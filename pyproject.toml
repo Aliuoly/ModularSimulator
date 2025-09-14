@@ -1,0 +1,25 @@
+[project]
+name = "modular-simulation"
+version = "0.0.1"
+authors = [
+  { name="Alden Olyniec", email="aldenliuolyniec@gmail.com" },
+]
+description = "A simulation framework for gas phase polyethylene"
+readme = "README.md"
+requires-python = ">=3.13"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+]
+
+
+
+
+
+
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"

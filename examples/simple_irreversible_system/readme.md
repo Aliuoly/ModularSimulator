@@ -37,9 +37,9 @@ The power of the `modular_simulation` package is in how cleanly the mathematical
 
 First, we define the data structures for all measurable variables using Pydantic models. This provides strong typing and validation.
 
-  * `IrreversableStates`: Holds the differential state variables (`V`, `A`, `B`).
-  * `IrreversableControlElements`: Holds the variables that can be externally manipulated (`F_in`).
-  * `IrreversableAlgebraicStates`: Holds variables that are calculated from other states (`F_out`).
+  * `IrreversibleStates`: Holds the differential state variables (`V`, `A`, `B`).
+  * `IrreversibleControlElements`: Holds the variables that can be externally manipulated (`F_in`).
+  * `IrreversibleAlgebraicStates`: Holds variables that are calculated from other states (`F_out`).
 
 These are then collected into a single `MeasurableQuantities` object that represents the complete state of the system at any given time.
 
@@ -61,7 +61,7 @@ These are assembled into `UsableQuantities` (the collection of sensors) and `Con
 
 ### 4\. Assembling the Final Simulation
 
-The final simulation object is created by passing all the modular components—quantities, controllers, constants, and solver options—to the constructor of our `IrreversableSystem` class. This object then handles the entire simulation loop, including the control logic and numerical integration.
+The final simulation object is created by passing all the modular components—quantities, controllers, constants, and solver options—to the constructor of our `IrreversibleSystem` class. This object then handles the entire simulation loop, including the control logic and numerical integration.
 
 ## Performance Considerations
 

@@ -1,39 +1,110 @@
 import numpy as np
-import numba
+from pydantic import ConfigDict, Field
 from enum import Enum
-from typing import List, Type, ClassVar
-from numpy.typing import NDArray
+from typing import Dict, Any, Type, ClassVar, List
+import numba
 
-from modular_simulation.system import FastSystem
 from modular_simulation.measurables import States, ControlElements, AlgebraicStates
 from modular_simulation.usables import Sensor
 from modular_simulation.control_system import Controller, Trajectory
+from modular_simulation.system import System, FastSystem
+from numpy.typing import NDArray
 
-# --- Reusable Pydantic Models for Data Structure ---
-# These are the same as the readable version, but F_out has been correctly
-# moved from a differential state to an algebraic state.
+# 1. Define the Data Structures for the System
+# ============================================
 
-class IrreversableStateMap(Enum):
-    V = 0  # Reactor volume [L]
-    A = 1  # Concentration of A [mol/L]
-    B = 2  # Concentration of B [mol/L]
+class IrreversibleStateMap(Enum):
+    """Maps the differential state names to their index in the NumPy array."""
+    V = 0  # Reactor Volume
+    A = 1  # Concentration of A
+    B = 2  # Concentration of B
 
-class IrreversableStates(States):
-    StateMap: ClassVar[Type[Enum]] = IrreversableStateMap
-    V: float
+class IrreversibleStates(States):
+    """Pydantic model for the differential states of the system."""
+    model_config = ConfigDict(extra='forbid')
+    StateMap: ClassVar = IrreversibleStateMap
+    V: float = Field()
     A: float
     B: float
 
-class IrreversableControlElements(ControlElements):
-    F_in: float  # Inlet flow rate (of A) [L/s]
+class IrreversibleControlElements(ControlElements):
+    """Pydantic model for the externally controlled variables."""
+    F_in: float  # Inlet flow rate
 
-class IrreversableAlgebraicStates(AlgebraicStates):
-    F_out: float # Outlet flow rate [L/s]
+class IrreversibleAlgebraicStates(AlgebraicStates):
+    """Pydantic model for states that are algebraic functions of other variables."""
+    model_config = ConfigDict(extra='forbid')
+    F_out: float # Outlet flow rate, an algebraic function of Volume
 
+# 2. Define the System Dynamics
+# =============================
+
+class IrreversibleSystem(System):
+    """
+    Implements the 'readable' contract from the `System` base class to define
+    the dynamics of the irreversible reaction A -> 2B.
+    """
+
+    @staticmethod
+    def _calculate_algebraic_values(
+            y: NDArray,
+            StateMap: Type[Enum],
+            control_elements: ControlElements,
+            system_constants: Dict
+            ) -> Dict[str, Any]:
+        """
+        Calculates the outlet flow (F_out) based on the current reactor volume.
+        This is the algebraic part of the DAE system.
+        """
+        # Ensure volume doesn't go to zero to prevent division errors.
+        volume = max(1e-6, y[StateMap.V.value])
+        
+        # F_out = Cv * sqrt(V)
+        F_out = system_constants['Cv'] * (volume**0.5)
+        
+        return {"F_out": F_out}
+
+    @staticmethod
+    def rhs(
+            t: float,
+            y: NDArray,
+            StateMap: Type[Enum],
+            algebraic_values_dict: Dict[str, Any],
+            control_elements: ControlElements,
+            system_constants: Dict
+            ) -> NDArray:
+        """
+        Calculates the derivatives for the differential states (dV/dt, dA/dt, dB/dt).
+        This is the differential part of the DAE system.
+        """
+        # Unpack values from the inputs
+        F_out = algebraic_values_dict['F_out']
+        F_in = control_elements.F_in
+        k = system_constants['k']
+        CA_in = system_constants['CA_in']
+
+        # Unpack current state values using the StateMap for clarity
+        volume = max(1e-6, y[StateMap.V.value])
+        molarity_A = y[StateMap.A.value]
+        molarity_B = y[StateMap.B.value]
+        
+        # Calculate reaction rate: r = k * [A] * V
+        reaction_rate = molarity_A * volume * k
+        
+        # Initialize the derivative array
+        dy = np.zeros_like(y)
+        
+        # Calculate the derivatives
+        dV_dt = F_in - F_out
+        dy[StateMap.V.value] = dV_dt
+        dy[StateMap.A.value] = (1/volume) * (-reaction_rate + F_in * CA_in - F_out * molarity_A - molarity_A * dV_dt)
+        dy[StateMap.B.value] = (1/volume) * (2*reaction_rate - F_out * molarity_B - molarity_B * dV_dt)
+
+        return dy
 
 # --- Fast System Implementation ---
 
-class IrreversableFastSystem(FastSystem):
+class IrreversibleFastSystem(FastSystem):
     """
     A performance-optimized implementation of the irreversible reaction system.
 
@@ -115,26 +186,29 @@ class IrreversableFastSystem(FastSystem):
         
         return dy
 
-# --- Sensor, controller, and Trajectory classes remain the same ---
-# (They are independent of the System implementation)
+# 3. Define Sensors, Controllers, and Trajectories
+# =================================================
 
 class FlowOutSensor(Sensor):
+    """Measures the outlet flow rate from the algebraic states."""
     def measure(self, measurable_quantities):
-        # Correctly measures from the algebraic_states model now
         return measurable_quantities.algebraic_states.F_out
 
 class FlowInSensor(Sensor):
+    """Measures the inlet flow rate from the control elements."""
     def measure(self, measurable_quantities):
         return measurable_quantities.control_elements.F_in
-
+    
 class BConcentrationSensor(Sensor):
+    """Measures the concentration of B from the differential states."""
     def measure(self, measurable_quantities):
         return measurable_quantities.states.B
-
+    
 class VolumeSensor(Sensor):
+    """Measures the reactor volume from the differential states."""
     def measure(self, measurable_quantities):
         return measurable_quantities.states.V
-
+    
 class PIDController(Controller):
     """A simple Proportional-Integral controller."""
     def __init__(self, sp_trajectory, pv_tag, Kp, Ti):
@@ -163,10 +237,14 @@ class PIDController(Controller):
         return max(0.0, correction)
 
 class ConstantTrajectory(Trajectory):
+    """Provides a constant setpoint value over time."""
     def __init__(self, value):
         self.value = value
+    
     def __call__(self, t):
         return self.value
-    def change(self, value):
-        self.value = value
+    
+    def change(self, new_value):
+        """Allows for changing the setpoint during a simulation."""
+        self.value = new_value
 

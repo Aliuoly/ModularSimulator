@@ -60,7 +60,7 @@ class States(BaseModel, ABC):
     def get_total_size(cls) -> int:
         """Calculates the total size of the flat NumPy array representation."""
         max_val = 0
-        for member in cls.StateMap:
+        for member in cls.StateMap: #type: ignore
             if isinstance(member.value, int):
                 max_val = max(max_val, member.value + 1)
             elif isinstance(member.value, slice):
@@ -70,13 +70,13 @@ class States(BaseModel, ABC):
     def to_array(self) -> NDArray[np.float64]:
         """Converts the Pydantic model instance to a flat NumPy array."""
         array = np.zeros(self.get_total_size(), dtype=np.float64)
-        for member in self.StateMap:
+        for member in self.StateMap: #type: ignore
             array[member.value] = getattr(self, member.name)
         return array
     
     @classmethod
     def from_array(cls, array: NDArray) -> "States":
         """Creates a Pydantic model instance from a flat NumPy array."""
-        kwargs = {member.name: array[member.value] for member in cls.StateMap}
+        kwargs = {member.name: array[member.value] for member in cls.StateMap} #type: ignore
         return cls(**kwargs)
 

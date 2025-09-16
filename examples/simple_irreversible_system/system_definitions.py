@@ -1,14 +1,17 @@
 import numpy as np
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, PrivateAttr
 from enum import Enum
-from typing import Dict, Any, Type, ClassVar, List
-import numba
+from typing import Dict, Any, Type, ClassVar, List, TYPE_CHECKING, Union
+import numba #type: ignore
 
 from modular_simulation.measurables import States, ControlElements, AlgebraicStates
-from modular_simulation.usables import Sensor
-from modular_simulation.control_system import Controller, Trajectory
+from modular_simulation.usables import SampledDelayedSensor
+from modular_simulation.control_system import Trajectory, PIDController
 from modular_simulation.system import System, FastSystem
 from numpy.typing import NDArray
+if TYPE_CHECKING:
+    from modular_simulation.usables import Sensor
+    from modular_simulation.quantities import UsableResults
 
 # 1. Define the Data Structures for the System
 # ============================================
@@ -57,7 +60,7 @@ class IrreversibleSystem(System):
         This is the algebraic part of the DAE system.
         """
         # Ensure volume doesn't go to zero to prevent division errors.
-        volume = max(1e-6, y[StateMap.V.value])
+        volume = max(1e-6, y[StateMap.V.value]) #type: ignore
         
         # F_out = Cv * sqrt(V)
         F_out = system_constants['Cv'] * (volume**0.5)
@@ -84,9 +87,9 @@ class IrreversibleSystem(System):
         CA_in = system_constants['CA_in']
 
         # Unpack current state values using the StateMap for clarity
-        volume = max(1e-6, y[StateMap.V.value])
-        molarity_A = y[StateMap.A.value]
-        molarity_B = y[StateMap.B.value]
+        volume = max(1e-6, y[StateMap.V.value]) #type: ignore
+        molarity_A = y[StateMap.A.value] #type: ignore
+        molarity_B = y[StateMap.B.value] #type: ignore
         
         # Calculate reaction rate: r = k * [A] * V
         reaction_rate = molarity_A * volume * k
@@ -96,9 +99,9 @@ class IrreversibleSystem(System):
         
         # Calculate the derivatives
         dV_dt = F_in - F_out
-        dy[StateMap.V.value] = dV_dt
-        dy[StateMap.A.value] = (1/volume) * (-reaction_rate + F_in * CA_in - F_out * molarity_A - molarity_A * dV_dt)
-        dy[StateMap.B.value] = (1/volume) * (2*reaction_rate - F_out * molarity_B - molarity_B * dV_dt)
+        dy[StateMap.V.value] = dV_dt #type: ignore
+        dy[StateMap.A.value] = (1/volume) * (-reaction_rate + F_in * CA_in - F_out * molarity_A - molarity_A * dV_dt) #type: ignore 
+        dy[StateMap.B.value] = (1/volume) * (2*reaction_rate - F_out * molarity_B - molarity_B * dV_dt) #type: ignore
 
         return dy
 
@@ -189,52 +192,28 @@ class IrreversibleFastSystem(FastSystem):
 # 3. Define Sensors, Controllers, and Trajectories
 # =================================================
 
-class FlowOutSensor(Sensor):
-    """Measures the outlet flow rate from the algebraic states."""
-    def measure(self, measurable_quantities):
-        return measurable_quantities.algebraic_states.F_out
 
-class FlowInSensor(Sensor):
-    """Measures the inlet flow rate from the control elements."""
-    def measure(self, measurable_quantities):
-        return measurable_quantities.control_elements.F_in
-    
-class BConcentrationSensor(Sensor):
-    """Measures the concentration of B from the differential states."""
-    def measure(self, measurable_quantities):
-        return measurable_quantities.states.B
-    
-class VolumeSensor(Sensor):
-    """Measures the reactor volume from the differential states."""
-    def measure(self, measurable_quantities):
-        return measurable_quantities.states.V
-    
-class PIDController(Controller):
-    """A simple Proportional-Integral controller."""
-    def __init__(self, sp_trajectory, pv_tag, Kp, Ti):
-        self.sp_trajectory = sp_trajectory
-        self.pv_tag = pv_tag
-        self.Ti = Ti
-        self.Kp = Kp
-        self.last_error = 0
-        self.integral = 0
-        self._t_previous = 0.0
+F_out_sensor = SampledDelayedSensor(
+    measurement_tag = "F_out",
+)
 
-    def update(self, usable_results, t):
-        dt = t - self._t_previous
-        self._t_previous = t
-        
-        measured_pv = usable_results[self.pv_tag]
-        setpoint = self.sp_trajectory(t)
-        
-        error = setpoint - measured_pv
-        self.integral += error * dt
-        
-        # PI control law
-        correction = self.Kp * error + (self.Kp / self.Ti) * self.integral
-        
-        # Ensure output is non-negative (e.g., flow rate can't be negative)
-        return max(0.0, correction)
+F_in_sensor = SampledDelayedSensor(
+    measurement_tag = "F_in",
+    coefficient_of_variance=0.05
+)
+    
+B_sensor = SampledDelayedSensor(
+    measurement_tag = "B",
+    coefficient_of_variance=0.05,
+    sampling_period = 900,
+    deadtime = 900,
+)
+    
+V_sensor = SampledDelayedSensor(
+    measurement_tag = "V",
+)
+
+
 
 class ConstantTrajectory(Trajectory):
     """Provides a constant setpoint value over time."""
@@ -248,3 +227,9 @@ class ConstantTrajectory(Trajectory):
         """Allows for changing the setpoint during a simulation."""
         self.value = new_value
 
+controller = PIDController(
+        pv_tag="B",
+        sp_trajectory=ConstantTrajectory(0.5),
+        Kp=1.0e-1,
+        Ti=100.0
+    )

@@ -4,17 +4,20 @@ from system_definitions import (
     IrreversibleStates,
     IrreversibleControlElements,
     IrreversibleAlgebraicStates,
-    FlowInSensor,
-    FlowOutSensor,
-    BConcentrationSensor,
-    VolumeSensor,
+    F_in_sensor,
+    F_out_sensor,
+    V_sensor,
+    B_sensor,
     PIDController,
     ConstantTrajectory,
 
     IrreversibleSystem,
     IrreversibleFastSystem
 )
-from copy import deepcopy
+from modular_simulation.system import create_system
+from typing import Dict, TYPE_CHECKING
+if TYPE_CHECKING:
+    from modular_simulation.usables import Calculation
 
 # 1. Set up the initial conditions and system components.
 # =======================================================
@@ -29,34 +32,26 @@ initial_controls = IrreversibleControlElements(F_in=0.0)
 initial_algebraic = IrreversibleAlgebraicStates(F_out=0.0)
 
 # The MeasurableQuantities object now holds all state-like data.
-measurable_quantities = MeasurableQuantities(
-    states=initial_states,
-    control_elements=initial_controls,
-    algebraic_states=initial_algebraic
-)
+
 
 # Define which quantities can be measured by sensors.
-usable_quantities = UsableQuantities(
-    measurement_definitions={
-        'F_out': FlowOutSensor(),
-        'F_in': FlowInSensor(),
-        'B': BConcentrationSensor(),
-        'V': VolumeSensor(),
-    },
-    calculation_definitions={}
-)
+measurement_definitions={
+    'F_out': F_out_sensor,
+    'F_in': F_in_sensor,
+    'B': B_sensor,
+    'V': V_sensor,
+}
+calculation_definitions: Dict[str, "Calculation"] = {}
 
 # Define the controllers that will manipulate the control elements.
-controllable_quantities = ControllableQuantities(
-    control_definitions={
-        'F_in': PIDController(
-            pv_tag="B",
-            sp_trajectory=ConstantTrajectory(0.5),
-            Kp=1.0e-1,
-            Ti=100.0
-        )
-    }
-)
+control_definitions={
+    'F_in': PIDController(
+        pv_tag="B",
+        sp_trajectory=ConstantTrajectory(0.5),
+        Kp=1.0e-1,
+        Ti=100.0
+    ),
+}
 
 # Define the system's physical constants and solver params
 system_constants = {'k': 1e-3, 'Cv': 1e-1, 'CA_in': 1.0}
@@ -64,52 +59,59 @@ solver_options = {'method': 'LSODA'}
 
 # --- 2. Assemble and Initialize the System ---
 
-readable_system = IrreversibleSystem(
-    measurable_quantities=deepcopy(measurable_quantities),
-    usable_quantities=deepcopy(usable_quantities),
-    controllable_quantities=deepcopy(controllable_quantities),
-    system_constants=deepcopy(system_constants),
-    solver_options=deepcopy(solver_options)
+readable_system = create_system(
+    system_class = IrreversibleSystem,
+    initial_states = initial_states,
+    initial_controls = initial_controls,
+    initial_algebraic = initial_algebraic,
+    measurement_definitions = measurement_definitions,
+    calculation_definitions = calculation_definitions,
+    control_definitions = control_definitions,
+    system_constants = system_constants,
+    solver_options = solver_options,
 )
 
-# have to use a copy of all the arguments since they are by-refernce objects
-# otherwise, when I iterate over the other system, this one will change too.
-fast_system = IrreversibleFastSystem(
-    measurable_quantities=measurable_quantities,
-    usable_quantities=usable_quantities,
-    controllable_quantities=controllable_quantities,
-    system_constants=system_constants,
-    solver_options=solver_options
+fast_system = create_system(
+    system_class = IrreversibleFastSystem,
+    initial_states = initial_states,
+    initial_controls = initial_controls,
+    initial_algebraic = initial_algebraic,
+    measurement_definitions = measurement_definitions,
+    calculation_definitions = calculation_definitions,
+    control_definitions = control_definitions,
+    system_constants = system_constants,
+    solver_options = solver_options,
 )
 
 # --- 3. Run the Simulation ---
+dt = 30
 systems = {"readable": readable_system, "fast": fast_system}
 if __name__ == "__main__":
     plt.figure(figsize=(12, 8))
     linestyles = ['-', '--']
     j = 0
-    for system in systems.values():
+    for system in systems.values(): 
         # --- First simulation run ---
         for i in range(5000):
-            system.step(30)
+            system.step(dt) #type: ignore
 
         # --- Change the setpoint and continue the simulation ---
         # Access the controller via the controllable_quantities object.
-        pid_controller = system.controllable_quantities.control_definitions["F_in"]
+        pid_controller = system.controllable_quantities.control_definitions["F_in"]  #type: ignore
         pid_controller.sp_trajectory.change(0.2)
 
         for i in range(5000):
-            system.step(30)
+            system.step(dt)  #type: ignore
 
         # 3. Plot the results.
         # =====================
 
         # The simulation history is stored in the system's `_history` attribute.
-        history = system._history
-
+        history = system.measured_history  #type: ignore
+        t = history['time']
         # Plot Concentration of B
         plt.subplot(2, 2, 1)
-        plt.plot([s["B"] for s in history], linestyle = linestyles[j])
+        plt.step(t, history['B'], linestyle = linestyles[j])
         plt.title("Concentration of B")
         plt.xlabel("Time Step")
         plt.ylabel("[B] (mol/L)")
@@ -117,7 +119,7 @@ if __name__ == "__main__":
 
         # Plot Inlet Flow Rate (F_in)
         plt.subplot(2, 2, 2)
-        plt.plot([s['F_in'] for s in history], linestyle = linestyles[j])
+        plt.step(t, history['F_in'], linestyle = linestyles[j])
         plt.title("Inlet Flow Rate (F_in)")
         plt.xlabel("Time Step")
         plt.ylabel("Flow (L/s)")
@@ -125,7 +127,7 @@ if __name__ == "__main__":
 
         # Plot Reactor Volume (V)
         plt.subplot(2, 2, 3)
-        plt.plot([s['V'] for s in history], linestyle = linestyles[j])
+        plt.step(t, history['V'], linestyle = linestyles[j])
         plt.title("Reactor Volume (V)")
         plt.xlabel("Time Step")
         plt.ylabel("Volume (L)")
@@ -133,7 +135,7 @@ if __name__ == "__main__":
 
         # Plot Outlet Flow Rate (F_out)
         plt.subplot(2, 2, 4)
-        plt.plot([s['F_out'] for s in history], linestyle = linestyles[j])
+        plt.step(t, history['F_out'], linestyle = linestyles[j])
         plt.title("Outlet Flow Rate (F_out)")
         plt.xlabel("Time Step")
         plt.ylabel("Flow (L/s)")

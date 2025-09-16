@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 # --- Simulation Parameters ---
 # Use a high number of steps to get meaningful profile data
-N_STEPS = 10000  # A good number for profiling
+N_STEPS = 30000  # A good number for profiling
 DT = 60
 sp_segments = 10
 np.random.seed(0)
@@ -34,11 +34,12 @@ def plot(systems):
     linestyles = ['-','--']
     j = 0
     for name, system in systems.items():
-        history = system._history
+        history = system.measured_history
 
+        t = history['time']
         # Plot Concentration of B
         plt.subplot(2, 2, 1)
-        plt.plot([s["B"] for s in history], label = name, linestyle = linestyles[j])
+        plt.step(t, history['B'], linestyle = linestyles[j])
         plt.title("Concentration of B")
         plt.xlabel("Time Step")
         plt.ylabel("[B] (mol/L)")
@@ -46,7 +47,7 @@ def plot(systems):
 
         # Plot Inlet Flow Rate (F_in)
         plt.subplot(2, 2, 2)
-        plt.plot([s['F_in'] for s in history], label = name, linestyle = linestyles[j])
+        plt.step(t, history['F_in'], linestyle = linestyles[j])
         plt.title("Inlet Flow Rate (F_in)")
         plt.xlabel("Time Step")
         plt.ylabel("Flow (L/s)")
@@ -54,7 +55,7 @@ def plot(systems):
 
         # Plot Reactor Volume (V)
         plt.subplot(2, 2, 3)
-        plt.plot([s['V'] for s in history], label = name, linestyle = linestyles[j])
+        plt.step(t, history['V'], linestyle = linestyles[j])
         plt.title("Reactor Volume (V)")
         plt.xlabel("Time Step")
         plt.ylabel("Volume (L)")
@@ -62,7 +63,7 @@ def plot(systems):
 
         # Plot Outlet Flow Rate (F_out)
         plt.subplot(2, 2, 4)
-        plt.plot([s['F_out'] for s in history], label = name, linestyle = linestyles[j])
+        plt.step(t, history['F_out'], linestyle = linestyles[j])
         plt.title("Outlet Flow Rate (F_out)")
         plt.xlabel("Time Step")
         plt.ylabel("Flow (L/s)")

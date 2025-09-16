@@ -1,16 +1,11 @@
 from modular_simulation.quantities import MeasurableQuantities, UsableQuantities, ControllableQuantities
 from abc import ABC, abstractmethod
 from numpy.typing import NDArray
-from typing import Any, Type, Dict, List, TYPE_CHECKING
+from typing import Any, Type, Dict, List
 from enum import Enum
 from scipy.integrate import solve_ivp #type: ignore
 from modular_simulation.measurables import ControlElements
 import numpy as np
-if TYPE_CHECKING:
-    from modular_simulation.measurables import States, AlgebraicStates
-    from modular_simulation.usables import Sensor, Calculation
-    from modular_simulation.control_system import Controller
-from copy import deepcopy
 
 class System(ABC):
     """
@@ -281,15 +276,6 @@ class System(ABC):
         self._t += dt
         self._update_history()
 
-    @property
-    def measured_history(self) -> Dict[str, NDArray]:
-        """Returns a trimmed copy of the measured history dictionary."""
-        return {k: v[:self._measured_history_size].copy() for k, v in self._measured_history.items()}
-    @property
-    def history(self) -> Dict[str, NDArray]:
-        """Returns a trimmed copy of the full history dictionary."""
-        return {k: v[:self._history_size].copy() for k, v in self._history.items()}
-
 
 class FastSystem(System):
     """
@@ -398,66 +384,3 @@ class FastSystem(System):
                 self.measurable_quantities.algebraic_states.__class__(**final_algebraic_values)
         return final_y
 
-
-
-
-def create_system(
-        system_class: Type[System],
-        initial_states: "States", 
-        initial_controls: "ControlElements", 
-        initial_algebraic: "AlgebraicStates", 
-        measurement_definitions: Dict[str,"Sensor"],
-        calculation_definitions: Dict[str, "Calculation"],
-        control_definitions: Dict[str, "Controller"],
-        system_constants: Dict[str, Any],
-        solver_options: Dict[str, Any]
-        ) -> System:
-    """
-    Factory to build a complete, internally consistent simulation system. 
-    Creates copies of the objects passed in so as to ensure no cross-contamination
-    between multiple systems created with the same inputs.
-    """
-    # 1. Create the components for this specific system instance
-    copied_states = deepcopy(initial_states)
-    copied_controls = deepcopy(initial_controls)
-    copied_algebraic = deepcopy(initial_algebraic)
-    copied_controllers = deepcopy(control_definitions)
-    copied_measurements = deepcopy(measurement_definitions)
-    copied_calculations = deepcopy(calculation_definitions)
-    copied_constants = deepcopy(system_constants)
-
-    measurables = MeasurableQuantities(
-        states=copied_states,
-        control_elements=copied_controls,
-        algebraic_states=copied_algebraic
-    )
-    
-    usables = UsableQuantities(
-        measurement_definitions=copied_measurements,
-        calculation_definitions=copied_calculations,
-        measurable_quantities = measurables
-    )
-    
-    # Re-create controllers to ensure their internal states are fresh
-    
-
-    # 2. Link them correctly during construction
-    # The UsableQuantities must be created before the ControllableQuantities
-    # because the controllers depend on the sensors being defined.
-    # The instance of usable_quantities here HAS to be the same 
-    # as the one defined above. 
-    controllables = ControllableQuantities(
-        control_definitions=copied_controllers,
-        usable_quantities=usables  # The link is explicit and guaranteed here
-    )
-
-    # 3. Assemble the final system object
-    system = system_class(
-        measurable_quantities=measurables,
-        usable_quantities=usables,
-        controllable_quantities=controllables,
-        system_constants=copied_constants,
-        solver_options=solver_options
-    )
-    
-    return system

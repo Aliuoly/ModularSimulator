@@ -11,6 +11,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
+[[tool.mypy.overrides]]
+module = "modular_simulation.*"
+ignore_missing_imports = true
 
 dependencies = [
 ]

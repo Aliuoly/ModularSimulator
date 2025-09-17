@@ -40,7 +40,7 @@ measurement_definitions={
         coefficient_of_variance=0.05
     ),
     'B': SampledDelayedSensor(
-        measurement_tag = "B2",
+        measurement_tag = "B",
         coefficient_of_variance=0.05,
         sampling_period = 900,
         deadtime = 900,

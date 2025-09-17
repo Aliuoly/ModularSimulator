@@ -30,32 +30,8 @@ class UsableQuantities:
         self.calculation_definitions = calculation_definitions
         self._tag_list = list(self.measurement_definitions.keys()) \
                       + list(self.calculation_definitions.keys())
-        
-        self._validate_definitions(measurable_quantities, t = 0.0)
 
-    def _validate_definitions(self, measurable_quantities: "MeasurableQuantities", t: float) -> None:
         self._usable_results = {}
-        for tag, sensor in self.measurement_definitions.items():
-            try:
-                self._usable_results[tag] = sensor.measure(measurable_quantities, t)
-            except Exception as e:
-                raise RuntimeError(f"Error processing Measurement '{tag}': {e}.\
-                                    Verify the dependencies for said Measurement are all\
-                                    properly defined prior to this Measurement in the\
-                                    measurement_definitions. Granted, if you are \
-                                    seeing this, something is very wrong. Afterall,\
-                                    measurements are supposed to be independent. \
-                                    All 'measurements' that require other measurements\
-                                    should be defined in calculation_definitions instead.") from e
-        for tag, calculation in self.calculation_definitions.items():
-            try:
-                self._usable_results[tag] = calculation.calculate(self._usable_results)
-            except Exception as e:
-                raise RuntimeError(f"Error processing calculation '{tag}': {e}.\
-                                    Verify the dependencies for said calculation are all\
-                                    properly defined prior to this calculation in the\
-                                    calculation_definitions or is present within \
-                                    measurement_definitions.") from e
     
     def update(
             self, 

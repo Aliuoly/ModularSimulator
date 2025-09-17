@@ -1,4 +1,4 @@
-from typing import Optional, Any, TYPE_CHECKING
+from typing import Optional, Any
 from pydantic import BaseModel
 from modular_simulation.measurables import AlgebraicStates
 from modular_simulation.measurables import States, ControlElements

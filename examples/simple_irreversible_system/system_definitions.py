@@ -1,17 +1,13 @@
 import numpy as np
-from pydantic import ConfigDict, Field, PrivateAttr
+from pydantic import ConfigDict, Field
 from enum import Enum
-from typing import Dict, Any, Type, ClassVar, List, TYPE_CHECKING, Union
+from typing import Dict, Any, Type, ClassVar, List
 import numba #type: ignore
 
 from modular_simulation.measurables import States, ControlElements, AlgebraicStates
-from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.control_system import Trajectory, PIDController
 from modular_simulation.system import System, FastSystem
 from numpy.typing import NDArray
-if TYPE_CHECKING:
-    from modular_simulation.usables import Sensor
-    from modular_simulation.quantities import UsableResults
 
 # 1. Define the Data Structures for the System
 # ============================================

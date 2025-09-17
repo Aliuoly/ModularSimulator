@@ -5,6 +5,7 @@ from typing import Any, Type, Dict, List, TYPE_CHECKING
 from enum import Enum
 from scipy.integrate import solve_ivp #type: ignore
 from modular_simulation.measurables import ControlElements
+from modular_simulation.validation import validate_and_link
 import numpy as np
 if TYPE_CHECKING:
     from modular_simulation.measurables import States, AlgebraicStates
@@ -73,14 +74,7 @@ class System(ABC):
         self.system_constants = system_constants
         self.solver_options = solver_options
 
-        # Ensure all defined control elements have a corresponding controller.
-        enforce_for = self.measurable_quantities.control_elements.__class__.model_fields.keys()
-        enforce_against = self.controllable_quantities.control_definitions.keys()
-        missing_tags = [tag for tag in enforce_for if tag not in enforce_against]
-        
-        if len(missing_tags) > 0:
-            missing_tag_string = ",".join(missing_tags)
-            raise ValueError(f"Control Element tag(s) {missing_tag_string} not defined.")
+        validate_and_link(self)
         
         self._t = 0.
         self._history_size = 0
@@ -448,7 +442,6 @@ def create_system(
     # as the one defined above. 
     controllables = ControllableQuantities(
         control_definitions=copied_controllers,
-        usable_quantities=usables  # The link is explicit and guaranteed here
     )
 
     # 3. Assemble the final system object

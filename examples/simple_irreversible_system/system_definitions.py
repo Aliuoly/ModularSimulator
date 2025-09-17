@@ -189,32 +189,6 @@ class IrreversibleFastSystem(FastSystem):
         
         return dy
 
-# 3. Define Sensors, Controllers, and Trajectories
-# =================================================
-
-
-F_out_sensor = SampledDelayedSensor(
-    measurement_tag = "F_out",
-)
-
-F_in_sensor = SampledDelayedSensor(
-    measurement_tag = "F_in",
-    coefficient_of_variance=0.05
-)
-    
-B_sensor = SampledDelayedSensor(
-    measurement_tag = "B",
-    coefficient_of_variance=0.05,
-    sampling_period = 900,
-    deadtime = 900,
-)
-    
-V_sensor = SampledDelayedSensor(
-    measurement_tag = "V",
-)
-
-
-
 class ConstantTrajectory(Trajectory):
     """Provides a constant setpoint value over time."""
     def __init__(self, value):

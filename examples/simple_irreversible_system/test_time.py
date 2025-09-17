@@ -10,7 +10,7 @@ measurables = fast_system.measurable_quantities
 profiler = cProfile.Profile()
 profiler.enable()
 for _ in range(10000):
-    sensor._get_processed_value(0., 0.)
+    sensor.measure(measurables, 0.)
 profiler.disable()
 s = io.StringIO()
 sortby = pstats.SortKey.CUMULATIVE

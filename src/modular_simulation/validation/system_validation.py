@@ -44,6 +44,7 @@ def _ensure_control_elements_have_controllers(
         joined = ", ".join(missing_tags)
         raise ConfigurationError(
             f"Control element tag(s) {joined} do not have corresponding controller definitions."
+            f" Available controller tags are: {', '.join(controller_tags)}"
         )
 
 
@@ -66,8 +67,9 @@ def _get_sensor_for_tag(
         return sensors[pv_tag]
     except KeyError as exc:  # pragma: no cover - trivial guard
         raise ConfigurationError(
-            "Controller '{controller}' references pv_tag '{tag}' which is not defined in the "
-            "measurement_definitions.".format(controller=controller_tag, tag=pv_tag)
+            f"Controller '{controller_tag}' references pv_tag '{pv_tag}' which is not defined in the "
+            "measurement_definitions. Available pv tags for controllers are: "
+            f"{', '.join(sensors.keys())}"
         ) from exc
 
 
@@ -83,6 +85,7 @@ def _initialize_usable_results(
             raise ConfigurationError(
                 f"Error processing measurement '{tag}': {exc}. "
                 "Verify that all dependencies are correctly defined and ordered."
+                
             ) from exc
     for tag, calculation in usable.calculation_definitions.items():
         try:

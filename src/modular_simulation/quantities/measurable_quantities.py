@@ -14,3 +14,10 @@ class MeasurableQuantities(BaseModel):
         super().model_post_init(__context)
         if self.algebraic_states is None:
             self.algebraic_states = AlgebraicStates()
+    @property
+    def available_tags(self) -> list[str]:
+        tags = []
+        for category in [self.states, self.control_elements, self.algebraic_states]:
+            if category:
+                tags.extend(category.model_fields.keys())
+        return tags

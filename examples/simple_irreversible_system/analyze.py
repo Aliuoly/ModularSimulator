@@ -77,7 +77,7 @@ def plot(systems):
     plt.tight_layout()
     plt.show()
 
-systems = {"fast": fast_system, "readable": readable_system}
+systems = { "readable": readable_system}
 print("--- Starting Profiling Session ---")
 print(f"Running {N_STEPS} steps with dt={DT} for system .")
 
@@ -98,4 +98,4 @@ for name, system in systems.items():
 
     print(f"System '{name}' profiling complete. ")
 
-plot(systems)
+#plot(systems)

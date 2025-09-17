@@ -50,7 +50,10 @@ class Sensor(BaseModel, ABC):
                 found_path = f"{category}.{self.measurement_tag}"
         
         if found_path is None:
-            raise AttributeError(f"Tag '{self.measurement_tag}' not found in any field of measurable_quantities.")
+            raise AttributeError(
+                f"Tag '{self.measurement_tag}' not found in any field of measurable_quantities. "
+                f"Available measurable quantities are: {', '.join(measurable_quantities.available_tags)}"
+                )
         
         # Create a simple function to get the value from the path
         path_parts = found_path.split('.')

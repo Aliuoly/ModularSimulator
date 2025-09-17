@@ -1,19 +1,15 @@
 import matplotlib.pyplot as plt
-from modular_simulation.quantities import MeasurableQuantities, UsableQuantities, ControllableQuantities
 from system_definitions import (
     IrreversibleStates,
     IrreversibleControlElements,
     IrreversibleAlgebraicStates,
-    F_in_sensor,
-    F_out_sensor,
-    V_sensor,
-    B_sensor,
     PIDController,
     ConstantTrajectory,
 
     IrreversibleSystem,
     IrreversibleFastSystem
 )
+from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.system import create_system
 from typing import Dict, TYPE_CHECKING
 if TYPE_CHECKING:
@@ -36,10 +32,22 @@ initial_algebraic = IrreversibleAlgebraicStates(F_out=0.0)
 
 # Define which quantities can be measured by sensors.
 measurement_definitions={
-    'F_out': F_out_sensor,
-    'F_in': F_in_sensor,
-    'B': B_sensor,
-    'V': V_sensor,
+    'F_out': SampledDelayedSensor(
+        measurement_tag = "F_out",
+    ),
+    'F_in': SampledDelayedSensor(
+        measurement_tag = "F_in",
+        coefficient_of_variance=0.05
+    ),
+    'B': SampledDelayedSensor(
+        measurement_tag = "B2",
+        coefficient_of_variance=0.05,
+        sampling_period = 900,
+        deadtime = 900,
+    ),
+    'V': SampledDelayedSensor(
+        measurement_tag = "V",
+    ),
 }
 calculation_definitions: Dict[str, "Calculation"] = {}
 

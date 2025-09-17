@@ -429,7 +429,6 @@ def create_system(
     usables = UsableQuantities(
         measurement_definitions=copied_measurements,
         calculation_definitions=copied_calculations,
-        measurable_quantities = measurables
     )
     
     # Re-create controllers to ensure their internal states are fresh

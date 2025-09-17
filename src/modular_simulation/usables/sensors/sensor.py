@@ -9,7 +9,7 @@ import functools
 if TYPE_CHECKING:
     from modular_simulation.quantities import MeasurableQuantities
 
-@dataclass
+@dataclass(slots = True)
 class Measurement:
     """Simple container class for a single measurement."""
     t: float

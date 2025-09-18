@@ -8,6 +8,7 @@ from pydantic import ConfigDict, Field, PrivateAttr
 from modular_simulation.control_system import Trajectory, Controller
 from modular_simulation.measurables import ControlElements, States, AlgebraicStates
 from modular_simulation.system import FastSystem, System
+from modular_simulation.usables import Calculation, Measurement
 from numpy.typing import NDArray
 
 
@@ -16,10 +17,8 @@ class VanDeVusseStateMap(Enum):
 
     Ca = 0
     Cb = 1
-    Cc = 2
-    Cd = 3
-    T = 4
-    Tk = 5
+    T = 2
+    Tk = 3
 
 
 class VanDeVusseStates(States):
@@ -30,16 +29,27 @@ class VanDeVusseStates(States):
 
     Ca: float = Field(description="Concentration of A in the reactor [mol/L]")
     Cb: float = Field(description="Concentration of B in the reactor [mol/L]")
-    Cc: float = Field(description="Concentration of C in the reactor [mol/L]")
-    Cd: float = Field(description="Concentration of D in the reactor [mol/L]")
     T: float = Field(description="Reactor temperature [°C]")
     Tk: float = Field(description="Jacket temperature [°C]")
 
 
 class VanDeVusseControlElements(ControlElements):
     """Externally actuated variables for the Van de Vusse reactor."""
+    Tj_in: float = Field(description="Jacket inlet temperature [°C]")
 
-    Qk: float = Field(description="Heat removal/addition rate in the jacket [kJ/h]")
+
+class HeatDutyCalculation(Calculation):
+    """Calculate the instantaneous heat duty transferred between jacket and reactor."""
+
+    kw: float
+    area: float
+
+    def calculate(self, usable_results: Dict[str, Measurement]) -> Measurement:
+        jacket_measurement = usable_results["Tk"]
+        reactor_measurement = usable_results["T"]
+
+        heat_duty = self.kw * self.area * (jacket_measurement.value - reactor_measurement.value)
+        return Measurement(t=reactor_measurement.t, value=heat_duty)
 
 
 class VanDeVusseAlgebraicStates(AlgebraicStates):
@@ -75,8 +85,6 @@ class VanDeVusseSystem(System):
 
         Ca = y[StateMap.Ca.value]  # type: ignore[index]
         Cb = y[StateMap.Cb.value]  # type: ignore[index]
-        Cc = y[StateMap.Cc.value]  # type: ignore[index]
-        Cd = y[StateMap.Cd.value]  # type: ignore[index]
         T = y[StateMap.T.value]  # type: ignore[index]
         Tk = y[StateMap.Tk.value]  # type: ignore[index]
 
@@ -84,14 +92,8 @@ class VanDeVusseSystem(System):
         Ca0 = system_constants["Ca0"]
         T0 = system_constants["T0"]
         k10 = system_constants["k10"]
-        k20 = system_constants["k20"]
-        k30 = system_constants["k30"]
         E1 = system_constants["E1"]
-        E2 = system_constants["E2"]
-        E3 = system_constants["E3"]
         dHr1 = system_constants["dHr1"]
-        dHr2 = system_constants["dHr2"]
-        dHr3 = system_constants["dHr3"]
         rho = system_constants["rho"]
         Cp = system_constants["Cp"]
         kw = system_constants["kw"]
@@ -99,41 +101,34 @@ class VanDeVusseSystem(System):
         VR = system_constants["VR"]
         mK = system_constants["mK"]
         CpK = system_constants["CpK"]
+        Fj = system_constants["Fj"]
 
-        Qk = control_elements.Qk  # type: ignore[attr-defined]
+        Tj_in = control_elements.Tj_in  # type: ignore[attr-defined]
 
         temperature_kelvin = max(1e-6, T + 273.15)
 
         k1 = k10 * np.exp(-E1 / temperature_kelvin)
-        k2 = k20 * np.exp(-E2 / temperature_kelvin)
-        k3 = k30 * np.exp(-E3 / temperature_kelvin)
-
         r1 = k1 * VR * Ca
-        r2 = k2 * VR * Cb
-        r3 = k3 * VR * Ca * Ca
 
-        dCa = (-r1 - 2.0 * r3 + F * (Ca0 - Ca)) / VR
-        dCb = (r1 - r2 - F * Cb) / VR
-        dCc = (r2 - F * Cc) / VR
-        dCd = (r3 - F * Cd) / VR
+        dCa = (-r1 + F * (Ca0 - Ca)) / VR
+        dCb = (r1 - F * Cb) / VR
 
         heat_capacity_term = max(1e-9, rho * Cp * VR)
         dT = (
             F * rho * Cp * (T0 - T)
             - r1 * dHr1
-            - r2 * dHr2
-            - r3 * dHr3
             + kw * AR * (Tk - T)
         ) / heat_capacity_term
 
         jacket_capacity_term = max(1e-9, mK * CpK)
-        dTk = (Qk + kw * AR * (T - Tk)) / jacket_capacity_term
+        dTk = (
+            Fj * CpK * (Tj_in - Tk)
+            + kw * AR * (T - Tk)
+        ) / jacket_capacity_term
 
         dy = np.zeros_like(y)
         dy[StateMap.Ca.value] = dCa  # type: ignore[index]
         dy[StateMap.Cb.value] = dCb  # type: ignore[index]
-        dy[StateMap.Cc.value] = dCc  # type: ignore[index]
-        dy[StateMap.Cd.value] = dCd  # type: ignore[index]
         dy[StateMap.T.value] = dT  # type: ignore[index]
         dy[StateMap.Tk.value] = dTk  # type: ignore[index]
         return dy
@@ -149,14 +144,8 @@ class VanDeVusseFastSystem(FastSystem):
             "Ca0",
             "T0",
             "k10",
-            "k20",
-            "k30",
             "E1",
-            "E2",
-            "E3",
             "dHr1",
-            "dHr2",
-            "dHr3",
             "rho",
             "Cp",
             "kw",
@@ -164,11 +153,12 @@ class VanDeVusseFastSystem(FastSystem):
             "VR",
             "mK",
             "CpK",
+            "Fj",
         ]
 
     @staticmethod
     def _get_controls_map() -> List[str]:
-        return ["Qk"]
+        return ["Tj_in"]
 
     @staticmethod
     def _calculate_algebraic_values_fast(
@@ -190,57 +180,48 @@ class VanDeVusseFastSystem(FastSystem):
     ) -> NDArray:
         del t, algebraic_states_arr
 
-        Ca, Cb, Cc, Cd, T, Tk = y
+        Ca, Cb, T, Tk = y
 
         F = constants_arr[0]
         Ca0 = constants_arr[1]
         T0 = constants_arr[2]
         k10 = constants_arr[3]
-        k20 = constants_arr[4]
-        k30 = constants_arr[5]
-        E1 = constants_arr[6]
-        E2 = constants_arr[7]
-        E3 = constants_arr[8]
-        dHr1 = constants_arr[9]
-        dHr2 = constants_arr[10]
-        dHr3 = constants_arr[11]
-        rho = constants_arr[12]
-        Cp = constants_arr[13]
-        kw = constants_arr[14]
-        AR = constants_arr[15]
-        VR = constants_arr[16]
-        mK = constants_arr[17]
-        CpK = constants_arr[18]
+        E1 = constants_arr[4]
+        dHr1 = constants_arr[5]
+        rho = constants_arr[6]
+        Cp = constants_arr[7]
+        kw = constants_arr[8]
+        AR = constants_arr[9]
+        VR = constants_arr[10]
+        mK = constants_arr[11]
+        CpK = constants_arr[12]
+        Fj = constants_arr[13]
 
-        Qk = control_elements_arr[0]
+        Tj_in = control_elements_arr[0]
 
         temperature_kelvin = max(1e-6, T + 273.15)
         k1 = k10 * np.exp(-E1 / temperature_kelvin)
-        k2 = k20 * np.exp(-E2 / temperature_kelvin)
-        k3 = k30 * np.exp(-E3 / temperature_kelvin)
 
         r1 = k1 * VR * Ca
-        r2 = k2 * VR * Cb
-        r3 = k3 * VR * Ca * Ca
 
-        dCa = (-r1 - 2.0 * r3 + F * (Ca0 - Ca)) / VR
-        dCb = (r1 - r2 - F * Cb) / VR
-        dCc = (r2 - F * Cc) / VR
-        dCd = (r3 - F * Cd) / VR
+        dCa = (-r1 + F * (Ca0 - Ca)) / VR
+        dCb = (r1 - F * Cb) / VR
+
 
         heat_capacity_term = max(1e-9, rho * Cp * VR)
         dT = (
             F * rho * Cp * (T0 - T)
             - r1 * dHr1
-            - r2 * dHr2
-            - r3 * dHr3
             + kw * AR * (Tk - T)
         ) / heat_capacity_term
 
         jacket_capacity_term = max(1e-9, mK * CpK)
-        dTk = (Qk + kw * AR * (T - Tk)) / jacket_capacity_term
+        dTk = (
+            Fj * CpK * (Tj_in - Tk)
+            + kw * AR * (T - Tk)
+        ) / jacket_capacity_term
 
-        return np.array([dCa, dCb, dCc, dCd, dT, dTk], dtype=np.float64)
+        return np.array([dCa, dCb, dT, dTk], dtype=np.float64)
 
 
 class ConstantTrajectory(Trajectory):

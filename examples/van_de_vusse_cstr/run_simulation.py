@@ -28,6 +28,7 @@ initial_states = VanDeVusseStates(
 initial_controls = VanDeVusseControlElements(Tj_in=77.69)
 initial_algebraic = VanDeVusseAlgebraicStates()
 
+
 system_constants = {
     "F": 14.19,  # L/h
     "Ca0": 5.1,  # mol/L
@@ -149,7 +150,7 @@ if __name__ == "__main__":
         plt.xlabel("Time [h]")
         plt.ylabel("Temperature [°C]")
         plt.grid(True)
-
+        
         plt.subplot(3, 2, 6)
         plt.step(time, history["Tj_in"], linestyle=linestyles[j], label=label)
         plt.title("Jacket Inlet Temperature")

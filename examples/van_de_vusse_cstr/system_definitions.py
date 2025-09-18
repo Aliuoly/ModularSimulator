@@ -35,7 +35,6 @@ class VanDeVusseStates(States):
 
 class VanDeVusseControlElements(ControlElements):
     """Externally actuated variables for the Van de Vusse reactor."""
-
     Tj_in: float = Field(description="Jacket inlet temperature [°C]")
 
 
@@ -109,7 +108,6 @@ class VanDeVusseSystem(System):
         temperature_kelvin = max(1e-6, T + 273.15)
 
         k1 = k10 * np.exp(-E1 / temperature_kelvin)
-
         r1 = k1 * VR * Ca
 
         dCa = (-r1 + F * (Ca0 - Ca)) / VR
@@ -208,6 +206,7 @@ class VanDeVusseFastSystem(FastSystem):
 
         dCa = (-r1 + F * (Ca0 - Ca)) / VR
         dCb = (r1 - F * Cb) / VR
+
 
         heat_capacity_term = max(1e-9, rho * Cp * VR)
         dT = (

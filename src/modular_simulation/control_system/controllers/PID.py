@@ -1,9 +1,9 @@
 from pydantic import Field, PrivateAttr
 from typing import Union, TYPE_CHECKING
 from modular_simulation.control_system import Controller
+from modular_simulation.control_system import Trajectory
 if TYPE_CHECKING:
     from modular_simulation.usables import Sensor
-    from modular_simulation.control_system import Trajectory
     from modular_simulation.quantities import UsableResults
 
 class PIDController(Controller):
@@ -12,7 +12,7 @@ class PIDController(Controller):
         ..., 
         description="The measurement tag of the sensor providing the process variable (PV) for this controller."
         )
-    sp_trajectory: "Trajectory" = Field(
+    sp_trajectory: Trajectory = Field(
         ..., 
         description="A Trajectory instance defining the setpoint (SP) over time."
         )
@@ -24,6 +24,10 @@ class PIDController(Controller):
         ..., 
         description = "Integral time constant"
         )
+    inverted: bool = Field(
+        default = False,
+        description = "If True, the controller assumes that higher control output -> lower pv."
+    )
 
     _last_t: float = PrivateAttr(default=0.0)
     _last_error: float = PrivateAttr(default=0.0)
@@ -36,7 +40,10 @@ class PIDController(Controller):
         dt = t - self._last_t
         self._last_t = t
         
+        
         error = sp - pv
+        if self.inverted:
+            error = -error
         self._integral += error * dt
         
         # PI control law

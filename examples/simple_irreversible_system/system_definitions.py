@@ -197,9 +197,3 @@ class ConstantTrajectory(Trajectory):
         """Allows for changing the setpoint during a simulation."""
         self.value = new_value
 
-controller = PIDController(
-        pv_tag="B",
-        sp_trajectory=ConstantTrajectory(0.5),
-        Kp=1.0e-1,
-        Ti=100.0
-    )

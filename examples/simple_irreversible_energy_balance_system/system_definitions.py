@@ -40,6 +40,7 @@ class EnergyBalanceControlElements(ControlElements):
     """Pydantic model for the externally controlled variables."""
 
     F_in: float  # Inlet flow rate
+    F_J_in: float  # Jacket inlet flow rate
 
 
 class EnergyBalanceAlgebraicStates(AlgebraicStates):
@@ -82,6 +83,7 @@ class EnergyBalanceSystem(System):
 
         F_out = algebraic_values_dict["F_out"]
         F_in = control_elements.F_in
+        F_J_in = control_elements.F_J_in
 
         k0 = system_constants["k0"]
         activation_energy = system_constants["activation_energy"]
@@ -94,7 +96,6 @@ class EnergyBalanceSystem(System):
         heat_transfer_area = system_constants["heat_transfer_area"]
         UA = overall_heat_transfer_coefficient * heat_transfer_area
 
-        jacket_flow_rate = system_constants["jacket_flow_rate"]
         jacket_volume = max(1e-9, system_constants["jacket_volume"])
         jacket_rho_cp = max(1e-9, system_constants["jacket_rho_cp"])
         jacket_inlet_temperature = system_constants["jacket_inlet_temperature"]
@@ -105,7 +106,7 @@ class EnergyBalanceSystem(System):
         reactor_temperature = y[StateMap.T.value]  # type: ignore
         jacket_temperature = y[StateMap.T_J.value]  # type: ignore
 
-        arrhenius_temperature = max(1e-6, reactor_temperature)
+        arrhenius_temperature = max(1e-6, reactor_temperature) #type: ignore
         rate_constant = k0 * np.exp(-activation_energy / (gas_constant * arrhenius_temperature))
         reaction_rate = molarity_A * volume * rate_constant
 
@@ -113,28 +114,28 @@ class EnergyBalanceSystem(System):
         dV_dt = F_in - F_out
         dy[StateMap.V.value] = dV_dt  # type: ignore
 
-        dy[StateMap.A.value] = (1 / volume) * (
+        dy[StateMap.A.value] = (1 / volume) * ( # type: ignore
             -reaction_rate
             + F_in * CA_in
             - F_out * molarity_A
             - molarity_A * dV_dt
-        )  # type: ignore
+        )  
 
-        dy[StateMap.B.value] = (1 / volume) * (
+        dy[StateMap.B.value] = (1 / volume) * (# type: ignore
             2.0 * reaction_rate
             - F_out * molarity_B
             - molarity_B * dV_dt
-        )  # type: ignore
+        )  
 
-        heat_generation = (-reaction_enthalpy) * reaction_rate
-        dy[StateMap.T.value] = (
+        heat_generation = (reaction_enthalpy) * reaction_rate
+        dy[StateMap.T.value] = ( # type: ignore
             (F_in / volume) * (feed_temperature - reactor_temperature)
             + heat_generation / (rho_cp * volume)
             - UA * (reactor_temperature - jacket_temperature) / (rho_cp * volume)
-        )  # type: ignore
+        )  
 
-        dy[StateMap.T_J.value] = (
-            (jacket_flow_rate / jacket_volume)
+        dy[StateMap.T_J.value] = ( # type: ignore
+            (F_J_in / jacket_volume)
             * (jacket_inlet_temperature - jacket_temperature)
             + UA * (reactor_temperature - jacket_temperature)
             / (jacket_rho_cp * jacket_volume)
@@ -162,7 +163,6 @@ class EnergyBalanceFastSystem(FastSystem):
             "rho_cp",
             "overall_heat_transfer_coefficient",
             "heat_transfer_area",
-            "jacket_flow_rate",
             "jacket_volume",
             "jacket_rho_cp",
             "jacket_inlet_temperature",
@@ -170,7 +170,7 @@ class EnergyBalanceFastSystem(FastSystem):
 
     @staticmethod
     def _get_controls_map() -> List[str]:
-        return ["F_in"]
+        return ["F_in", "F_J_in"]
 
     @staticmethod
     @numba.jit(nopython=True)
@@ -204,20 +204,21 @@ class EnergyBalanceFastSystem(FastSystem):
         k0 = constants_arr[0]
         activation_energy = constants_arr[1]
         gas_constant = constants_arr[2]
+
         CA_in = constants_arr[4]
         feed_temperature = constants_arr[5]
         reaction_enthalpy = constants_arr[6]
         rho_cp = max(1e-9, constants_arr[7])
         overall_heat_transfer_coefficient = constants_arr[8]
         heat_transfer_area = constants_arr[9]
-        jacket_flow_rate = constants_arr[10]
-        jacket_volume = max(1e-9, constants_arr[11])
-        jacket_rho_cp = max(1e-9, constants_arr[12])
-        jacket_inlet_temperature = constants_arr[13]
+        jacket_volume = max(1e-9, constants_arr[10])
+        jacket_rho_cp = max(1e-9, constants_arr[11])
+        jacket_inlet_temperature = constants_arr[12]
 
         UA = overall_heat_transfer_coefficient * heat_transfer_area
 
         F_in = control_elements_arr[0]
+        F_J_in = control_elements_arr[1]
         F_out = algebraic_states_arr[0]
 
         arrhenius_temperature = max(1e-6, reactor_temperature)
@@ -241,7 +242,7 @@ class EnergyBalanceFastSystem(FastSystem):
             - molarity_B * dV_dt
         )
 
-        heat_generation = (-reaction_enthalpy) * reaction_rate
+        heat_generation = (reaction_enthalpy) * reaction_rate
         dy[T_idx] = (
             (F_in / volume) * (feed_temperature - reactor_temperature)
             + heat_generation / (rho_cp * volume)
@@ -249,7 +250,7 @@ class EnergyBalanceFastSystem(FastSystem):
         )
 
         dy[Tj_idx] = (
-            (jacket_flow_rate / jacket_volume)
+            (F_J_in / jacket_volume)
             * (jacket_inlet_temperature - jacket_temperature)
             + UA * (reactor_temperature - jacket_temperature)
             / (jacket_rho_cp * jacket_volume)
@@ -272,10 +273,3 @@ class ConstantTrajectory(Trajectory):
 
         self.value = new_value
 
-
-controller = PIDController(
-    pv_tag="B",
-    sp_trajectory=ConstantTrajectory(0.5),
-    Kp=1.0e-1,
-    Ti=100.0,
-)

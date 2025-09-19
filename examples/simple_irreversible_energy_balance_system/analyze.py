@@ -28,60 +28,69 @@ def run_simulation(system, iterations: int, dt: float):
 
 
 def plot(systems):
-    plt.figure(figsize=(14, 10))
+    
     linestyles = ["-", "--"]
-    for j, (name, system) in enumerate(systems.items()):
+    plt.figure(figsize=(14, 10))
+    j = 0
+    for system in systems:
         history = system.measured_history
         t = history["time"]
-
-        plt.subplot(3, 2, 1)
+        plt.subplot(4, 2, 1)
         plt.step(t, history["B"], linestyle=linestyles[j])
         plt.title("Concentration of B")
         plt.xlabel("Time Step")
         plt.ylabel("[B] (mol/L)")
         plt.grid(True)
 
-        plt.subplot(3, 2, 2)
+        plt.subplot(4, 2, 2)
         plt.step(t, history["F_in"], linestyle=linestyles[j])
         plt.title("Inlet Flow Rate (F_in)")
         plt.xlabel("Time Step")
         plt.ylabel("Flow (L/s)")
         plt.grid(True)
 
-        plt.subplot(3, 2, 3)
+        plt.subplot(4, 2, 3)
         plt.step(t, history["V"], linestyle=linestyles[j])
         plt.title("Reactor Volume (V)")
         plt.xlabel("Time Step")
         plt.ylabel("Volume (L)")
         plt.grid(True)
 
-        plt.subplot(3, 2, 4)
+        plt.subplot(4, 2, 4)
         plt.step(t, history["F_out"], linestyle=linestyles[j])
         plt.title("Outlet Flow Rate (F_out)")
         plt.xlabel("Time Step")
         plt.ylabel("Flow (L/s)")
         plt.grid(True)
 
-        plt.subplot(3, 2, 5)
+        plt.subplot(4, 2, 5)
         plt.step(t, history["T"], linestyle=linestyles[j])
         plt.title("Reactor Temperature (T)")
         plt.xlabel("Time Step")
         plt.ylabel("Temperature (K)")
         plt.grid(True)
 
-        plt.subplot(3, 2, 6)
+        plt.subplot(4, 2, 6)
         plt.step(t, history["T_J"], linestyle=linestyles[j])
         plt.title("Jacket Temperature (T_J)")
         plt.xlabel("Time Step")
         plt.ylabel("Temperature (K)")
         plt.grid(True)
 
-    for i in range(6):
-        plt.subplot(3, 2, i + 1)
-        plt.legend()
+        plt.subplot(4, 2, 8)
+        plt.step(t, history["F_J_in"], linestyle=linestyles[j])
+        plt.title("Jacket inflow (F_J_in)")
+        plt.xlabel("Time Step")
+        plt.ylabel("flow (L/s)")
+        plt.grid(True)
+        j += 1
+
+    for i in range(8):
+        plt.subplot(4, 2, i + 1)
+        plt.legend(systems.keys())
+
     plt.tight_layout()
     plt.show()
-
 
 systems = {"readable": readable_system, "fast": fast_system}
 print("--- Starting Profiling Session ---")

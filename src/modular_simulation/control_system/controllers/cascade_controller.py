@@ -71,7 +71,7 @@ class CascadeController(Controller):
 
         object.__setattr__(self, "mv_range", self.inner_loop.mv_range)
         object.__setattr__(self, "sp_trajectory", self.inner_loop.sp_trajectory)
-        self._auto_source = self.inner_loop.sp_trajectory
+        self._auto_source = self.inner_loop.active_sp_trajectory()
         return self
 
     def _initialize(self, usable_quantities, control_elements) -> None:  # type: ignore[override]
@@ -106,7 +106,7 @@ class CascadeController(Controller):
 
     def active_sp_trajectory(self) -> Trajectory:
         if self.mode is ControllerMode.cascade:
-            return self.outer_loop.sp_trajectory
+            return self.outer_loop.active_sp_trajectory()
         return self._auto_source
 
     def update_trajectory(self, t: float, value: float) -> None:  # type: ignore[override]

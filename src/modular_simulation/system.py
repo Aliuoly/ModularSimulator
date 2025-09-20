@@ -312,16 +312,18 @@ class System(ABC):
             )
 
         controller = self.controller_dictionary[cv_tag]
-        trajectory = controller.sp_trajectory
+        active_trajectory = controller.active_sp_trajectory()
+
         if value is None:
-            value = trajectory.current_value(self._t)
-        old_value = trajectory(self._t)
-        trajectory.set_now(t=self._t, value=value)
-        new_value = trajectory(self._t)
+            value = active_trajectory.current_value(self._t)
+
+        old_value = active_trajectory(self._t)
+        controller.update_trajectory(self._t, value)
+        new_value = controller.active_sp_trajectory()(self._t)
         logger.info("Setpoint trajectory for '%(tag)s' controller changed at time %(time)0.0f " \
                         "from %(old)0.1e to %(new)0.1e",
                         {'tag': cv_tag, 'time': self._t, 'old': old_value, 'new': new_value})
-        return trajectory
+        return controller.active_sp_trajectory()
         
     @cached_property
     def controller_dictionary(self) -> Dict[str, "Controller"]:

@@ -7,6 +7,7 @@ from system_definitions import (
     IrreversibleFastSystem
 )
 from modular_simulation.usables import SampledDelayedSensor
+from modular_simulation.plotting import plot_triplet_series
 from modular_simulation.system import create_system
 from modular_simulation.control_system import Trajectory, PIDController
 from typing import List, TYPE_CHECKING
@@ -109,8 +110,7 @@ if __name__ == "__main__":
     mpl.set_loglevel("warning") # silence matplotlib debug messages
     plt.figure(figsize=(12, 8))
     linestyles = ['-', '--']
-    j = 0
-    for system in systems.values(): 
+    for j, (system_name, system) in enumerate(systems.items()):
         # --- First simulation run ---
         for i in range(5000):
             system.step(dt) #type: ignore
@@ -129,42 +129,60 @@ if __name__ == "__main__":
         sensor_hist = history["sensors"]
         calc_hist = history["calculations"]
         # Plot Concentration of B
-        plt.subplot(2, 2, 1)
-        hist = sensor_hist["B"]
-        plt.step(hist["time"], hist['value'], linestyle = linestyles[j])
+        ax = plt.subplot(2, 2, 1)
+        plot_triplet_series(
+            ax,
+            sensor_hist["B"],
+            style="step",
+            line_kwargs={"linestyle": linestyles[j]},
+            label=system_name,
+        )
         plt.title("Concentration of B")
         plt.xlabel("Time ")
         plt.ylabel("[B] (mol/L)")
         plt.grid(True)
 
         # Plot Inlet Flow Rate (F_in)
-        plt.subplot(2, 2, 2)
-        hist = sensor_hist["F_in"]
-        plt.step(hist["time"], hist['value'], linestyle = linestyles[j])
+        ax = plt.subplot(2, 2, 2)
+        plot_triplet_series(
+            ax,
+            sensor_hist["F_in"],
+            style="step",
+            line_kwargs={"linestyle": linestyles[j]},
+            label=system_name,
+        )
         plt.title("Inlet Flow Rate (F_in)")
         plt.xlabel("Time ")
         plt.ylabel("Flow (L/s)")
         plt.grid(True)
 
         # Plot Reactor Volume (V)
-        plt.subplot(2, 2, 3)
-        hist = sensor_hist["V"]
-        plt.step(hist["time"], hist['value'], linestyle = linestyles[j])
+        ax = plt.subplot(2, 2, 3)
+        plot_triplet_series(
+            ax,
+            sensor_hist["V"],
+            style="step",
+            line_kwargs={"linestyle": linestyles[j]},
+            label=system_name,
+        )
         plt.title("Reactor Volume (V)")
         plt.xlabel("Time ")
         plt.ylabel("Volume (L)")
         plt.grid(True)
 
         # Plot Outlet Flow Rate (F_out)
-        plt.subplot(2, 2, 4)
-        hist = sensor_hist["F_out"]
-        plt.step(hist["time"], hist['value'], linestyle = linestyles[j])
+        ax = plt.subplot(2, 2, 4)
+        plot_triplet_series(
+            ax,
+            sensor_hist["F_out"],
+            style="step",
+            line_kwargs={"linestyle": linestyles[j]},
+            label=system_name,
+        )
         plt.title("Outlet Flow Rate (F_out)")
         plt.xlabel("Time ")
         plt.ylabel("Flow (L/s)")
         plt.grid(True)
-
-        j+=1
 
     for i in range(4):
         plt.subplot(2, 2, i+1)

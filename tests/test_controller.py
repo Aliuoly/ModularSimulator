@@ -99,6 +99,19 @@ def _wire_cascade_for_testing(cascade: CascadeController) -> None:
     cascade.outer_loop._mv_setter = assign_inner
 
 
+def _build_dummy_controller(mv_tag: str, cv_tag: str) -> DummyController:
+    controller = DummyController(
+        mv_tag=mv_tag,
+        cv_tag=cv_tag,
+        sp_trajectory=Trajectory(y0=0.0, t0=0.0),
+        mv_range=(-10.0, 10.0),
+    )
+    controller._mv_setter = lambda value: None
+    controller._cv_getter = lambda: TimeValueQualityTriplet(0.0, 0.0, ok=True)
+    controller._last_value = TimeValueQualityTriplet(0.0, 0.0, ok=True)
+    return controller
+
+
 def test_controller_ramp_rate_limits_setpoint_progression():
     controller, state = _prepare_controller(ramp_rate=1.0)
 
@@ -198,3 +211,20 @@ def test_cascade_update_trajectory_targets_active_source():
     cascade.mode = ControllerMode.auto
     cascade.update_trajectory(0.0, 1.5)
     assert inner.sp_trajectory.current_value(0.0) == pytest.approx(1.5)
+
+
+def test_cascade_active_trajectory_delegates_to_outer_cascade():
+    inner_main = _build_dummy_controller(mv_tag="inner_mv", cv_tag="inner_cv")
+    bridge = _build_dummy_controller(mv_tag="bridge_mv", cv_tag="bridge_cv")
+    outer = _build_dummy_controller(mv_tag="outer_mv", cv_tag="outer_cv")
+
+    outer_cascade = CascadeController(inner_loop=bridge, outer_loop=outer)
+    cascade = CascadeController(inner_loop=inner_main, outer_loop=outer_cascade)
+
+    assert cascade.active_sp_trajectory() is outer.sp_trajectory
+
+    outer_cascade.mode = ControllerMode.auto
+    assert cascade.active_sp_trajectory() is bridge.sp_trajectory
+
+    cascade.mode = ControllerMode.auto
+    assert cascade.active_sp_trajectory() is inner_main.sp_trajectory

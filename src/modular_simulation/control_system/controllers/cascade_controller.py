@@ -45,7 +45,7 @@ class CascadeController(Controller):
         ),
     )
 
-    _auto_source: Trajectory | Controller = PrivateAttr()
+    _auto_source: Trajectory = PrivateAttr()
 
     @model_validator(mode="before")
     def _inherit_loop_metadata(cls, data: dict) -> dict:
@@ -54,9 +54,9 @@ class CascadeController(Controller):
         if inner is not None:
             data.setdefault("mv_tag", inner.mv_tag)
             data.setdefault("mv_range", inner.mv_range)
+            data.setdefault("sp_trajectory", inner.sp_trajectory)
         if outer is not None:
             data.setdefault("cv_tag", outer.cv_tag)
-            data.setdefault("sp_trajectory", outer)
         return data
 
     @model_validator(mode="after")
@@ -70,8 +70,8 @@ class CascadeController(Controller):
             raise ValueError("CascadeController cv_tag must match the outer loop controller cv_tag.")
 
         object.__setattr__(self, "mv_range", self.inner_loop.mv_range)
+        object.__setattr__(self, "sp_trajectory", self.inner_loop.sp_trajectory)
         self._auto_source = self.inner_loop.sp_trajectory
-        self._apply_mode()
         return self
 
     def _initialize(self, usable_quantities, control_elements) -> None:  # type: ignore[override]
@@ -84,44 +84,45 @@ class CascadeController(Controller):
         self._mv_setter = self.inner_loop._mv_setter
         self._last_value = self.inner_loop._last_value
 
-    def _apply_mode(self) -> None:
+        def _assign_inner_setpoint(value):
+            last = self.outer_loop._last_value
+            if last is None:
+                raise RuntimeError("Outer loop has not produced a value yet.")
+            self.inner_loop.update_trajectory(last.t, value)
+
+        self.outer_loop._mv_setter = _assign_inner_setpoint
+
+    def update(self, t: float) -> TimeValueQualityTriplet:  # type: ignore[override]
         if self.mode is ControllerMode.cascade:
-            if self.inner_loop.sp_trajectory is not self.outer_loop:
-                self.inner_loop.sp_trajectory = self.outer_loop
+            self.outer_loop.update(t)
         elif self.mode is ControllerMode.auto:
-            if self.inner_loop.sp_trajectory is not self._auto_source:
-                self.inner_loop.sp_trajectory = self._auto_source
+            self.outer_loop.track_cv(t)
         else:
             raise ValueError(f"Unsupported controller mode: {self.mode!r}")
 
-    def update(self, t: float) -> TimeValueQualityTriplet:  # type: ignore[override]
-        result = self._run(t, apply_mv=True)
+        result = self.inner_loop.update(t)
         self._last_value = result
         return result
 
-    def __call__(self, t: float) -> TimeValueQualityTriplet:  # type: ignore[override]
-        return self._run(t, apply_mv=False)
+    def active_sp_trajectory(self) -> Trajectory:
+        if self.mode is ControllerMode.cascade:
+            return self.outer_loop.sp_trajectory
+        return self._auto_source
 
-    def _run(self, t: float, *, apply_mv: bool) -> TimeValueQualityTriplet:
-        self._apply_mode()
-
-        if self.mode is ControllerMode.auto:
-            self.outer_loop.track_pv(t)
-
-        result = self.inner_loop.update(t) if apply_mv else self.inner_loop.__call__(t)
-        if apply_mv:
-            self._last_value = result
-        return result
-
-    def active_sp_trajectory(self) -> Trajectory:  # type: ignore[override]
-        if self.mode is ControllerMode.auto:
-            source = self._auto_source
+    def update_trajectory(self, t: float, value: float) -> None:  # type: ignore[override]
+        if self.mode is ControllerMode.cascade:
+            self.outer_loop.update_trajectory(t, value)
         else:
-            source = self.outer_loop
+            self.inner_loop.update_trajectory(t, value)
 
-        if isinstance(source, Trajectory):
-            return source
-        return source.active_sp_trajectory()
+    def track_cv(self, t: float) -> None:  # type: ignore[override]
+        if self.mode is ControllerMode.cascade:
+            self.outer_loop.track_cv(t)
+        else:
+            self.inner_loop.track_cv(t)
+
+    def track_pv(self, t: float) -> None:  # type: ignore[override]
+        self.track_cv(t)
 
     def _control_algorithm(self, cv_value, sp_value, t):  # type: ignore[override]
         raise RuntimeError("CascadeController does not use the base control algorithm pathway.")

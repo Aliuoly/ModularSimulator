@@ -312,7 +312,7 @@ class System(ABC):
             )
 
         controller = self.controller_dictionary[cv_tag]
-        trajectory = controller.active_sp_trajectory()
+        trajectory = controller.sp_trajectory
         if value is None:
             value = trajectory.current_value(self._t)
         old_value = trajectory(self._t)
@@ -337,40 +337,56 @@ class System(ABC):
         if not self._record_measured_history:
             return {}
 
-
         sensors_detail: Dict[str, Dict[str, NDArray]] = {}
         calculations_detail: Dict[str, Dict[str, NDArray]] = {}
-        history: Dict[str, Any] = {"_sensors": sensors_detail, "_calculations": calculations_detail}
+        history: Dict[str, Any] = {
+            "_sensors": sensors_detail,
+            "_calculations": calculations_detail,
+        }
+
+        time_axis: NDArray | None = None
+
+        def consider_time(candidate: NDArray) -> None:
+            nonlocal time_axis
+            if candidate.size == 0:
+                return
+            if time_axis is None or candidate.shape[0] > time_axis.shape[0]:
+                time_axis = candidate
 
         for sensor in self.usable_quantities.sensors:
             sensor_history = sensor.measurement_history()
-            tag = sensor.measurement_tag
-            time_array = sensor_history["time"].copy()
-            value_array = sensor_history["value"].copy()
-            ok_array = sensor_history["ok"].copy()
-            sensors_detail[tag] = {
-                "time": time_array,
-                "value": value_array,
-                "ok": ok_array,
+            times = sensor_history["time"].copy()
+            values = sensor_history["value"].copy()
+            ok = sensor_history["ok"].copy()
+
+            sensors_detail[sensor.measurement_tag] = {
+                "time": times,
+                "value": values,
+                "ok": ok,
             }
-            history.setdefault("time", time_array.copy())
-            history[tag] = value_array.copy()
-            history[f"{tag}_ok"] = ok_array.copy()
+            history[sensor.measurement_tag] = values
+            history[f"{sensor.measurement_tag}_ok"] = ok
+            consider_time(times)
 
         for calculation in self.usable_quantities.calculations:
             calculation_history = calculation.history()
-            tag = calculation.output_tag
-            time_array = calculation_history["time"].copy()
-            value_array = calculation_history["value"].copy()
-            ok_array = calculation_history["ok"].copy()
-            calculations_detail[tag] = {
-                "time": time_array,
-                "value": value_array,
-                "ok": ok_array,
+            times = calculation_history["time"].copy()
+            values = calculation_history["value"].copy()
+            ok = calculation_history["ok"].copy()
+
+            calculations_detail[calculation.output_tag] = {
+                "time": times,
+                "value": values,
+                "ok": ok,
             }
-            history.setdefault("time", time_array.copy())
-            history[tag] = value_array.copy()
-            history[f"{tag}_ok"] = ok_array.copy()
+            history[calculation.output_tag] = values
+            history[f"{calculation.output_tag}_ok"] = ok
+            consider_time(times)
+
+        if time_axis is None:
+            history["time"] = np.asarray([], dtype=float)
+        else:
+            history["time"] = time_axis.copy()
 
         return history
 
@@ -386,7 +402,7 @@ class System(ABC):
         """Returns historized controller setpoints keyed by ``cv_tag``."""
         history: Dict[str, Dict[str, NDArray]] = {}
         for controller in self.controllable_quantities.controllers:
-            traj_hist = controller.active_sp_trajectory().history()
+            traj_hist = controller.sp_trajectory.history()
             history[controller.cv_tag] = {
                 "time": traj_hist["time"].copy(),
                 "value": traj_hist["value"].copy(),

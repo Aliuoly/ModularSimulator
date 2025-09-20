@@ -83,6 +83,22 @@ def _prepare_echo_controller() -> tuple[EchoController, dict[str, float], list[f
     return controller, state, applied
 
 
+def _wire_cascade_for_testing(cascade: CascadeController) -> None:
+    """Link outer-loop commands to the inner loop without full system wiring."""
+
+    cascade._cv_getter = cascade.outer_loop._cv_getter
+    cascade._mv_setter = cascade.inner_loop._mv_setter
+    cascade._last_value = cascade.inner_loop._last_value
+
+    def assign_inner(value):
+        last = cascade.outer_loop._last_value
+        if last is None:
+            raise RuntimeError("Outer loop has not produced a value yet.")
+        cascade.inner_loop.update_trajectory(last.t, value)
+
+    cascade.outer_loop._mv_setter = assign_inner
+
+
 def test_controller_ramp_rate_limits_setpoint_progression():
     controller, state = _prepare_controller(ramp_rate=1.0)
 
@@ -119,16 +135,10 @@ def test_cascade_requires_non_cascade_inner_loop():
     inner, _ = _prepare_controller(ramp_rate=None)
     outer, _, _ = _prepare_echo_controller()
 
-    inner_cascade = CascadeController(
-        inner_loop=inner,
-        outer_loop=outer,
-    )
+    cascade = CascadeController(inner_loop=inner, outer_loop=outer)
 
     with pytest.raises(TypeError):
-        CascadeController(
-            inner_loop=inner_cascade,  # type: ignore[arg-type]
-            outer_loop=outer,
-        )
+        CascadeController(inner_loop=cascade, outer_loop=outer)  # type: ignore[arg-type]
 
 
 def test_cascade_updates_inner_setpoint_from_outer_output():
@@ -139,11 +149,9 @@ def test_cascade_updates_inner_setpoint_from_outer_output():
 
     outer, outer_state, outer_actions = _prepare_echo_controller()
 
-    cascade = CascadeController(
-        inner_loop=inner,
-        outer_loop=outer,
-    )
+    cascade = CascadeController(inner_loop=inner, outer_loop=outer)
     cascade.mode = ControllerMode.cascade
+    _wire_cascade_for_testing(cascade)
 
     inner_state.update({"t": 1.0, "value": 0.0})
     outer_state.update({"t": 1.0, "value": 0.0})
@@ -155,18 +163,16 @@ def test_cascade_updates_inner_setpoint_from_outer_output():
     assert inner_actions != []
     assert inner._observed_setpoints[-1] == pytest.approx(3.0)
     assert result is inner._last_value
-    assert cascade.inner_loop.sp_trajectory is cascade.outer_loop
+    assert cascade.active_sp_trajectory() is outer.sp_trajectory
 
 
 def test_cascade_auto_mode_tracks_outer_measurement():
     inner, inner_state = _prepare_controller(ramp_rate=None)
     outer, outer_state, outer_actions = _prepare_echo_controller()
 
-    cascade = CascadeController(
-        inner_loop=inner,
-        outer_loop=outer,
-    )
+    cascade = CascadeController(inner_loop=inner, outer_loop=outer)
     cascade.mode = ControllerMode.auto
+    _wire_cascade_for_testing(cascade)
 
     inner_state.update({"t": 2.0, "value": 0.0})
     outer_state.update({"t": 2.0, "value": 5.0})
@@ -175,6 +181,7 @@ def test_cascade_auto_mode_tracks_outer_measurement():
 
     assert outer.sp_trajectory.current_value(2.0) == pytest.approx(5.0)
     assert outer_actions == []
+    assert cascade.active_sp_trajectory() is inner.sp_trajectory
 
 
 def test_cascade_update_trajectory_targets_active_source():
@@ -182,11 +189,12 @@ def test_cascade_update_trajectory_targets_active_source():
     outer, _, _ = _prepare_echo_controller()
 
     cascade = CascadeController(inner_loop=inner, outer_loop=outer)
+    _wire_cascade_for_testing(cascade)
 
     cascade.mode = ControllerMode.cascade
     cascade.update_trajectory(0.0, 7.0)
-    assert cascade.active_sp_trajectory().current_value(0.0) == pytest.approx(7.0)
+    assert outer.sp_trajectory.current_value(0.0) == pytest.approx(7.0)
 
     cascade.mode = ControllerMode.auto
     cascade.update_trajectory(0.0, 1.5)
-    assert cascade.active_sp_trajectory().current_value(0.0) == pytest.approx(1.5)
+    assert inner.sp_trajectory.current_value(0.0) == pytest.approx(1.5)

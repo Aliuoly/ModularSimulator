@@ -49,8 +49,8 @@ class System(ABC):
     system_constants: Dict[str, Any]
     solver_options: Dict[str, Any]
 
-    _history: Dict[str, float]
-    _measured_history: Dict[str, float |Dict[str, List]]
+    _history: Dict[str, NDArray]
+    _measured_history: Dict[str, NDArray | Dict[str, NDArray]]
 
     def __init__(
             self, 
@@ -80,46 +80,103 @@ class System(ABC):
         validate_and_link(self)
         
         self._t = 0.
+        self._buffer_size = 10_000
         self._history = {}
         self._measured_history = {}
+        self._history_size = 0
+        self._measured_history_size = 0
         self._usable_snapshot = None
-        
+
         # take one single step to get things populated
         self.step(dt = 0)
 
     def _update_history(self) -> None:
         """Creates a serializable dictionary snapshot of the current system state for logging."""
-        
-        if self._history == {}:
+
+        if not self._history:
             for measurable_obj_name in self.measurable_quantities.__class__.model_fields.keys():
                 measurable_obj = getattr(self.measurable_quantities, measurable_obj_name)
                 for tag in measurable_obj.__class__.model_fields.keys():
-                    self._history[tag] = [getattr(measurable_obj, tag)] # type: ignore
-            self._history['time'] = [self._t] #type: ignore
+                    first_value = getattr(measurable_obj, tag)
+                    value_array = np.asarray(first_value)
+                    is_scalar = value_array.shape == ()
+                    array_shape = (self._buffer_size,) if is_scalar else (self._buffer_size, *value_array.shape)
+                    values = np.empty(array_shape, dtype=value_array.dtype)
+                    values[0] = value_array.item() if is_scalar else value_array
+                    self._history[tag] = values
+            time_values = np.empty(self._buffer_size, dtype=float)
+            time_values[0] = self._t
+            self._history['time'] = time_values
+            self._history_size = 1
             return
-        
+
+        if self._history_size >= self._history['time'].shape[0]:
+            for tag, values in self._history.items():
+                new_shape = (values.shape[0] + self._buffer_size, *values.shape[1:])
+                expanded = np.empty(new_shape, dtype=values.dtype)
+                expanded[:values.shape[0]] = values
+                self._history[tag] = expanded
+
         for measurable_obj_name in self.measurable_quantities.__class__.model_fields.keys():
             measurable_obj = getattr(self.measurable_quantities, measurable_obj_name)
             for tag in measurable_obj.__class__.model_fields.keys():
-                self._history[tag] += [getattr(measurable_obj, tag)] # type: ignore
-        self._history['time'] += [self._t] # type: ignore
-            
+                current_value = getattr(measurable_obj, tag)
+                value_array = np.asarray(current_value)
+                if value_array.shape == ():
+                    self._history[tag][self._history_size] = value_array.item()
+                else:
+                    self._history[tag][self._history_size] = value_array
+        self._history['time'][self._history_size] = self._t
+        self._history_size += 1
+
 
     def _update_measured_history(self, snapshot) -> None:
-
-        if self._measured_history == {}:
+        if not self._measured_history:
             for tag, tvq in snapshot.items():
-                    self._measured_history[tag] = {
-                        'value': [tvq.value],
-                        'ok': [tvq.ok]
-                    } 
-            self._measured_history['time'] = [self._t] #type: ignore
+                value_array = np.asarray(tvq.value)
+                is_scalar = value_array.shape == ()
+                array_shape = (self._buffer_size,) if is_scalar else (self._buffer_size, *value_array.shape)
+                values = np.empty(array_shape, dtype=value_array.dtype)
+                values[0] = value_array.item() if is_scalar else value_array
+                oks = np.empty(self._buffer_size, dtype=bool)
+                oks[0] = tvq.ok
+                self._measured_history[tag] = {
+                    'value': values,
+                    'ok': oks
+                }
+            time_values = np.empty(self._buffer_size, dtype=float)
+            time_values[0] = self._t
+            self._measured_history['time'] = time_values
+            self._measured_history_size = 1
             return
-        
+
+        if self._measured_history_size >= self._measured_history['time'].shape[0]:
+            new_time = np.empty(self._measured_history['time'].shape[0] + self._buffer_size, dtype=float)
+            new_time[:self._measured_history['time'].shape[0]] = self._measured_history['time']
+            self._measured_history['time'] = new_time
+            for tag, tvq in snapshot.items():
+                entry = self._measured_history[tag]
+                value_arr = entry['value']
+                value_shape = (value_arr.shape[0] + self._buffer_size, *value_arr.shape[1:])
+                expanded_values = np.empty(value_shape, dtype=value_arr.dtype)
+                expanded_values[:value_arr.shape[0]] = value_arr
+                entry['value'] = expanded_values
+                ok_arr = entry['ok']
+                expanded_ok = np.empty(ok_arr.shape[0] + self._buffer_size, dtype=bool)
+                expanded_ok[:ok_arr.shape[0]] = ok_arr
+                entry['ok'] = expanded_ok
+
         for tag, tvq in snapshot.items():
-            self._measured_history[tag]['value'] += [tvq.value] # type: ignore
-            self._measured_history[tag]['ok'] += [tvq.ok] # type: ignore
-        self._measured_history['time'] += [self._t] # type: ignore
+            entry = self._measured_history[tag]
+            value_array = np.asarray(tvq.value)
+            if value_array.shape == ():
+                entry['value'][self._measured_history_size] = value_array.item()
+            else:
+                entry['value'][self._measured_history_size] = value_array
+            entry['ok'][self._measured_history_size] = tvq.ok
+
+        self._measured_history['time'][self._measured_history_size] = self._t
+        self._measured_history_size += 1
             
 
     def _pre_integration_step(self) -> NDArray:
@@ -291,14 +348,23 @@ class System(ABC):
         return [c.cv_tag for c in self.controllable_quantities.controllers]
 
     @property
-    def measured_history(self) -> Dict[str, NDArray]:
+    def measured_history(self) -> Dict[str, NDArray | Dict[str, NDArray]]:
         """Returns a trimmed copy of the measured history dictionary."""
-        return {k: v.copy() for k, v in self._measured_history.items()}
-    
+        trimmed: Dict[str, Any] = {}
+        for key, value in self._measured_history.items():
+            if key == 'time':
+                trimmed[key] = value[:self._measured_history_size].copy()
+            else:
+                trimmed[key] = {
+                    'value': value['value'][:self._measured_history_size].copy(),
+                    'ok': value['ok'][:self._measured_history_size].copy(),
+                }
+        return trimmed
+
     @property
     def history(self) -> Dict[str, NDArray]:
         """Returns a trimmed copy of the full history dictionary."""
-        return {k: v.copy() for k, v in self._history.items()}
+        return {k: v[:self._history_size].copy() for k, v in self._history.items()}
 
 
 class FastSystem(System):

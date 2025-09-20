@@ -50,7 +50,6 @@ class System(ABC):
     solver_options: Dict[str, Any]
 
     _history: Dict[str, NDArray]
-    _measured_history: Dict[str, NDArray | Dict[str, NDArray]]
 
     def __init__(
             self,
@@ -85,13 +84,17 @@ class System(ABC):
         self._record_measured_history = record_measured_history
 
         validate_and_link(self)
-        
+
+        if not self._record_measured_history:
+            for sensor in self.usable_quantities.sensors:
+                sensor.set_history_enabled(False)
+            for calculation in self.usable_quantities.calculations:
+                calculation.set_history_enabled(False)
+
         self._t = 0.
         self._buffer_size = 10_000
         self._history = {}
-        self._measured_history = {}
         self._history_size = 0
-        self._measured_history_size = 0
         self._usable_snapshot = None
 
         # take one single step to get things populated
@@ -140,69 +143,17 @@ class System(ABC):
         self._history_size += 1
 
 
-    def _update_measured_history(self, snapshot) -> None:
-        if not self._record_measured_history:
-            return
-        if not self._measured_history:
-            for tag, tvq in snapshot.items():
-                value_array = np.asarray(tvq.value)
-                is_scalar = value_array.shape == ()
-                array_shape = (self._buffer_size,) if is_scalar else (self._buffer_size, *value_array.shape)
-                values = np.empty(array_shape, dtype=value_array.dtype)
-                values[0] = value_array.item() if is_scalar else value_array
-                oks = np.empty(self._buffer_size, dtype=bool)
-                oks[0] = tvq.ok
-                self._measured_history[tag] = {
-                    'value': values,
-                    'ok': oks
-                }
-            time_values = np.empty(self._buffer_size, dtype=float)
-            time_values[0] = self._t
-            self._measured_history['time'] = time_values
-            self._measured_history_size = 1
-            return
-
-        if self._measured_history_size >= self._measured_history['time'].shape[0]:
-            new_time = np.empty(self._measured_history['time'].shape[0] + self._buffer_size, dtype=float)
-            new_time[:self._measured_history['time'].shape[0]] = self._measured_history['time']
-            self._measured_history['time'] = new_time
-            for tag, tvq in snapshot.items():
-                entry = self._measured_history[tag]
-                value_arr = entry['value']
-                value_shape = (value_arr.shape[0] + self._buffer_size, *value_arr.shape[1:])
-                expanded_values = np.empty(value_shape, dtype=value_arr.dtype)
-                expanded_values[:value_arr.shape[0]] = value_arr
-                entry['value'] = expanded_values
-                ok_arr = entry['ok']
-                expanded_ok = np.empty(ok_arr.shape[0] + self._buffer_size, dtype=bool)
-                expanded_ok[:ok_arr.shape[0]] = ok_arr
-                entry['ok'] = expanded_ok
-
-        for tag, tvq in snapshot.items():
-            entry = self._measured_history[tag]
-            value_array = np.asarray(tvq.value)
-            if value_array.shape == ():
-                entry['value'][self._measured_history_size] = value_array.item()
-            else:
-                entry['value'][self._measured_history_size] = value_array
-            entry['ok'][self._measured_history_size] = tvq.ok
-
-        self._measured_history['time'][self._measured_history_size] = self._t
-        self._measured_history_size += 1
-            
-
     def _pre_integration_step(self) -> NDArray:
         """
         Handles the control loop logic before integration.
-        
+
         This method updates all sensors and controllers based on the current state,
         sets the new values for the control elements, and returns the initial state
         array for the solver.
         """
-        usable_results = self.usable_quantities.update(self._t)
-        self._update_measured_history(usable_results)
+        self.usable_quantities.update(self._t)
         self.controllable_quantities.update(self._t) # returns results too, but I don't need it here.
-        # control elements is already updated here by reference. 
+        # control elements is already updated here by reference.
         y0 = self.measurable_quantities.states.to_array()
         return y0
 
@@ -375,20 +326,51 @@ class System(ABC):
         return [c.cv_tag for c in self.controllable_quantities.controllers]
 
     @property
-    def measured_history(self) -> Dict[str, NDArray | Dict[str, NDArray]]:
-        """Returns a trimmed copy of the measured history dictionary."""
+    def measured_history(self) -> Dict[str, Any]:
+        """Returns historized measurements and calculations."""
         if not self._record_measured_history:
             return {}
-        trimmed: Dict[str, Any] = {}
-        for key, value in self._measured_history.items():
-            if key == 'time':
-                trimmed[key] = value[:self._measured_history_size].copy()
-            else:
-                trimmed[key] = {
-                    'value': value['value'][:self._measured_history_size].copy(),
-                    'ok': value['ok'][:self._measured_history_size].copy(),
-                }
-        return trimmed
+
+        history: Dict[str, Any] = {}
+        sensors_detail: Dict[str, Dict[str, NDArray]] = {}
+        calculations_detail: Dict[str, Dict[str, NDArray]] = {}
+        time_array: Optional[NDArray] = None
+
+        for sensor in self.usable_quantities.sensors:
+            sensor_history = sensor.measurement_history()
+            if time_array is None and sensor_history["time"].size:
+                time_array = sensor_history["time"].copy()
+            sensors_detail[sensor.measurement_tag] = {
+                "time": sensor_history["time"].copy(),
+                "value": sensor_history["value"].copy(),
+                "ok": sensor_history["ok"].copy(),
+            }
+            history[sensor.measurement_tag] = sensor_history["value"].copy()
+            history[f"{sensor.measurement_tag}_ok"] = sensor_history["ok"].copy()
+
+        for calculation in self.usable_quantities.calculations:
+            calculation_history = calculation.history()
+            if time_array is None and calculation_history["time"].size:
+                time_array = calculation_history["time"].copy()
+            calculations_detail[calculation.output_tag] = {
+                "time": calculation_history["time"].copy(),
+                "value": calculation_history["value"].copy(),
+                "ok": calculation_history["ok"].copy(),
+            }
+            history[calculation.output_tag] = calculation_history["value"].copy()
+            history[f"{calculation.output_tag}_ok"] = calculation_history["ok"].copy()
+
+        if sensors_detail:
+            history["_sensors"] = sensors_detail
+        if calculations_detail:
+            history["_calculations"] = calculations_detail
+
+        if time_array is None:
+            history["time"] = np.asarray([], dtype=float)
+        else:
+            history["time"] = time_array
+
+        return history
 
     @property
     def history(self) -> Dict[str, NDArray]:

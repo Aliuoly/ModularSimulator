@@ -2,7 +2,7 @@ from numpy.typing import NDArray
 import numpy as np
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
-from typing import TYPE_CHECKING, Any, Callable, Union, List
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
 from operator import attrgetter
 
@@ -21,9 +21,12 @@ class Sensor(BaseModel, ABC):
     _measurement_function: Callable | None = PrivateAttr(default = None)
     _measurables: Union["MeasurableQuantities", None] = PrivateAttr(default = None)
     _initialized: bool = PrivateAttr(default = False)
-    _history_times: List[float] = PrivateAttr(default_factory=list)
-    _history_values: List[float | np.ndarray] = PrivateAttr(default_factory=list)
-    _history_ok: List[bool] = PrivateAttr(default_factory=list)
+    _buffer_size: int = PrivateAttr(default=10_000)
+    _history_size: int = PrivateAttr(default=0)
+    _history_times: Optional[np.ndarray] = PrivateAttr(default=None)
+    _history_values: Optional[np.ndarray] = PrivateAttr(default=None)
+    _history_ok: Optional[np.ndarray] = PrivateAttr(default=None)
+    _record_history: bool = PrivateAttr(default=True)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -126,25 +129,89 @@ class Sensor(BaseModel, ABC):
         return noisy_value, False
 
     def _record_measurement(self, measurement: TimeValueQualityTriplet) -> None:
-        self._history_times.append(measurement.t)
+        if not self._record_history:
+            return
+
         value_array = np.asarray(measurement.value)
+
+        if self._history_times is None:
+            self._initialize_history_buffers(value_array)
+        elif self._history_size >= self._history_times.shape[0]:
+            self._expand_history_buffers()
+
+        if (
+            self._history_times is None
+            or self._history_values is None
+            or self._history_ok is None
+        ):
+            raise RuntimeError("History buffers must be initialized before storing measurements.")
+
+        # After ensuring buffers are ready, store the measurement.
+        self._history_times[self._history_size] = measurement.t
         if value_array.shape == ():
-            stored_value: float | np.ndarray = value_array.item()
+            self._history_values[self._history_size] = value_array.item()
         else:
-            stored_value = value_array.copy()
-        self._history_values.append(stored_value)
-        self._history_ok.append(measurement.ok)
+            self._history_values[self._history_size] = value_array
+        self._history_ok[self._history_size] = measurement.ok
+        self._history_size += 1
 
     def measurement_history(self) -> dict[str, np.ndarray]:
-        times = np.asarray(self._history_times, dtype=float)
-        ok = np.asarray(self._history_ok, dtype=bool)
-        if not self._history_values:
-            values = np.asarray([], dtype=float)
-        else:
-            stacked: np.ndarray
-            try:
-                stacked = np.stack([np.asarray(v) for v in self._history_values])
-            except ValueError:
-                stacked = np.array([np.asarray(v) for v in self._history_values], dtype=object)
-            values = stacked
+        if (
+            not self._record_history
+            or self._history_times is None
+            or self._history_values is None
+            or self._history_ok is None
+            or self._history_size == 0
+        ):
+            return {
+                "time": np.asarray([], dtype=float),
+                "value": np.asarray([], dtype=float),
+                "ok": np.asarray([], dtype=bool),
+            }
+
+        times = self._history_times[:self._history_size].copy()
+        values = self._history_values[:self._history_size].copy()
+        ok = self._history_ok[:self._history_size].copy()
         return {"time": times, "value": values, "ok": ok}
+
+    def set_history_enabled(self, enabled: bool) -> None:
+        """Enable or disable historization for this sensor."""
+        self._record_history = enabled
+        if not enabled:
+            self._history_times = None
+            self._history_values = None
+            self._history_ok = None
+            self._history_size = 0
+
+    def _initialize_history_buffers(self, value_array: np.ndarray) -> None:
+        """Allocate the history buffers based on the measurement type."""
+        values_shape = (
+            (self._buffer_size,) if value_array.shape == () else (self._buffer_size, *value_array.shape)
+        )
+        self._history_times = np.empty(self._buffer_size, dtype=float)
+        self._history_ok = np.empty(self._buffer_size, dtype=bool)
+        self._history_values = np.empty(values_shape, dtype=value_array.dtype)
+
+    def _expand_history_buffers(self) -> None:
+        """Expand the existing buffers by the configured buffer size."""
+        if (
+            self._history_times is None
+            or self._history_values is None
+            or self._history_ok is None
+        ):
+            raise RuntimeError("History buffers must be initialized before expansion.")
+
+        new_length = self._history_times.shape[0] + self._buffer_size
+
+        expanded_times = np.empty(new_length, dtype=float)
+        expanded_times[: self._history_times.shape[0]] = self._history_times
+        self._history_times = expanded_times
+
+        expanded_ok = np.empty(new_length, dtype=bool)
+        expanded_ok[: self._history_ok.shape[0]] = self._history_ok
+        self._history_ok = expanded_ok
+
+        value_shape = (new_length, *self._history_values.shape[1:])
+        expanded_values = np.empty(value_shape, dtype=self._history_values.dtype)
+        expanded_values[: self._history_values.shape[0]] = self._history_values
+        self._history_values = expanded_values

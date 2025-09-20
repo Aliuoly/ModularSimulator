@@ -17,11 +17,7 @@ import matplotlib as mpl
 if TYPE_CHECKING:
     from modular_simulation.usables import Calculation
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(message)s"
-)
-mpl.set_loglevel("warning") # silence matplotlib debug messages
+
 
 # 1. Set up the initial conditions and system components.
 # =======================================================
@@ -105,6 +101,12 @@ fast_system = create_system(
 dt = 30
 systems = {'fast': fast_system,"readable": readable_system}
 if __name__ == "__main__":
+
+    logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(message)s"
+    )
+    mpl.set_loglevel("warning") # silence matplotlib debug messages
     plt.figure(figsize=(12, 8))
     linestyles = ['-', '--']
     j = 0

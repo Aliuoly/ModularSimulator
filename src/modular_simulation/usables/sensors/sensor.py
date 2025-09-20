@@ -82,8 +82,6 @@ class Sensor(BaseModel, ABC):
         #     If you want to use it though, change it lol. 
         new_measurement = TimeValueQualityTriplet(t=t, value=final_value, ok=True)
         self._last_value = new_measurement
-        if self.measurement_tag == "B":
-            print(f"B updated at time {t:.0f} with value {final_value:.1e}")
         return new_measurement
     
     @abstractmethod

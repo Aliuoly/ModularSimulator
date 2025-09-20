@@ -6,6 +6,7 @@ import io
 from run_simulation import readable_system, fast_system
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 # --- Simulation Parameters ---
 # Use a high number of steps to get meaningful profile data
@@ -24,10 +25,9 @@ else:
 
 def run_simulation(system, iterations: int, dt: float):
     """A simple function to run the simulation steps."""
-    pid_controller = system.controllable_quantities.control_definitions["F_in"]
-    for i in range(iterations):
+    for i in tqdm(range(iterations)):
         system.step(dt)
-        pid_controller.sp_trajectory.change(sp_trajs[i])
+        system.extend_controller_trajectory(cv_tag = 'B').hold(dt, sp_trajs[i])
 
 def plot(systems):
     plt.figure(figsize=(12, 8))
@@ -77,7 +77,7 @@ def plot(systems):
     plt.tight_layout()
     plt.show()
 
-systems = { "readable": readable_system}
+systems = { "readable": readable_system, 'fast': fast_system}
 print("--- Starting Profiling Session ---")
 print(f"Running {N_STEPS} steps with dt={DT} for system .")
 

@@ -1,7 +1,8 @@
 from typing import List, Dict
 from dataclasses import dataclass, field
 from modular_simulation.usables import TimeValueQualityTriplet
-from modular_simulation.control_system.controllers.controller import Controller, CascadeController
+from modular_simulation.control_system.controllers.controller import Controller
+from modular_simulation.control_system.controllers.cascade_controller import CascadeController
 @dataclass(slots = True)
 class ControllableQuantities:
     """Container for the controllers acting on the system's control elements."""

@@ -46,8 +46,8 @@ sensors=[
     SampledDelayedSensor(
         measurement_tag = "B",
         coefficient_of_variance=0.05,
-        sampling_period = 0,
-        deadtime = 0,
+        sampling_period = 900,
+        deadtime = 900,
     ),
     SampledDelayedSensor(
         measurement_tag = "V",
@@ -103,7 +103,7 @@ systems = {'fast': fast_system,"readable": readable_system}
 if __name__ == "__main__":
 
     logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(message)s"
     )
     mpl.set_loglevel("warning") # silence matplotlib debug messages
@@ -117,7 +117,7 @@ if __name__ == "__main__":
 
         # --- Change the setpoint and continue the simulation ---
         # Access the controller via the controllable_quantities object.
-        system.extend_controller_trajectory(cv_tag = "B").hold(duration = inf, value = 0.2)
+        system.extend_controller_trajectory(cv_tag = "B", value = 0.2)
         for i in range(5000):
             system.step(dt)  #type: ignore
 
@@ -125,37 +125,42 @@ if __name__ == "__main__":
         # =====================
 
         # The simulation history is stored in the system's `_history` attribute.
-        history = system.history  #type: ignore
-        t = history['time']
+        history = system.measured_history  #type: ignore
+        sensor_hist = history["sensors"]
+        calc_hist = history["calculations"]
         # Plot Concentration of B
         plt.subplot(2, 2, 1)
-        plt.step(t, history['B'], linestyle = linestyles[j])
+        hist = sensor_hist["B"]
+        plt.step(hist["time"], hist['value'], linestyle = linestyles[j])
         plt.title("Concentration of B")
-        plt.xlabel("Time Step")
+        plt.xlabel("Time ")
         plt.ylabel("[B] (mol/L)")
         plt.grid(True)
 
         # Plot Inlet Flow Rate (F_in)
         plt.subplot(2, 2, 2)
-        plt.step(t, history['F_in'], linestyle = linestyles[j])
+        hist = sensor_hist["F_in"]
+        plt.step(hist["time"], hist['value'], linestyle = linestyles[j])
         plt.title("Inlet Flow Rate (F_in)")
-        plt.xlabel("Time Step")
+        plt.xlabel("Time ")
         plt.ylabel("Flow (L/s)")
         plt.grid(True)
 
         # Plot Reactor Volume (V)
         plt.subplot(2, 2, 3)
-        plt.step(t, history['V'], linestyle = linestyles[j])
+        hist = sensor_hist["V"]
+        plt.step(hist["time"], hist['value'], linestyle = linestyles[j])
         plt.title("Reactor Volume (V)")
-        plt.xlabel("Time Step")
+        plt.xlabel("Time ")
         plt.ylabel("Volume (L)")
         plt.grid(True)
 
         # Plot Outlet Flow Rate (F_out)
         plt.subplot(2, 2, 4)
-        plt.step(t, history['F_out'], linestyle = linestyles[j])
+        hist = sensor_hist["F_out"]
+        plt.step(hist["time"], hist['value'], linestyle = linestyles[j])
         plt.title("Outlet Flow Rate (F_out)")
-        plt.xlabel("Time Step")
+        plt.xlabel("Time ")
         plt.ylabel("Flow (L/s)")
         plt.grid(True)
 

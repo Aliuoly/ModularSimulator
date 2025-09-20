@@ -1,11 +1,11 @@
 from typing import List, Dict
 from dataclasses import dataclass, field
 from modular_simulation.usables import TimeValueQualityTriplet
-from modular_simulation.control_system.controller import Controller
+from modular_simulation.control_system.controllers.controller import Controller, CascadeController
 @dataclass(slots = True)
 class ControllableQuantities:
     """Container for the controllers acting on the system's control elements."""
-    controllers: List[Controller]
+    controllers: List[Controller | CascadeController]
 
     _control_outputs: Dict[str, TimeValueQualityTriplet] = field(init = False, default_factory = dict)
     

@@ -139,60 +139,66 @@ if __name__ == "__main__":
         for _ in range(5000):
             system.step(dt)  # type: ignore
 
-        # not ideal - I want to change sp for B, but I have to refer to the F_J_in controller instead.
-          # type: ignore
-        system.extend_controller_trajectory(cv_tag = "B").hold(duration = inf, value = 0.2)
+        system.extend_controller_trajectory(cv_tag = "B", value = 0.2)
 
         for _ in range(5000):
             system.step(dt)  # type: ignore
 
         history = system.measured_history  # type: ignore
-        t = history["time"]
+        sensor_hist = history["sensors"]
+        calc_hist = history["calculations"]
 
         plt.subplot(4, 2, 1)
-        plt.step(t, history["B"]['value'], linestyle=linestyles[j])
+        hist = sensor_hist["B"]
+        plt.step(hist['time'], hist["value"], linestyle=linestyles[j])
         plt.title("Concentration of B")
         plt.xlabel("Time Step")
         plt.ylabel("[B] (mol/L)")
         plt.grid(True)
 
         plt.subplot(4, 2, 2)
-        plt.step(t, history["F_in"]['value'], linestyle=linestyles[j])
+        hist = sensor_hist["F_in"]
+        plt.step(hist['time'], hist["value"], linestyle=linestyles[j])
         plt.title("Inlet Flow Rate (F_in)")
         plt.xlabel("Time Step")
         plt.ylabel("Flow (L/s)")
         plt.grid(True)
 
         plt.subplot(4, 2, 3)
-        plt.step(t, history["V"]['value'], linestyle=linestyles[j])
+        hist = sensor_hist["V"]
+        plt.step(hist['time'], hist["value"], linestyle=linestyles[j])
         plt.title("Reactor Volume (V)")
         plt.xlabel("Time Step")
         plt.ylabel("Volume (L)")
         plt.grid(True)
 
         plt.subplot(4, 2, 4)
-        plt.step(t, history["F_out"]['value'], linestyle=linestyles[j])
+        hist = sensor_hist["F_out"]
+        plt.step(hist['time'], hist["value"], linestyle=linestyles[j])
         plt.title("Outlet Flow Rate (F_out)")
         plt.xlabel("Time Step")
         plt.ylabel("Flow (L/s)")
         plt.grid(True)
 
         plt.subplot(4, 2, 5)
-        plt.step(t, history["T"]['value'], linestyle=linestyles[j])
+        hist = sensor_hist["T"]
+        plt.step(hist['time'], hist["value"], linestyle=linestyles[j])
         plt.title("Reactor Temperature (T)")
         plt.xlabel("Time Step")
         plt.ylabel("Temperature (K)")
         plt.grid(True)
 
         plt.subplot(4, 2, 6)
-        plt.step(t, history["T_J"]['value'], linestyle=linestyles[j])
+        hist = sensor_hist["T_J"]
+        plt.step(hist['time'], hist["value"], linestyle=linestyles[j])
         plt.title("Jacket Temperature (T_J)")
         plt.xlabel("Time Step")
         plt.ylabel("Temperature (K)")
         plt.grid(True)
 
         plt.subplot(4, 2, 8)
-        plt.step(t, history["F_J_in"]['value'], linestyle=linestyles[j])
+        hist = sensor_hist["F_J_in"]
+        plt.step(hist['time'], hist["value"], linestyle=linestyles[j])
         plt.title("Jacket inflow (F_J_in)")
         plt.xlabel("Time Step")
         plt.ylabel("flow (L/s)")

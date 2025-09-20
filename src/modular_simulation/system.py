@@ -3,7 +3,7 @@ from modular_simulation.quantities.usable_quantities import UsableQuantities
 from modular_simulation.quantities.controllable_quantities import ControllableQuantities
 from abc import ABC, abstractmethod
 from numpy.typing import NDArray
-from typing import Any, Type, Dict, List, TYPE_CHECKING, Optional 
+from typing import Any, Type, Dict, List, TYPE_CHECKING, Optional
 from enum import Enum
 from scipy.integrate import solve_ivp #type: ignore
 from modular_simulation.validation import validate_and_link
@@ -14,7 +14,8 @@ if TYPE_CHECKING:
     from modular_simulation.usables import Sensor, Calculation, TimeValueQualityTriplet
     from modular_simulation.control_system import Controller, Trajectory
 from copy import deepcopy
-import numba #type: ignore
+import logging
+logger = logging.getLogger(__name__)
 
 class System(ABC):
     """
@@ -314,7 +315,12 @@ class System(ABC):
         trajectory = controller.sp_trajectory
         if value is None:
             value = trajectory.current_value(self._t)
+        old_value = trajectory(self._t)
         trajectory.set_now(t=self._t, value=value)
+        new_value = trajectory(self._t)
+        logger.info("Setpoint trajectory for '%(tag)s' controller changed at time %(time)0.0f " \
+                        "from %(old)0.1e to %(new)0.1e",
+                        {'tag': cv_tag, 'time': self._t, 'old': old_value, 'new': new_value})
         return trajectory
         
     @cached_property
@@ -331,44 +337,26 @@ class System(ABC):
         if not self._record_measured_history:
             return {}
 
-        history: Dict[str, Any] = {}
+
         sensors_detail: Dict[str, Dict[str, NDArray]] = {}
         calculations_detail: Dict[str, Dict[str, NDArray]] = {}
-        time_array: Optional[NDArray] = None
+        history = {"sensors": sensors_detail, "calculations": calculations_detail}
 
         for sensor in self.usable_quantities.sensors:
             sensor_history = sensor.measurement_history()
-            if time_array is None and sensor_history["time"].size:
-                time_array = sensor_history["time"].copy()
             sensors_detail[sensor.measurement_tag] = {
                 "time": sensor_history["time"].copy(),
                 "value": sensor_history["value"].copy(),
                 "ok": sensor_history["ok"].copy(),
             }
-            history[sensor.measurement_tag] = sensor_history["value"].copy()
-            history[f"{sensor.measurement_tag}_ok"] = sensor_history["ok"].copy()
 
         for calculation in self.usable_quantities.calculations:
             calculation_history = calculation.history()
-            if time_array is None and calculation_history["time"].size:
-                time_array = calculation_history["time"].copy()
             calculations_detail[calculation.output_tag] = {
                 "time": calculation_history["time"].copy(),
                 "value": calculation_history["value"].copy(),
                 "ok": calculation_history["ok"].copy(),
             }
-            history[calculation.output_tag] = calculation_history["value"].copy()
-            history[f"{calculation.output_tag}_ok"] = calculation_history["ok"].copy()
-
-        if sensors_detail:
-            history["_sensors"] = sensors_detail
-        if calculations_detail:
-            history["_calculations"] = calculations_detail
-
-        if time_array is None:
-            history["time"] = np.asarray([], dtype=float)
-        else:
-            history["time"] = time_array
 
         return history
 

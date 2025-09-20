@@ -6,6 +6,7 @@ pytest.importorskip("scipy")
 import numpy as np
 from enum import Enum
 from pydantic import ConfigDict, Field
+from typing import ClassVar, Type
 
 from modular_simulation.measurables import ControlElements, States
 from modular_simulation.quantities import ControllableQuantities, MeasurableQuantities, UsableQuantities
@@ -19,7 +20,7 @@ class DummyStateMap(Enum):
 
 class DummyStates(States):
     model_config = ConfigDict(extra="forbid")
-    StateMap = DummyStateMap
+    StateMap: ClassVar[Type[Enum]] = DummyStateMap
     X: float = Field(0.0)
 
 

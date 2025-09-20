@@ -12,9 +12,7 @@ def test_set_now_prunes_segments_and_records_history():
     for t in times:
         traj.set_now(t, t)
         assert len(traj.segments) <= 2
-
-    assert traj.current_value(times[-1]) == pytest.approx(times[-1])
-    assert traj(times[-1] - 0.5) == pytest.approx(times[-2])
+        assert traj(t) == pytest.approx(t)
 
     history = traj.history()
     assert history["time"].tolist() == times

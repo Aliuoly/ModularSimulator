@@ -3,7 +3,8 @@ from abc import ABC
 from numpy.typing import NDArray
 import numpy as np
 from enum import Enum
-from typing import get_origin, ClassVar
+from typing import get_origin, ClassVar, Type
+from pydantic import Field
 
 class States(BaseModel, ABC):
     """
@@ -13,7 +14,14 @@ class States(BaseModel, ABC):
     robust, generic logic to ensure that any subclass is correctly defined
     with a matching StateMap enum for NumPy array conversion.
     """
+
+    StateMap: ClassVar[Type[Enum]] = Field(
+        ...,
+        description = 'The Enum specifying array indeces for all defined states used in' \
+                        ' converting States to an numpy array for scipy solve_ivp calls.'
+    )
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
+    
 
     def __init_subclass__(cls, **kwargs):
         """

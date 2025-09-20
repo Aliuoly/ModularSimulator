@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, List
-from functools import lru_cache
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
@@ -61,7 +60,7 @@ class Calculation(BaseModel, ABC):
             found = False
             for sensor in sensors:
                 if sensor.measurement_tag == tag:
-                    self._input_getters[tag] = lambda sensor=sensor: sensor._last_value
+                    self._input_getters[tag] = lambda sensor=sensor: sensor._last_value #type: ignore
                     found = True
             if not found:
                 raise AttributeError(
@@ -74,7 +73,7 @@ class Calculation(BaseModel, ABC):
             found = False
             for calculation in calculations:
                 if calculation.output_tag == tag:
-                    self._input_getters[tag] = lambda calculation=calculation: calculation._last_value
+                    self._input_getters[tag] = lambda calculation=calculation: calculation._last_value #type: ignore
                     found = True
             if not found:
                 raise AttributeError(
@@ -82,7 +81,6 @@ class Calculation(BaseModel, ABC):
                     f"Available calculations are: {', '.join([c.output_tag for c in calculations])}"
                     )
     @property
-    @lru_cache(maxsize=1) # only remember the last call
     def inputs(self) -> Dict[str, TimeValueQualityTriplet | float | NDArray]:
         if self._input_getters is not None:
             return {tag_name: tag_getter() for tag_name, tag_getter in self._input_getters.items()}

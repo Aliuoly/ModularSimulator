@@ -256,7 +256,7 @@ class Trajectory:
             del self._start_vals[:drop]
             self._rebuild_breaks()
 
-        self._append(Hold(t, float('inf'), value), start_value=prev_value)
+        self._append(Hold(t0 = t, duration = 0, value = value), start_value=prev_value)
         self._record_history_entry(t, value)
         self._last_set_time = t
         self._last_set_value = value

@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 # --- Simulation Parameters ---
 # Use a high number of steps to get meaningful profile data
-N_STEPS = 3000  # A good number for profiling
+N_STEPS = 30000  # A good number for profiling
 DT = 60
 sp_segments = 10
 np.random.seed(0)
@@ -27,55 +27,7 @@ def run_simulation(system, iterations: int, dt: float):
     """A simple function to run the simulation steps."""
     for i in tqdm(range(iterations)):
         system.step(dt)
-        system.extend_controller_trajectory(cv_tag = 'B').hold(dt, sp_trajs[i])
-
-def plot(systems):
-    plt.figure(figsize=(12, 8))
-    linestyles = ['-','--']
-    j = 0
-    for name, system in systems.items():
-        history = system.measured_history
-
-        t = history['time']
-        # Plot Concentration of B
-        plt.subplot(2, 2, 1)
-        plt.step(t, history['B'], linestyle = linestyles[j])
-        plt.title("Concentration of B")
-        plt.xlabel("Time Step")
-        plt.ylabel("[B] (mol/L)")
-        plt.grid(True)
-
-        # Plot Inlet Flow Rate (F_in)
-        plt.subplot(2, 2, 2)
-        plt.step(t, history['F_in'], linestyle = linestyles[j])
-        plt.title("Inlet Flow Rate (F_in)")
-        plt.xlabel("Time Step")
-        plt.ylabel("Flow (L/s)")
-        plt.grid(True)
-
-        # Plot Reactor Volume (V)
-        plt.subplot(2, 2, 3)
-        plt.step(t, history['V'], linestyle = linestyles[j])
-        plt.title("Reactor Volume (V)")
-        plt.xlabel("Time Step")
-        plt.ylabel("Volume (L)")
-        plt.grid(True)
-
-        # Plot Outlet Flow Rate (F_out)
-        plt.subplot(2, 2, 4)
-        plt.step(t, history['F_out'], linestyle = linestyles[j])
-        plt.title("Outlet Flow Rate (F_out)")
-        plt.xlabel("Time Step")
-        plt.ylabel("Flow (L/s)")
-        plt.grid(True)
-
-        j += 1
-        
-    for i in range(4):
-        plt.subplot(2, 2, i+1)
-        plt.legend()
-    plt.tight_layout()
-    plt.show()
+        system.extend_controller_trajectory(cv_tag = 'B', value = sp_trajs[i])
 
 systems = { "readable": readable_system, 'fast': fast_system}
 print("--- Starting Profiling Session ---")

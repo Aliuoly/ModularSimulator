@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("numpy")
 
-from modular_simulation.control_system.controller import Controller
+from modular_simulation.control_system.controllers.controller import Controller
 from modular_simulation.control_system.trajectory import Trajectory
 from modular_simulation.usables import TimeValueQualityTriplet
 

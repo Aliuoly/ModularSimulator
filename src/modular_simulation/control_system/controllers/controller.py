@@ -9,6 +9,8 @@ from modular_simulation.measurables import ControlElements
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
 if TYPE_CHECKING:
     from modular_simulation.quantities import UsableQuantities
+    from modular_simulation.usables.sensors.sensor import Sensor
+    from modular_simulation.usables.calculations import Calculation
 import logging
 logger = logging.getLogger(__name__)
 
@@ -47,18 +49,12 @@ class Controller(BaseModel, ABC):
     _last_sp_time: float | None = PrivateAttr(default=None)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
     
-    def _initialize(
-            self,
-            usable_quantities: "UsableQuantities",
-            control_elements: ControlElements,
+    def _initialize_cv_getter(
+        self,
+        sensors: "Sensor",
+        calculations: "Calculation",
         ) -> None:
-        """
-        establish the link between sensor corresponding to the CV and 
-            between controlelement of the system
-        """
-        self._usables = usable_quantities
-        sensors = usable_quantities.sensors
-        calculations = usable_quantities.calculations
+
         found = False
         for sensor in sensors:
             if sensor.measurement_tag == self.cv_tag:
@@ -84,7 +80,10 @@ class Controller(BaseModel, ABC):
                 f"{self.cv_tag} controller could not be initialized. The tag '{self.cv_tag}' is not measured. "
                 f"Available measurements are: {', '.join([s.measurement_tag for s in sensors])}."
             )
-        
+    def _initialize_mv_setter(
+        self,
+        control_elements: "ControlElements"
+        ) -> None:
         found = False
         for control_element_name in control_elements.__class__.model_fields:
             if control_element_name == self.mv_tag:
@@ -99,6 +98,19 @@ class Controller(BaseModel, ABC):
                 f"Available control elements are: {', '.join([ce for ce in control_elements.__class__.model_fields])}."
             )
         self._last_value = TimeValueQualityTriplet(t = 0, value = self._u0, ok = True)
+        
+    def _initialize(
+        self,
+        usable_quantities: "UsableQuantities",
+        control_elements: ControlElements,
+        ) -> None:
+        """
+        establish the link between sensor corresponding to the CV and 
+            between controlelement of the system
+        """
+        self._usables = usable_quantities
+        self._initialize_cv_getter(usable_quantities.sensors, usable_quantities.calculations)
+        self._initialize_mv_setter(control_elements)
 
     def update(self, t: float) -> Union[float, NDArray[np.float64]]:
         # 1. get pv

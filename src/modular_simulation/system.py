@@ -53,12 +53,15 @@ class System(ABC):
     _measured_history: Dict[str, NDArray | Dict[str, NDArray]]
 
     def __init__(
-            self, 
-            measurable_quantities: MeasurableQuantities, 
-            usable_quantities: UsableQuantities, 
-            controllable_quantities: ControllableQuantities, 
+            self,
+            measurable_quantities: MeasurableQuantities,
+            usable_quantities: UsableQuantities,
+            controllable_quantities: ControllableQuantities,
             system_constants: Dict[str, Any],
             solver_options: Dict[str, Any],
+            *,
+            record_history: bool = True,
+            record_measured_history: bool = True,
             ):
         """
         Initializes the System object.
@@ -69,6 +72,8 @@ class System(ABC):
             controllable_quantities: An object defining the system's controllers.
             system_constants: A dictionary containing fixed parameters for the simulation.
             solver_options: A dictionary of keyword arguments to be passed to `solve_ivp`.
+            record_history: If ``False``, disable recording of state history snapshots.
+            record_measured_history: If ``False``, disable recording of measurement history snapshots.
         """
         self.measurable_quantities = measurable_quantities
         self.usable_quantities = usable_quantities
@@ -76,6 +81,8 @@ class System(ABC):
         
         self.system_constants = system_constants
         self.solver_options = solver_options
+        self._record_history = record_history
+        self._record_measured_history = record_measured_history
 
         validate_and_link(self)
         
@@ -92,6 +99,9 @@ class System(ABC):
 
     def _update_history(self) -> None:
         """Creates a serializable dictionary snapshot of the current system state for logging."""
+
+        if not self._record_history:
+            return
 
         if not self._history:
             for measurable_obj_name in self.measurable_quantities.__class__.model_fields.keys():
@@ -131,6 +141,8 @@ class System(ABC):
 
 
     def _update_measured_history(self, snapshot) -> None:
+        if not self._record_measured_history:
+            return
         if not self._measured_history:
             for tag, tvq in snapshot.items():
                 value_array = np.asarray(tvq.value)
@@ -341,16 +353,18 @@ class System(ABC):
         cv_tag is used to specify which controller
         
         """
-        if cv_tag in self.controller_dictionary:
-            controller = self.controller_dictionary[cv_tag]
-            if value is None:
-                value = controller.sp_trajectory(self._t)
-                return controller.sp_trajectory.set_now(t = self._t, value = value)
-        else:
+        if cv_tag not in self.controller_dictionary:
             raise ValueError(
                 f"Specified cv_tag '{cv_tag}' to extend the trajectory for does not correspond"
                 f" to any defined controllers. Available controller cv_tags are {self.cv_tag_list}."
             )
+
+        controller = self.controller_dictionary[cv_tag]
+        trajectory = controller.sp_trajectory
+        if value is None:
+            value = trajectory.current_value(self._t)
+        trajectory.set_now(t=self._t, value=value)
+        return trajectory
         
     @cached_property
     def controller_dictionary(self) -> Dict[str, "Controller"]:
@@ -363,6 +377,8 @@ class System(ABC):
     @property
     def measured_history(self) -> Dict[str, NDArray | Dict[str, NDArray]]:
         """Returns a trimmed copy of the measured history dictionary."""
+        if not self._record_measured_history:
+            return {}
         trimmed: Dict[str, Any] = {}
         for key, value in self._measured_history.items():
             if key == 'time':
@@ -377,7 +393,21 @@ class System(ABC):
     @property
     def history(self) -> Dict[str, NDArray]:
         """Returns a trimmed copy of the full history dictionary."""
+        if not self._record_history:
+            return {}
         return {k: v[:self._history_size].copy() for k, v in self._history.items()}
+
+    @property
+    def setpoint_history(self) -> Dict[str, Dict[str, NDArray]]:
+        """Returns historized controller setpoints keyed by ``cv_tag``."""
+        history: Dict[str, Dict[str, NDArray]] = {}
+        for controller in self.controllable_quantities.controllers:
+            traj_hist = controller.sp_trajectory.history()
+            history[controller.cv_tag] = {
+                "time": traj_hist["time"].copy(),
+                "value": traj_hist["value"].copy(),
+            }
+        return history
 
 
 class FastSystem(System):
@@ -490,19 +520,26 @@ class FastSystem(System):
 
 def create_system(
         system_class: Type[System],
-        initial_states: "States", 
-        initial_controls: "ControlElements", 
-        initial_algebraic: "AlgebraicStates", 
+        initial_states: "States",
+        initial_controls: "ControlElements",
+        initial_algebraic: "AlgebraicStates",
         sensors: List["Sensor"],
         calculations: List["Calculation"],
         controllers: List["Controller"],
         system_constants: Dict[str, Any],
-        solver_options: Dict[str, Any]
+        solver_options: Dict[str, Any],
+        *,
+        record_history: bool = True,
+        record_measured_history: bool = True,
         ) -> System:
     """
-    Factory to build a complete, internally consistent simulation system. 
+    Factory to build a complete, internally consistent simulation system.
     Creates copies of the objects passed in so as to ensure no cross-contamination
     between multiple systems created with the same inputs.
+
+    The optional ``record_history`` and ``record_measured_history`` flags allow
+    callers to disable internal historization to save memory when full logs are
+    unnecessary.
     """
     # 1. Create the components for this specific system instance
     copied_states = deepcopy(initial_states)
@@ -544,7 +581,9 @@ def create_system(
         usable_quantities=usables,
         controllable_quantities=controllables,
         system_constants=copied_constants,
-        solver_options=solver_options
+        solver_options=solver_options,
+        record_history=record_history,
+        record_measured_history=record_measured_history,
     )
     
     return system

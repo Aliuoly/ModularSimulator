@@ -2,7 +2,7 @@ from numpy.typing import NDArray
 import numpy as np
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
-from typing import TYPE_CHECKING, Any, Callable, Union
+from typing import TYPE_CHECKING, Any, Callable, Union, List
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
 from operator import attrgetter
 
@@ -21,6 +21,9 @@ class Sensor(BaseModel, ABC):
     _measurement_function: Callable | None = PrivateAttr(default = None)
     _measurables: Union["MeasurableQuantities", None] = PrivateAttr(default = None)
     _initialized: bool = PrivateAttr(default = False)
+    _history_times: List[float] = PrivateAttr(default_factory=list)
+    _history_values: List[float | np.ndarray] = PrivateAttr(default_factory=list)
+    _history_ok: List[bool] = PrivateAttr(default_factory=list)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -82,6 +85,7 @@ class Sensor(BaseModel, ABC):
         #     If you want to use it though, change it lol. 
         new_measurement = TimeValueQualityTriplet(t=t, value=final_value, ok=True)
         self._last_value = new_measurement
+        self._record_measurement(new_measurement)
         return new_measurement
     
     @abstractmethod
@@ -120,3 +124,27 @@ class Sensor(BaseModel, ABC):
             noisy_value = value + noise
         
         return noisy_value, False
+
+    def _record_measurement(self, measurement: TimeValueQualityTriplet) -> None:
+        self._history_times.append(measurement.t)
+        value_array = np.asarray(measurement.value)
+        if value_array.shape == ():
+            stored_value: float | np.ndarray = value_array.item()
+        else:
+            stored_value = value_array.copy()
+        self._history_values.append(stored_value)
+        self._history_ok.append(measurement.ok)
+
+    def measurement_history(self) -> dict[str, np.ndarray]:
+        times = np.asarray(self._history_times, dtype=float)
+        ok = np.asarray(self._history_ok, dtype=bool)
+        if not self._history_values:
+            values = np.asarray([], dtype=float)
+        else:
+            stacked: np.ndarray
+            try:
+                stacked = np.stack([np.asarray(v) for v in self._history_values])
+            except ValueError:
+                stacked = np.array([np.asarray(v) for v in self._history_values], dtype=object)
+            values = stacked
+        return {"time": times, "value": values, "ok": ok}

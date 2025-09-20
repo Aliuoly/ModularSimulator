@@ -3,7 +3,7 @@ from modular_simulation.quantities.usable_quantities import UsableQuantities
 from modular_simulation.quantities.controllable_quantities import ControllableQuantities
 from abc import ABC, abstractmethod
 from numpy.typing import NDArray
-from typing import Any, Type, Dict, List, TYPE_CHECKING, Literal
+from typing import Any, Type, Dict, List, TYPE_CHECKING, Optional 
 from enum import Enum
 from scipy.integrate import solve_ivp #type: ignore
 from modular_simulation.validation import validate_and_link
@@ -332,16 +332,29 @@ class System(ABC):
             self._t += dt
         self._update_history()
     
-    def extend_controller_trajectory(self, cv_tag: str) -> "Trajectory":
-        for controller in self.controllable_quantities.controllers:
-            if controller.cv_tag == cv_tag:
-                return controller.sp_trajectory.trim_future(t = self._t)
-        raise ValueError(
-            f"Specified cv_tag '{cv_tag}' to extend the trajectory for does not correspond"
-            f" to any defined controllers. Available controller cv_tags are {self.cv_tag_list}."
-        )
-        
+    def extend_controller_trajectory(self, cv_tag: str, value: float | None = None) -> "Trajectory":
+        """
+        used to 'extend' the setpoint trajectory of a controller from the current time onwards.
+        If the trajectory has already been defined into the future, the trajectory is trimmed
+        back to the current time. 
 
+        cv_tag is used to specify which controller
+        
+        """
+        if cv_tag in self.controller_dictionary:
+            controller = self.controller_dictionary[cv_tag]
+            if value is None:
+                value = controller.sp_trajectory(self._t)
+                return controller.sp_trajectory.set_now(t = self._t, value = value)
+        else:
+            raise ValueError(
+                f"Specified cv_tag '{cv_tag}' to extend the trajectory for does not correspond"
+                f" to any defined controllers. Available controller cv_tags are {self.cv_tag_list}."
+            )
+        
+    @cached_property
+    def controller_dictionary(self) -> Dict[str, "Controller"]:
+        return {c.cv_tag: c for c in self.controllable_quantities.controllers}
 
     @cached_property
     def cv_tag_list(self) -> List[str]:
@@ -449,8 +462,8 @@ class FastSystem(System):
         constants_arr = np.array([self.system_constants[k] for k in self._constants_map])
         control_elements_arr = np.array([getattr(self.measurable_quantities.control_elements, k) for k in self._controls_map])
         static_params = (
-            constants_arr,
             control_elements_arr,
+            constants_arr, # order matters lol
         )
         result = solve_ivp(
             fun=self._rhs_wrapper, t_span=(0, dt), y0=y0, args=static_params, **self.solver_options

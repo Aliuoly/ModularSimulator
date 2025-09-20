@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 # --- Simulation Parameters ---
 # Use a high number of steps to get meaningful profile data
-N_STEPS = 30000  # A good number for profiling
+N_STEPS = 3000  # A good number for profiling
 DT = 60
 sp_segments = 10
 np.random.seed(0)

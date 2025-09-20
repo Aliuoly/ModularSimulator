@@ -2,13 +2,13 @@ import numpy as np
 import numba  # type: ignore
 from enum import Enum
 from typing import Any, ClassVar, Dict, List, Type
-
+from dataclasses import dataclass
 from pydantic import ConfigDict, Field, PrivateAttr
 
 from modular_simulation.control_system import Trajectory, Controller
 from modular_simulation.measurables import ControlElements, States, AlgebraicStates
 from modular_simulation.system import FastSystem, System
-from modular_simulation.usables import Calculation, Measurement
+from modular_simulation.usables import Calculation, TimeValueQualityTriplet
 from numpy.typing import NDArray
 
 
@@ -37,19 +37,19 @@ class VanDeVusseControlElements(ControlElements):
     """Externally actuated variables for the Van de Vusse reactor."""
     Tj_in: float = Field(description="Jacket inlet temperature [°C]")
 
-
+@dataclass
 class HeatDutyCalculation(Calculation):
     """Calculate the instantaneous heat duty transferred between jacket and reactor."""
 
     kw: float
     area: float
 
-    def calculate(self, usable_results: Dict[str, Measurement]) -> Measurement:
+    def calculate(self, usable_results: Dict[str, TimeValueQualityTriplet]) -> TimeValueQualityTriplet:
         jacket_measurement = usable_results["Tk"]
         reactor_measurement = usable_results["T"]
 
         heat_duty = self.kw * self.area * (jacket_measurement.value - reactor_measurement.value)
-        return Measurement(t=reactor_measurement.t, value=heat_duty)
+        return TimeValueQualityTriplet(t=reactor_measurement.t, value=heat_duty)
 
 
 class VanDeVusseAlgebraicStates(AlgebraicStates):
@@ -178,7 +178,6 @@ class VanDeVusseFastSystem(FastSystem):
         control_elements_arr: NDArray,
         constants_arr: NDArray,
     ) -> NDArray:
-        del t, algebraic_states_arr
 
         Ca, Cb, T, Tk = y
 

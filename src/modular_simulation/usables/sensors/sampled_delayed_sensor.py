@@ -1,5 +1,5 @@
 import numpy as np
-from modular_simulation.usables.sensors.sensor import Sensor, Measurement
+from modular_simulation.usables.sensors.sensor import Sensor, TimeValueQualityTriplet
 import collections
 from numpy.typing import NDArray
 from pydantic import Field, PrivateAttr
@@ -52,9 +52,9 @@ class SampledDelayedSensor(Sensor):
     
     _rng: np.random.Generator = PrivateAttr()
 
-    _last_measurement: Measurement | None = PrivateAttr()
+    _last_value: TimeValueQualityTriplet | None = PrivateAttr()
 
-    _sample_queue: collections.deque[Measurement] = PrivateAttr()
+    _sample_queue: collections.deque[TimeValueQualityTriplet] = PrivateAttr()
     _measurement_function: Callable[["MeasurableQuantities"], float | NDArray] | None = PrivateAttr(default=None)
 
     def __init__(
@@ -80,7 +80,7 @@ class SampledDelayedSensor(Sensor):
         self.random_seed = random_seed
 
         self._sample_queue = collections.deque()
-        self._last_measurement = None
+        self._last_value = None
         self._last_t_updated = -np.inf # force update first iteration
         
     def _should_update(self, t: float) -> bool:
@@ -88,7 +88,7 @@ class SampledDelayedSensor(Sensor):
         Sensor specific logic to determine if a new measurement should be processed and returned
         """
         new_sample_available = True # default to do update if no last measurement
-        if self._last_measurement is not None:
+        if self._last_value is not None:
             expected_available_t = self._last_t_updated + self.sampling_period
             new_sample_available = t >= expected_available_t
         
@@ -100,7 +100,7 @@ class SampledDelayedSensor(Sensor):
         such as time delays, filtering, etc.
         """
         # process value and append to queue
-        measurement = Measurement(t, raw_value)
+        measurement = TimeValueQualityTriplet(t, raw_value)
         self._sample_queue.append(measurement)
 
         # determine the timestamp of the measurement to be returned
@@ -117,7 +117,7 @@ class SampledDelayedSensor(Sensor):
         # reappend the sample just in case
         self._sample_queue.appendleft(return_sample)
 
-        self._last_measurement = return_sample
+        self._last_value = return_sample
 
         self._last_t_updated = t
         return return_sample.value

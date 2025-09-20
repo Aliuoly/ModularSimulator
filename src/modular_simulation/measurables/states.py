@@ -74,9 +74,9 @@ class States(BaseModel, ABC):
             array[member.value] = getattr(self, member.name)
         return array
     
-    @classmethod
-    def from_array(cls, array: NDArray) -> "States":
-        """Creates a Pydantic model instance from a flat NumPy array."""
-        kwargs = {member.name: array[member.value] for member in cls.StateMap} #type: ignore
-        return cls(**kwargs)
+    def update_from_array(self, array: NDArray) -> None:
+        """updates the class in place using the provided array."""
+        for member in self.StateMap: #type: ignore
+            setattr(self, member.name, array[member.value])
+    
 

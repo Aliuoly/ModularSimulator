@@ -1,32 +1,19 @@
-import numpy as np
-from numpy.typing import NDArray
-from typing import Dict, Union
-from modular_simulation.control_system import Controller
-from modular_simulation.quantities import UsableResults
-
-
-ControlOutputs = Dict[str, Union[NDArray[np.float64], float]]
-
-
+from typing import List, Dict
+from dataclasses import dataclass, field
+from modular_simulation.usables import TimeValueQualityTriplet
+from modular_simulation.control_system.controller import Controller
+@dataclass(slots = True)
 class ControllableQuantities:
     """Container for the controllers acting on the system's control elements."""
+    controllers: List[Controller]
 
-    def __init__(
-        self,
-        control_definitions: Dict[str, Controller],
-    ) -> None:
-        self.control_definitions = control_definitions
+    _control_outputs: Dict[str, TimeValueQualityTriplet] = field(init = False, default_factory = dict)
     
-    def update(
-            self, 
-            usable_results: "UsableResults",
-            t: float
-            ) -> ControlOutputs:
-        
-        # Validation occurs during system setup, so this method can focus solely
-        # on delegating to the controllers.
-        control_outputs: ControlOutputs = {}
-        for tag, controller in self.control_definitions.items():
-            control_outputs[tag] = controller.update(usable_results, t)
+    def update(self, t: float) -> Dict[str, TimeValueQualityTriplet]:
+        """updates the controllers available. Controllers are linked to the instance of ControlElement
+        internally, so the results are reflected in the simulation automatically without having
+        to return anything here. However, it is still returned for tracking purposes."""
+        for controller in self.controllers:
+            self._control_outputs[controller.mv_tag] = controller.update(t)
 
-        return control_outputs
+        return self._control_outputs

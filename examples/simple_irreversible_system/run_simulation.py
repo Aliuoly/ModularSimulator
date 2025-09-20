@@ -3,17 +3,25 @@ from system_definitions import (
     IrreversibleStates,
     IrreversibleControlElements,
     IrreversibleAlgebraicStates,
-    PIDController,
-    ConstantTrajectory,
-
     IrreversibleSystem,
     IrreversibleFastSystem
 )
 from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.system import create_system
-from typing import Dict, TYPE_CHECKING
+from modular_simulation.control_system import Trajectory, PIDController
+from typing import List, TYPE_CHECKING
+from numpy import inf
+import logging
+import matplotlib as mpl
+
 if TYPE_CHECKING:
     from modular_simulation.usables import Calculation
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(message)s"
+)
+mpl.set_loglevel("warning") # silence matplotlib debug messages
 
 # 1. Set up the initial conditions and system components.
 # =======================================================
@@ -31,35 +39,37 @@ initial_algebraic = IrreversibleAlgebraicStates(F_out=0.0)
 
 
 # Define which quantities can be measured by sensors.
-measurement_definitions={
-    'F_out': SampledDelayedSensor(
+sensors=[
+    SampledDelayedSensor(
         measurement_tag = "F_out",
     ),
-    'F_in': SampledDelayedSensor(
+    SampledDelayedSensor(
         measurement_tag = "F_in",
         coefficient_of_variance=0.05
     ),
-    'B': SampledDelayedSensor(
+    SampledDelayedSensor(
         measurement_tag = "B",
         coefficient_of_variance=0.05,
-        sampling_period = 900,
-        deadtime = 900,
+        sampling_period = 0,
+        deadtime = 0,
     ),
-    'V': SampledDelayedSensor(
+    SampledDelayedSensor(
         measurement_tag = "V",
     ),
-}
-calculation_definitions: Dict[str, "Calculation"] = {}
+]
+calculations: List["Calculation"] = []
 
 # Define the controllers that will manipulate the control elements.
-control_definitions={
-    'F_in': PIDController(
-        pv_tag="B",
-        sp_trajectory=ConstantTrajectory(0.5),
+controllers=[
+    PIDController(
+        cv_tag="B",
+        mv_tag = "F_in",
+        sp_trajectory=Trajectory(0.5),
         Kp=1.0e-1,
-        Ti=100.0
-    ),
-}
+        Ti=100.0,
+        mv_range = (0, 100.)
+    )
+]
 
 # Define the system's physical constants and solver params
 system_constants = {'k': 1e-3, 'Cv': 1e-1, 'CA_in': 1.0}
@@ -72,9 +82,9 @@ readable_system = create_system(
     initial_states = initial_states,
     initial_controls = initial_controls,
     initial_algebraic = initial_algebraic,
-    measurement_definitions = measurement_definitions,
-    calculation_definitions = calculation_definitions,
-    control_definitions = control_definitions,
+    sensors = sensors,
+    calculations = calculations,
+    controllers = controllers,
     system_constants = system_constants,
     solver_options = solver_options,
 )
@@ -84,16 +94,16 @@ fast_system = create_system(
     initial_states = initial_states,
     initial_controls = initial_controls,
     initial_algebraic = initial_algebraic,
-    measurement_definitions = measurement_definitions,
-    calculation_definitions = calculation_definitions,
-    control_definitions = control_definitions,
+    sensors = sensors,
+    calculations = calculations,
+    controllers = controllers,
     system_constants = system_constants,
     solver_options = solver_options,
 )
 
 # --- 3. Run the Simulation ---
 dt = 30
-systems = {"readable": readable_system, "fast": fast_system}
+systems = {'fast': fast_system,"readable": readable_system}
 if __name__ == "__main__":
     plt.figure(figsize=(12, 8))
     linestyles = ['-', '--']
@@ -105,9 +115,7 @@ if __name__ == "__main__":
 
         # --- Change the setpoint and continue the simulation ---
         # Access the controller via the controllable_quantities object.
-        pid_controller = system.controllable_quantities.control_definitions["F_in"]  #type: ignore
-        pid_controller.sp_trajectory.change(0.2)
-
+        system.extend_controller_trajectory(cv_tag = "B").hold(duration = inf, value = 0.2)
         for i in range(5000):
             system.step(dt)  #type: ignore
 
@@ -115,7 +123,7 @@ if __name__ == "__main__":
         # =====================
 
         # The simulation history is stored in the system's `_history` attribute.
-        history = system.measured_history  #type: ignore
+        history = system.history  #type: ignore
         t = history['time']
         # Plot Concentration of B
         plt.subplot(2, 2, 1)

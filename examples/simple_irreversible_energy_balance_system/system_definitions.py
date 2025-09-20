@@ -3,6 +3,7 @@ from pydantic import ConfigDict, Field
 from enum import Enum
 from typing import Dict, Any, Type, ClassVar, List
 import numba  # type: ignore
+from dataclasses import dataclass
 
 from modular_simulation.measurables import States, ControlElements, AlgebraicStates
 from modular_simulation.control_system import Trajectory, PIDController
@@ -27,9 +28,8 @@ class EnergyBalanceStateMap(Enum):
 class EnergyBalanceStates(States):
     """Pydantic model for the differential states of the system."""
 
-    model_config = ConfigDict(extra="forbid")
     StateMap: ClassVar = EnergyBalanceStateMap
-    V: float = Field()
+    V: float
     A: float
     B: float
     T: float
@@ -37,7 +37,7 @@ class EnergyBalanceStates(States):
 
 
 class EnergyBalanceControlElements(ControlElements):
-    """Pydantic model for the externally controlled variables."""
+    """dataclass for the externally controlled variables."""
 
     F_in: float  # Inlet flow rate
     F_J_in: float  # Jacket inlet flow rate
@@ -46,13 +46,11 @@ class EnergyBalanceControlElements(ControlElements):
 class EnergyBalanceAlgebraicStates(AlgebraicStates):
     """Pydantic model for algebraic states."""
 
-    model_config = ConfigDict(extra="forbid")
     F_out: float  # Outlet flow rate, an algebraic function of volume
 
 
 # 2. Define the System Dynamics
 # =============================
-
 
 class EnergyBalanceSystem(System):
     """Dynamic model of an irreversible reaction with an energy balance."""
@@ -173,7 +171,7 @@ class EnergyBalanceFastSystem(FastSystem):
         return ["F_in", "F_J_in"]
 
     @staticmethod
-    @numba.jit(nopython=True)
+    @numba.jit(nopython = True)
     def _calculate_algebraic_values_fast(
         y: NDArray,
         control_elements_arr: NDArray,
@@ -185,7 +183,7 @@ class EnergyBalanceFastSystem(FastSystem):
         return np.array([F_out])
 
     @staticmethod
-    @numba.jit(nopython=True)
+    @numba.jit(nopython = True)
     def rhs_fast(
         t: float,
         y: NDArray,
@@ -257,19 +255,3 @@ class EnergyBalanceFastSystem(FastSystem):
         )
 
         return dy
-
-
-class ConstantTrajectory(Trajectory):
-    """Provides a constant setpoint value over time."""
-
-    def __init__(self, value):
-        self.value = value
-
-    def __call__(self, t):
-        return self.value
-
-    def change(self, new_value):
-        """Allows for changing the setpoint during a simulation."""
-
-        self.value = new_value
-

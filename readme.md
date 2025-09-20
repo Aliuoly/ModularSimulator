@@ -10,7 +10,7 @@ Measurements and Calculations are collectively held in the UsableQuantities clas
  - `MeasurementDefinitions: Dict[str, Sensor]`. This is a dictionary that explicitly states what measurements are available and how they are obtained from the lower-level `MeasurableQuantities`.
 The way measurements are obtained is through the `measurement_function` field of the `Sensor`, which is a callable with signature `measurement_function(MeasurableQuantities) -> float | NDArray[np.float64]`. 
  The `Sensor` class itself may perform stateful calculations such as measurement delays, noise additions, error simulations.
- Measurement is a `callable` with signature `__call__(self, measurable_quantities: MeasurableQuantities) -> float | NDArray[np.float64]`. This will be exclusively simple functions since statefulness is inherently not needed for simple measurements 
+ TimeValueQualityTriplet is a `callable` with signature `__call__(self, measurable_quantities: MeasurableQuantities) -> float | NDArray[np.float64]`. This will be exclusively simple functions since statefulness is inherently not needed for simple measurements 
  - `CalculationDefinitions: Dict[str, Calculation]`. This is a dictionary that explicitly states what calculations are carried out. 
  Calculation is a `callable` with signature `__call__(self, usable_quantities: UsableQuantities) -> float | NDArray[np.float64]`. This is typically a `callable class` since many calculations require statefulness.
 measurements are defined via a single dictionary in the structure of {"measurement name":MeasurementFunction}

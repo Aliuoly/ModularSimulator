@@ -64,7 +64,7 @@ control_definitions = {
         sp_trajectory=ConstantTrajectory(80.0),
         Kp=2.0,
         Ti=0.5,
-        u_min=40.0,
+        u_min=10.0,
         u_max=120.0,
     )
 }

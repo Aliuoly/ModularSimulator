@@ -1,20 +1,13 @@
 """Utilities for validating system configurations before simulation."""
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Dict, Iterable
-
-if TYPE_CHECKING:  # pragma: no cover - only for type checking to avoid circular imports
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
     from modular_simulation.system import System
     from modular_simulation.quantities import (
         MeasurableQuantities,
         UsableQuantities,
         ControllableQuantities,
     )
-
-
-class ConfigurationError(Exception):
-    """Raised when the supplied system configuration is invalid."""
-
+import warnings 
 
 def validate_and_link(system: "System") -> None:
     """Validate the system configuration and link dependent components.
@@ -28,78 +21,94 @@ def validate_and_link(system: "System") -> None:
     usable = system.usable_quantities
     controllable = system.controllable_quantities
 
-    _ensure_control_elements_have_controllers(measurable, controllable)
-    _link_controllers_to_sensors(controllable, usable)
-    _initialize_usable_results(usable, measurable)
+    _check_duplicate_tags(usable, controllable)
 
+    _initialize_sensors_and_calculations(measurable, usable)
+    _initialize_controllers(measurable, usable, controllable)
+    _warn_uncontrolled_control_elements(measurable, controllable)
 
-def _ensure_control_elements_have_controllers(
-    measurable: "MeasurableQuantities",
-    controllable: "ControllableQuantities",
-) -> None:
-    control_element_tags = measurable.control_elements.__class__.model_fields.keys()
-    controller_tags = controllable.control_definitions.keys()
-    missing_tags = _find_missing_tags(control_element_tags, controller_tags)
-    if missing_tags:
-        joined = ", ".join(missing_tags)
-        raise ConfigurationError(
-            f"Control element tag(s) {joined} do not have corresponding controller definitions."
-            f" Available controller tags are: {', '.join(controller_tags)}"
-        )
+def _check_duplicate_tags(
+        usable: "UsableQuantities",
+        controllable: "ControllableQuantities"
+    ) -> None:
+    """checks if any duplicate sensors or controllers are defined.
+    
+    sensors are duplicate if they share the same measurament_tag 
+    calculations are duplicate if they share the same output_tag
+    controllers are duplicate if they share the same mv_tag (manipulated variable)
+    """
+    seen_measurement_tags = []
+    for sensor in usable.sensors:
+        tag = sensor.measurement_tag
+        if tag in seen_measurement_tags:
+            raise RuntimeError(
+                f"Duplicate measurement tag '{tag}' found. Make sure each sensor has a unique measurement_tag."
+            )
+        seen_measurement_tags += [tag]
 
+    seen_calculation_tags = []
+    for calculation in usable.calculations:
+        tag = calculation.output_tag
+        if tag in seen_measurement_tags:    
+            raise RuntimeError(
+                f"Duplicate calculation tag '{tag}' found - overlapped with an existing sensor's measurement_tag. "
+            )
+        if tag in seen_calculation_tags:
+            raise RuntimeError(
+                f"Duplicate calculation tag '{tag}' found - overlapped with another calculation's output_tag. "
+            )
+        seen_calculation_tags += [tag]
+    
+    seen_mv_tag = []
+    for controller in controllable.controllers:
+        tag = controller.mv_tag
+        if tag in seen_mv_tag:    
+            raise RuntimeError(
+                f"Duplicate controller '{controller.cv_tag}' found - mv '{tag}' in conflict with an another controller's manipulated variable. "
+            )
+        seen_mv_tag += [tag]
+        
 
-def _link_controllers_to_sensors(
-    controllable: "ControllableQuantities",
-    usable: "UsableQuantities",
-) -> None:
-    for controller_tag, controller in controllable.control_definitions.items():
-        pv_tag = controller.pv_tag
-        sensor = _get_sensor_for_tag(usable.measurement_definitions, pv_tag, controller_tag)
-        controller.link_pv_sensor(sensor)
+def _initialize_sensors_and_calculations(
+        measurable: "MeasurableQuantities", 
+        usable: "UsableQuantities"
+        ) -> None:
+    
+    for sensor in usable.sensors:
+        sensor._initialize(measurable)
 
+    for calculation in usable.calculations:
+        calculation._initialize(
+            usable.sensors,
+            usable.calculations
+            )
 
-def _get_sensor_for_tag(
-    sensors: Dict[str, object],
-    pv_tag: str,
-    controller_tag: str,
-):
-    try:
-        return sensors[pv_tag]
-    except KeyError as exc:  # pragma: no cover - trivial guard
-        raise ConfigurationError(
-            f"Controller '{controller_tag}' references pv_tag '{pv_tag}' which is not defined in the "
-            "measurement_definitions. Available pv tags for controllers are: "
-            f"{', '.join(sensors.keys())}"
-        ) from exc
+def _initialize_controllers(
+        measurable: "MeasurableQuantities", 
+        usable: "UsableQuantities", 
+        controllable:"ControllableQuantities"
+        ) -> None:
+    for controller in controllable.controllers:
+        controller._initialize(
+            usable_quantities = usable,
+            control_elements = measurable.control_elements
+            )
 
-
-def _initialize_usable_results(
-    usable: "UsableQuantities",
-    measurable: "MeasurableQuantities",
-) -> None:
-    usable._usable_results = {}  # type: ignore[attr-defined]
-    for tag, sensor in usable.measurement_definitions.items():
-        try:
-            usable._usable_results[tag] = sensor.measure(measurable, 0.0)  # type: ignore[attr-defined]
-        except Exception as exc:  # pragma: no cover - defensive error handling
-            raise ConfigurationError(
-                f"Error processing measurement '{tag}': {exc}. "
-                "Verify that all dependencies are correctly defined and ordered."
-                
-            ) from exc
-    for tag, calculation in usable.calculation_definitions.items():
-        try:
-            usable._usable_results[tag] = calculation.calculate(usable._usable_results)  # type: ignore[attr-defined]
-        except Exception as exc:  # pragma: no cover - defensive error handling
-            raise ConfigurationError(
-                f"Error processing calculation '{tag}': {exc}. "
-                "Verify that all dependencies are correctly defined and available."
-            ) from exc
-
-
-def _find_missing_tags(
-    required_tags: Iterable[str],
-    available_tags: Iterable[str],
-) -> list[str]:
-    available = set(available_tags)
-    return [tag for tag in required_tags if tag not in available]
+def _warn_uncontrolled_control_elements(
+        measurable: "MeasurableQuantities",
+        controllable: "ControllableQuantities"
+        ) -> None:
+    for ce_name in measurable.control_elements.__class__.model_fields:
+        found = False
+        for controller in controllable.controllers:
+            if controller.mv_tag == ce_name:
+                found = True
+        
+        if not found:
+            warnings.warn(
+                f"Control element {ce_name} is defined but not controlled; "
+                "as such, it will remain at the value initialized. "
+                "If this is not intended, ensure a controller with "
+                "cv_tag equal to the name of the control element is defined in controllable quantities. "
+                f"Currently defined controllers control {", ".join([controller.mv_tag for controller in controllable.controllers])}"
+            )

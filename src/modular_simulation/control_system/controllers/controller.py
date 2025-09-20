@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 import math
 from typing import Union, List, Callable, Tuple, TYPE_CHECKING
@@ -25,8 +27,8 @@ class Controller(BaseModel, ABC):
         description = "The tag of the UsableQuantities corresponding to the" \
                         "measured or calculated controlled variable (CV) for this controller"
     )
-    sp_trajectory: "Trajectory" = Field(
-        ..., 
+    sp_trajectory: "Trajectory | Controller" = Field(
+        ...,
         description="A Trajectory instance defining the setpoint (SP) over time.")
     mv_range: Tuple[float, float] = Field(
         ...,
@@ -112,12 +114,40 @@ class Controller(BaseModel, ABC):
         self._initialize_cv_getter(usable_quantities.sensors, usable_quantities.calculations)
         self._initialize_mv_setter(control_elements)
 
+    def __call__(self, t: float) -> TimeValueQualityTriplet:
+        """Evaluate the controller without applying its manipulated variable."""
+
+        original_setter = self._mv_setter
+        previous_value = self._last_value
+        self._mv_setter = (lambda value: None)
+        try:
+            result = self.update(t)
+        finally:
+            self._mv_setter = original_setter
+
+        if isinstance(result, TimeValueQualityTriplet) and not result.ok and previous_value is not None:
+            return TimeValueQualityTriplet(result.t, previous_value.value, ok=False)
+        return result
+
     def update(self, t: float) -> Union[float, NDArray[np.float64]]:
         # 1. get pv
         cv = self._get_cv_value()
         # 2. get sp
         raw_sp = self.sp_trajectory(t)
-        sp = self._apply_setpoint_ramp(raw_sp, t)
+        sp_ok = True
+        if isinstance(raw_sp, TimeValueQualityTriplet):
+            sp_ok = raw_sp.ok
+            sp_candidate = raw_sp.value
+        else:
+            sp_candidate = raw_sp
+
+        if isinstance(sp_candidate, np.ndarray):
+            sp = sp_candidate
+        else:
+            target = float(sp_candidate)
+            if not sp_ok and self._last_sp_command is not None:
+                target = self._last_sp_command
+            sp = self._apply_setpoint_ramp(target, t)
         # 3. compute control output
         control_output = self._control_algorithm(cv, sp, t)
 
@@ -136,19 +166,29 @@ class Controller(BaseModel, ABC):
                 )
         return self._last_value
 
+    def active_sp_trajectory(self) -> Trajectory:
+        """Return the innermost :class:`Trajectory` driving this controller."""
+
+        trajectory = self.sp_trajectory
+        if isinstance(trajectory, Trajectory):
+            return trajectory
+        if isinstance(trajectory, Controller):
+            return trajectory.active_sp_trajectory()
+        raise TypeError("Unsupported setpoint provider for controller.")
+
     def update_trajectory(
             self,
             t: float,
             value: float
             ) -> None:
-        self.sp_trajectory.set_now(t, value)
+        self.active_sp_trajectory().set_now(t, value)
 
     def track_cv(
             self,
             t: float
             ) -> None:
         pv = self._get_cv_value()
-        self.sp_trajectory.set_now(t, pv.value)
+        self.active_sp_trajectory().set_now(t, pv.value)
         self._last_sp_command = float(pv.value)
         self._last_sp_time = t
 

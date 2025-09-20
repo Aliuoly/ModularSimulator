@@ -123,8 +123,15 @@ class Trajectory:
     # fast-path caches
     _breaks: List[float] = field(default_factory=list, init=False, repr=False)
     _cursor: int = field(default=0, init=False, repr=False)
-    _last_value: float|None = field(default=None, init=False, repr=False)
+    _last_value: float | None = field(default=None, init=False, repr=False)
     _start_vals: List[float] = field(default_factory=list, init=False, repr=False)  # y at each segment start (O(1) eval)
+
+    # historization and bookkeeping for fast set_now
+    _history_times: List[float] = field(default_factory=list, init=False, repr=False)
+    _history_values: List[Number] = field(default_factory=list, init=False, repr=False)
+    _last_set_time: float | None = field(default=None, init=False, repr=False)
+    _last_set_value: Number | None = field(default=None, init=False, repr=False)
+    _max_retained_segments: int = field(default=1, init=False, repr=False)
 
     # --------------------------
     # Builder / mutators (chainable)
@@ -134,7 +141,62 @@ class Trajectory:
         out = Trajectory(self.y0, self.t0, list(self.segments))
         out._breaks = list(self._breaks)
         out._start_vals = list(self._start_vals)
+        out._history_times = list(self._history_times)
+        out._history_values = list(self._history_values)
+        out._last_set_time = self._last_set_time
+        out._last_set_value = self._last_set_value
         return out
+
+    # --------------------------
+    # Historization helpers
+    # --------------------------
+
+    def _record_history_entry(self, t: float, value: Number) -> None:
+        """Append or update a historized setpoint sample at time ``t``."""
+        if self._history_times:
+            if t < self._history_times[-1] - 1e-12:
+                # keep history sorted even if times go slightly backwards
+                idx = bisect.bisect_left(self._history_times, t)
+                self._history_times.insert(idx, t)
+                self._history_values.insert(idx, value)
+                return
+            if abs(t - self._history_times[-1]) <= 1e-12:
+                self._history_values[-1] = value
+                return
+        self._history_times.append(t)
+        self._history_values.append(value)
+
+    def _history_value_at(self, t: float) -> Number:
+        if not self._history_times:
+            return self.y0
+        idx = bisect.bisect_right(self._history_times, t) - 1
+        if idx < 0:
+            return self.y0
+        return self._history_values[idx]
+
+    def history(self) -> dict[str, np.ndarray]:
+        """Return historized setpoint samples as numpy arrays."""
+        return {
+            "time": np.asarray(self._history_times, dtype=float),
+            "value": np.asarray(self._history_values, dtype=float),
+        }
+
+    def last_setpoint(self) -> Number:
+        if self._last_set_value is not None:
+            return self._last_set_value
+        if self._history_values:
+            return self._history_values[-1]
+        if self.segments:
+            idx = len(self.segments) - 1
+            seg = self.segments[idx]
+            return seg.eval(seg.t0, self._start_vals[idx])
+        return self.y0
+
+    def current_value(self, t: float) -> float:
+        if self._last_set_time is not None and t >= self._last_set_time - 1e-12:
+            if self._last_set_value is not None:
+                return float(self._last_set_value)
+        return float(self.eval(t))
 
     def _can_append_at_end(self, t: float) -> bool:
         end_t = self._end_time()
@@ -175,11 +237,29 @@ class Trajectory:
         """Hard-set SP from time t onward. This is O(1): we append a Hold at t.
         Requires t >= current end time to keep evaluation O(1).
         falls back to trim_future O(n)"""
-        if self._can_append_at_end(t):
-            self._append(Hold(t, float('inf'), value))
-        else:
+        if not self._can_append_at_end(t):
             self.trim_future(t)
-            self._append(Hold(t, float('inf'), value))
+
+        if self.segments:
+            last_seg = self.segments[-1]
+            prev_start = last_seg.t0
+            prev_value = last_seg.eval(min(t, last_seg.t1()), self._start_vals[-1])
+        else:
+            prev_start = self.t0
+            prev_value = self.y0
+
+        self._record_history_entry(prev_start, prev_value)
+
+        if len(self.segments) > self._max_retained_segments:
+            drop = len(self.segments) - self._max_retained_segments
+            del self.segments[:drop]
+            del self._start_vals[:drop]
+            self._rebuild_breaks()
+
+        self._append(Hold(t, float('inf'), value), start_value=prev_value)
+        self._record_history_entry(t, value)
+        self._last_set_time = t
+        self._last_set_value = value
         return self
     
 
@@ -225,6 +305,11 @@ class Trajectory:
                 y = seg.eval(t, self._start_vals[self._cursor])
                 self._last_value = y
                 return y
+        if self._breaks and t < self._breaks[0]:
+            y_hist = float(self._history_value_at(t))
+            self._last_value = y_hist
+            self._cursor = 0
+            return y_hist
         # general path: binary search
         idx = bisect.bisect_right(self._breaks, t) - 1
         idx = max(0, min(idx, len(self.segments)-1))
@@ -247,19 +332,28 @@ class Trajectory:
         t = math.nextafter(self.segments[-1].t1(), -math.inf)
         return self.segments[idx].eval(t, self._start_vals[idx])
 
-    def _append(self, seg: Segment) -> None:
+    def _append(self, seg: Segment, *, start_value: Optional[float] = None) -> None:
         # append must be at the current end time to keep cached starts valid
         if not self._can_append_at_end(seg.t0):
             self.trim_future(seg.t0)
         # compute start value using previous tail
-        if self.segments:
-            prev_idx = len(self.segments) - 1
-            y_prev_end = self.segments[prev_idx].eval(self.segments[prev_idx].t1(), self._start_vals[prev_idx])
+        if start_value is None:
+            if self.segments:
+                prev_idx = len(self.segments) - 1
+                y_prev_end = self.segments[prev_idx].eval(self.segments[prev_idx].t1(), self._start_vals[prev_idx])
+            else:
+                y_prev_end = self.y0
         else:
-            y_prev_end = self.y0
+            y_prev_end = start_value
         self.segments.append(seg)
         self._start_vals.append(y_prev_end)
-        self._breaks = [s.t0 for s in self.segments] + [self.segments[-1].t1()]
+        if self._breaks:
+            if seg.t0 < self._breaks[-1] - 1e-12:
+                self._rebuild_breaks()
+            else:
+                self._breaks.append(seg.t1())
+        else:
+            self._breaks = [seg.t0, seg.t1()]
         self._cursor = len(self.segments) - 1
         self._last_value = None
 

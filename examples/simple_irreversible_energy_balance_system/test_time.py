@@ -1,3 +1,7 @@
+import pytest
+
+pytest.importorskip("matplotlib")
+
 from run_simulation import fast_system
 import cProfile
 import pstats

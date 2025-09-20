@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import math
 from typing import Union, List, Callable, Tuple, TYPE_CHECKING
 from numpy.typing import NDArray
 import numpy as np
@@ -29,11 +30,21 @@ class Controller(BaseModel, ABC):
         ...,
         description = "Lower and upper bound of the manipulated variable, in that order."
     )
+    ramp_rate: float | None = Field(
+        default=None,
+        description=(
+            "Optional rate limit for the controller setpoint in units per second. "
+            "When provided, the requested setpoint from the trajectory will be ramped "
+            "towards the target at no more than this rate during each update."
+        ),
+    )
     _cv_getter: Callable[[], TimeValueQualityTriplet] | None = PrivateAttr(default=None)
     _mv_setter: Callable[[float|NDArray], None] | None = PrivateAttr(default = None)
     _usables: Union["UsableQuantities", None] = PrivateAttr(default = None)
     _last_value: TimeValueQualityTriplet | None = PrivateAttr(default = None)
     _u0: float | NDArray = PrivateAttr(default = 0.)
+    _last_sp_command: float | None = PrivateAttr(default=None)
+    _last_sp_time: float | None = PrivateAttr(default=None)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
     
     def _initialize(
@@ -93,7 +104,8 @@ class Controller(BaseModel, ABC):
         # 1. get pv
         cv = self._get_cv_value()
         # 2. get sp
-        sp = self.sp_trajectory(t)
+        raw_sp = self.sp_trajectory(t)
+        sp = self._apply_setpoint_ramp(raw_sp, t)
         # 3. compute control output
         control_output = self._control_algorithm(cv, sp, t)
 
@@ -111,19 +123,60 @@ class Controller(BaseModel, ABC):
                 "Make sure system was initialized with the create_system function."
                 )
         return self._last_value
-    
+
     def update_trajectory(
             self,
             t: float,
             value: float
             ) -> None:
         self.sp_trajectory.set_now(t, value)
-    
+
     def track_cv(
             self,
             t: float
             ) -> None:
-        self.sp_trajectory.set_now(t, self._get_cv_value().value)
+        pv = self._get_cv_value()
+        self.sp_trajectory.set_now(t, pv.value)
+        self._last_sp_command = float(pv.value)
+        self._last_sp_time = t
+
+    def track_pv(
+            self,
+            t: float
+            ) -> None:
+        """Alias for :meth:`track_cv` retained for backward compatibility."""
+        self.track_cv(t)
+
+    def _apply_setpoint_ramp(self, target: float, t: float) -> float:
+        """Return the ramp-limited setpoint value for time ``t``."""
+        rate = self.ramp_rate
+        if rate is None or rate <= 0.0:
+            self._last_sp_command = float(target)
+            self._last_sp_time = t
+            return float(target)
+
+        last_value = self._last_sp_command
+        last_time = self._last_sp_time
+
+        if last_value is None or last_time is None:
+            self._last_sp_command = float(target)
+            self._last_sp_time = t
+            return float(target)
+
+        dt = t - last_time
+        if dt <= 0.0:
+            return last_value
+
+        max_delta = rate * dt
+        delta = float(target) - last_value
+        if abs(delta) <= max_delta:
+            new_value = float(target)
+        else:
+            new_value = last_value + math.copysign(max_delta, delta)
+
+        self._last_sp_command = new_value
+        self._last_sp_time = t
+        return new_value
 
     @abstractmethod
     def _control_algorithm(

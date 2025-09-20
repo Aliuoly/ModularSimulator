@@ -159,6 +159,11 @@ class Controller(BaseModel, ABC):
         """Alias for :meth:`track_cv` retained for backward compatibility."""
         self.track_cv(t)
 
+    def active_sp_trajectory(self) -> Trajectory:
+        """Return the trajectory currently providing setpoints for the controller."""
+
+        return self.sp_trajectory
+
     def _apply_setpoint_ramp(self, target: float, t: float) -> float:
         """Return the ramp-limited setpoint value for time ``t``."""
         rate = self.ramp_rate

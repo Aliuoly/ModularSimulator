@@ -8,6 +8,12 @@ from enum import Enum
 from pydantic import ConfigDict, Field
 from typing import ClassVar, Type
 
+from modular_simulation.control_system.controllers.cascade_controller import (
+    CascadeController,
+    ControllerMode,
+)
+from modular_simulation.control_system.controllers.controller import Controller
+from modular_simulation.control_system.trajectory import Trajectory
 from modular_simulation.measurables import ControlElements, States
 from modular_simulation.quantities import ControllableQuantities, MeasurableQuantities, UsableQuantities
 from modular_simulation.system import System
@@ -49,6 +55,15 @@ class DummySensor(Sensor):
 class TimeEchoCalculation(Calculation):
     def _calculation_algorithm(self, t, inputs_dict):  # type: ignore[override]
         return TimeValueQualityTriplet(t=t, value=t, ok=True)
+
+
+class SimpleController(Controller):
+    def _control_algorithm(self, cv_value, sp_value, t):  # type: ignore[override]
+        if isinstance(sp_value, TimeValueQualityTriplet):
+            target = float(sp_value.value)
+        else:
+            target = float(sp_value)
+        return TimeValueQualityTriplet(t=t, value=target, ok=True)
 
 
 def test_system_history_flags_disable_recording():
@@ -110,3 +125,70 @@ def test_system_measured_history_includes_calculations():
     assert np.array_equal(history["X"], history["_sensors"]["X"]["value"])
     assert np.array_equal(history["calc"], history["_calculations"]["calc"]["value"])
     assert np.array_equal(history["time"], history["_sensors"]["X"]["time"])
+
+
+class CascadeStateMap(Enum):
+    inner_cv = 0
+    bridge_cv = 1
+    outer_cv = 2
+
+
+class CascadeStates(States):
+    model_config = ConfigDict(extra="forbid")
+    StateMap: ClassVar[Type[Enum]] = CascadeStateMap
+    inner_cv: float = Field(0.0)
+    bridge_cv: float = Field(0.0)
+    outer_cv: float = Field(0.0)
+
+
+class CascadeControlElements(ControlElements):
+    inner_mv: float = 0.0
+    bridge_mv: float = 0.0
+    outer_mv: float = 0.0
+
+
+def _make_simple_controller(mv_tag: str, cv_tag: str) -> SimpleController:
+    return SimpleController(
+        mv_tag=mv_tag,
+        cv_tag=cv_tag,
+        sp_trajectory=Trajectory(y0=0.0, t0=0.0),
+        mv_range=(-10.0, 10.0),
+    )
+
+
+def test_extend_controller_trajectory_targets_active_cascade_loop():
+    sensors = [
+        DummySensor(measurement_tag="inner_cv"),
+        DummySensor(measurement_tag="bridge_cv"),
+        DummySensor(measurement_tag="outer_cv"),
+    ]
+
+    inner = _make_simple_controller(mv_tag="inner_mv", cv_tag="inner_cv")
+    bridge = _make_simple_controller(mv_tag="bridge_mv", cv_tag="bridge_cv")
+    outer = _make_simple_controller(mv_tag="outer_mv", cv_tag="outer_cv")
+
+    outer_cascade = CascadeController(inner_loop=bridge, outer_loop=outer)
+    cascade = CascadeController(inner_loop=inner, outer_loop=outer_cascade)
+
+    measurables = MeasurableQuantities(
+        states=CascadeStates(),
+        control_elements=CascadeControlElements(),
+    )
+    usables = UsableQuantities(sensors=sensors, calculations=[])
+    controllables = ControllableQuantities(controllers=[cascade])
+
+    system = DummySystem(
+        measurable_quantities=measurables,
+        usable_quantities=usables,
+        controllable_quantities=controllables,
+        system_constants={},
+        solver_options={},
+    )
+
+    assert cascade.active_sp_trajectory() is outer.sp_trajectory
+    system.extend_controller_trajectory(cv_tag=cascade.cv_tag, value=1.5)
+    assert outer.sp_trajectory.current_value(system._t) == pytest.approx(1.5)
+
+    cascade.mode = ControllerMode.auto
+    system.extend_controller_trajectory(cv_tag=cascade.cv_tag, value=0.5)
+    assert inner.sp_trajectory.current_value(system._t) == pytest.approx(0.5)

@@ -52,6 +52,8 @@ sensors=[
     ),
     SampledDelayedSensor(
         measurement_tag = "V",
+        faulty_probability = 0.01,
+        faulty_aware = True
     ),
 ]
 calculations: List["Calculation"] = []

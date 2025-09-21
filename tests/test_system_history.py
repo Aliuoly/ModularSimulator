@@ -81,11 +81,10 @@ def test_system_history_flags_disable_recording():
         system_constants={},
         solver_options={},
         record_history=False,
-        record_measured_history=False,
     )
 
     assert system.history == {}
-    assert system.measured_history == {}
+    assert system.measured_history != {}
 
 
 def test_system_measured_history_includes_calculations():
@@ -118,13 +117,11 @@ def test_system_measured_history_includes_calculations():
 
     history = system.measured_history
 
-    assert history["X"].tolist() == [0.0, 1.0, 2.0]
-    assert history["calc"].tolist() == [0.0, 0.0, 1.0]
-    assert history["calc_ok"].tolist() == [True, True, True]
-    assert "_sensors" in history and "_calculations" in history
-    assert np.array_equal(history["X"], history["_sensors"]["X"]["value"])
-    assert np.array_equal(history["calc"], history["_calculations"]["calc"]["value"])
-    assert np.array_equal(history["time"], history["_sensors"]["X"]["time"])
+    
+    assert "sensors" in history and "calculations" in history
+    assert [x.value for x in history['sensors']["X"]] == [0.0, 1.0, 2.0]
+    assert [calc.value for calc in history['calculations']["calc"]] == [0.0, 0.0, 1.0]
+    assert [calc.ok for calc in history['calculations']["calc"]] == [True, True, True]
 
 
 class CascadeStateMap(Enum):

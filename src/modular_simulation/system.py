@@ -61,7 +61,6 @@ class System(ABC):
             solver_options: Dict[str, Any],
             *,
             record_history: bool = True,
-            record_measured_history: bool = True,
             ):
         """
         Initializes the System object.
@@ -73,7 +72,6 @@ class System(ABC):
             system_constants: A dictionary containing fixed parameters for the simulation.
             solver_options: A dictionary of keyword arguments to be passed to `solve_ivp`.
             record_history: If ``False``, disable recording of state history snapshots.
-            record_measured_history: If ``False``, disable recording of measurement history snapshots.
         """
         self.measurable_quantities = measurable_quantities
         self.usable_quantities = usable_quantities
@@ -82,15 +80,8 @@ class System(ABC):
         self.system_constants = system_constants
         self.solver_options = solver_options
         self._record_history = record_history
-        self._record_measured_history = record_measured_history
 
         validate_and_link(self)
-
-        if not self._record_measured_history:
-            for sensor in self.usable_quantities.sensors:
-                sensor.set_history_enabled(False)
-            for calculation in self.usable_quantities.calculations:
-                calculation.set_history_enabled(False)
 
         self._t = 0.
         self._buffer_size = 10_000
@@ -336,59 +327,19 @@ class System(ABC):
     @property
     def measured_history(self) -> Dict[str, Any]:
         """Returns historized measurements and calculations."""
-        if not self._record_measured_history:
-            return {}
 
-        sensors_detail: Dict[str, Dict[str, NDArray]] = {}
-        calculations_detail: Dict[str, Dict[str, NDArray]] = {}
+        sensors_detail: Dict[str, List[TimeValueQualityTriplet]] = {}
+        calculations_detail: Dict[str, List[TimeValueQualityTriplet]] = {}
         history: Dict[str, Any] = {
-            "_sensors": sensors_detail,
-            "_calculations": calculations_detail,
+            "sensors": sensors_detail,
+            "calculations": calculations_detail,
         }
 
-        time_axis: NDArray | None = None
-
-        def consider_time(candidate: NDArray) -> None:
-            nonlocal time_axis
-            if candidate.size == 0:
-                return
-            if time_axis is None or candidate.shape[0] > time_axis.shape[0]:
-                time_axis = candidate
-
         for sensor in self.usable_quantities.sensors:
-            sensor_history = sensor.measurement_history()
-            times = sensor_history["time"].copy()
-            values = sensor_history["value"].copy()
-            ok = sensor_history["ok"].copy()
-
-            sensors_detail[sensor.measurement_tag] = {
-                "time": times,
-                "value": values,
-                "ok": ok,
-            }
-            history[sensor.measurement_tag] = values
-            history[f"{sensor.measurement_tag}_ok"] = ok
-            consider_time(times)
+            sensors_detail[sensor.measurement_tag] = sensor.measurement_history()
 
         for calculation in self.usable_quantities.calculations:
-            calculation_history = calculation.history()
-            times = calculation_history["time"].copy()
-            values = calculation_history["value"].copy()
-            ok = calculation_history["ok"].copy()
-
-            calculations_detail[calculation.output_tag] = {
-                "time": times,
-                "value": values,
-                "ok": ok,
-            }
-            history[calculation.output_tag] = values
-            history[f"{calculation.output_tag}_ok"] = ok
-            consider_time(times)
-
-        if time_axis is None:
-            history["time"] = np.asarray([], dtype=float)
-        else:
-            history["time"] = time_axis.copy()
+            calculations_detail[calculation.output_tag] = calculation.history()
 
         return history
 
@@ -532,16 +483,15 @@ def create_system(
         solver_options: Dict[str, Any],
         *,
         record_history: bool = True,
-        record_measured_history: bool = True,
         ) -> System:
     """
     Factory to build a complete, internally consistent simulation system.
     Creates copies of the objects passed in so as to ensure no cross-contamination
     between multiple systems created with the same inputs.
 
-    The optional ``record_history`` and ``record_measured_history`` flags allow
-    callers to disable internal historization to save memory when full logs are
-    unnecessary.
+    The optional ``record_history`` flags allow
+    callers to disable internal historization of states to save memory when full logs are
+    unnecessary. Measurements are still historized regardless.
     """
     # 1. Create the components for this specific system instance
     copied_states = deepcopy(initial_states)
@@ -585,7 +535,6 @@ def create_system(
         system_constants=copied_constants,
         solver_options=solver_options,
         record_history=record_history,
-        record_measured_history=record_measured_history,
     )
     
     return system

@@ -250,38 +250,33 @@ name = "modular-simulation"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "matplotlib" },
     { name = "numba" },
     { name = "pydantic" },
     { name = "scipy" },
     { name = "tqdm" },
 ]
 
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-]
-viz = [
-    { name = "matplotlib" },
-]
-
 [package.dev-dependencies]
 dev = [
+    { name = "pytest" },
     { name = "ruff" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10.6" },
+    { name = "matplotlib", specifier = ">=3.10.6" },
     { name = "numba", specifier = "==0.61.2" },
     { name = "pydantic", specifier = "==2.11.7" },
-    { name = "pytest", marker = "extra == 'dev'" },
     { name = "scipy", specifier = "==1.16.2" },
     { name = "tqdm", specifier = "==4.67.1" },
 ]
-provides-extras = ["dev", "viz"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.13.1" }]
+dev = [
+    { name = "pytest" },
+    { name = "ruff", specifier = ">=0.13.1" },
+]
 
 [[package]]
 name = "numba"

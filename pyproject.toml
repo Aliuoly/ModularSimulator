@@ -31,17 +31,10 @@ dependencies = [
   "scipy==1.16.2",
   "tqdm==4.67.1",
   "pydantic==2.11.7",
-]
-
-[project.optional-dependencies]
-dev = [
-  "pytest",
-]
-viz = [
   "matplotlib>=3.10.6",
 ]
-
 [dependency-groups]
 dev = [
     "ruff>=0.13.1",
+    "pytest",
 ]

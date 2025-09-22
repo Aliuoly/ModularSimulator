@@ -67,9 +67,9 @@ class IrreversibleSystem(System):
         volume = max(1e-6, y[y_map.V.value]) #type: ignore
         
         # F_out = Cv * sqrt(V)
-        F_out = k[k_map.Cv.value]* (volume**0.5) #type: ignore
-        
-        return F_out
+        F_out = k[k_map.Cv.value] * (volume**0.5)  # type: ignore
+
+        return np.asarray([F_out], dtype=np.float64)
 
     @staticmethod
     def rhs(
@@ -162,9 +162,9 @@ class IrreversibleFastSystem(FastSystem):
     def rhs_fast(
         t: float,
         y: NDArray,
-        constants_arr: NDArray,
-        control_elements_arr: NDArray,
         algebraic_states_arr: NDArray,
+        control_elements_arr: NDArray,
+        constants_arr: NDArray,
     ) -> NDArray:
         """
         Calculates derivatives using only NumPy arrays. This method is JIT-compiled.

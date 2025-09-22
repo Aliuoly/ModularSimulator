@@ -428,23 +428,26 @@ class FastSystem(System):
         NumPy arrays before calling the user-defined `rhs_fast` function.
         """
         algebraic_states_arr = self.__class__._calculate_algebraic_values_fast(
-            y=y, 
-            control_elements_arr = control_elements_arr, 
-            constants_arr = constants_arr
+            y,
+            control_elements_arr,
+            constants_arr,
         )
         return self.__class__.rhs_fast(
-            t = t, 
-            y = y, 
-            algebraic_states_arr = algebraic_states_arr, 
-            control_elements_arr = control_elements_arr, 
-            constants_arr = constants_arr
-            )
+            t,
+            y,
+            algebraic_states_arr,
+            control_elements_arr,
+            constants_arr,
+        )
 
     def _step(self, dt: float, y0: NDArray) -> NDArray:
         """Overrides the base `_step` to handle the performant path's data conversion."""
 
-        constants_arr = np.array([self.system_constants[k] for k in self._constants_map])
-        control_elements_arr = np.array([getattr(self.measurable_quantities.control_elements, k) for k in self._controls_map])
+        constants_arr = np.asarray([self.system_constants[k] for k in self._constants_map], dtype=np.float64)
+        control_elements_arr = np.asarray(
+            [getattr(self.measurable_quantities.control_elements, k) for k in self._controls_map],
+            dtype=np.float64,
+        )
         static_params = (
             control_elements_arr,
             constants_arr, # order matters lol
@@ -456,17 +459,17 @@ class FastSystem(System):
         final_y = result.y[:, -1]
 
         if self.measurable_quantities.algebraic_states:
-            constants_arr = np.array([self.system_constants[k] for k in self._constants_map])
-            controls_arr = np.array([getattr(self.measurable_quantities.control_elements, k) for k in self._controls_map])
-            final_alg_arr = self.__class__._calculate_algebraic_values_fast(
-                y = final_y, 
-                control_elements_arr = controls_arr, 
-                constants_arr = constants_arr
+            constants_arr = np.asarray([self.system_constants[k] for k in self._constants_map], dtype=np.float64)
+            controls_arr = np.asarray(
+                [getattr(self.measurable_quantities.control_elements, k) for k in self._controls_map],
+                dtype=np.float64,
             )
-            # Convert the final array result back into a dictionary for Pydantic model creation.
-            final_algebraic_values = dict(zip(self.measurable_quantities.algebraic_states.__class__.model_fields.keys(), final_alg_arr))
-            self.measurable_quantities.algebraic_states = \
-                self.measurable_quantities.algebraic_states.__class__(**final_algebraic_values)
+            final_alg_arr = self.__class__._calculate_algebraic_values_fast(
+                final_y,
+                controls_arr,
+                constants_arr,
+            )
+            self.measurable_quantities.algebraic_states.update_from_array(final_alg_arr)
         return final_y
 
 

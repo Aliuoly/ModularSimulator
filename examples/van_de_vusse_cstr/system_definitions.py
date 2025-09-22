@@ -1,15 +1,16 @@
-import numpy as np
-import numba  # type: ignore
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, ClassVar, Dict, List, Type
-from dataclasses import dataclass
+
+import numba  # type: ignore
+import numpy as np
+from numpy.typing import NDArray
 from pydantic import ConfigDict, Field, PrivateAttr
 
-from modular_simulation.control_system import Trajectory, Controller
-from modular_simulation.measurables import ControlElements, States, AlgebraicStates
+from modular_simulation.control_system import Controller, Trajectory
+from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
 from modular_simulation.system import FastSystem, System
 from modular_simulation.usables import Calculation, TimeValueQualityTriplet
-from numpy.typing import NDArray
 
 
 class VanDeVusseStateMap(Enum):
@@ -35,21 +36,8 @@ class VanDeVusseStates(States):
 
 class VanDeVusseControlElements(ControlElements):
     """Externally actuated variables for the Van de Vusse reactor."""
+
     Tj_in: float = Field(description="Jacket inlet temperature [°C]")
-
-@dataclass
-class HeatDutyCalculation(Calculation):
-    """Calculate the instantaneous heat duty transferred between jacket and reactor."""
-
-    kw: float
-    area: float
-
-    def calculate(self, usable_results: Dict[str, TimeValueQualityTriplet]) -> TimeValueQualityTriplet:
-        jacket_measurement = usable_results["Tk"]
-        reactor_measurement = usable_results["T"]
-
-        heat_duty = self.kw * self.area * (jacket_measurement.value - reactor_measurement.value)
-        return TimeValueQualityTriplet(t=reactor_measurement.t, value=heat_duty)
 
 
 class VanDeVusseAlgebraicStates(AlgebraicStates):
@@ -58,52 +46,96 @@ class VanDeVusseAlgebraicStates(AlgebraicStates):
     model_config = ConfigDict(extra="forbid")
 
 
+class VanDeVusseConstants(Constants):
+    """Physical constants for the Van de Vusse model."""
+
+    F: float
+    Ca0: float
+    T0: float
+    k10: float
+    E1: float
+    dHr1: float
+    rho: float
+    Cp: float
+    kw: float
+    AR: float
+    VR: float
+    mK: float
+    CpK: float
+    Fj: float
+
+
+class HeatDutyCalculation(Calculation):
+    """Calculate the instantaneous heat duty transferred between jacket and reactor."""
+
+    kw: float = Field(...)
+    area: float = Field(...)
+
+    def _calculation_algorithm(
+        self,
+        t: float,
+        inputs_dict: Dict[str, TimeValueQualityTriplet | float | NDArray],
+    ) -> TimeValueQualityTriplet:
+        jacket_measurement = inputs_dict["Tk"]
+        reactor_measurement = inputs_dict["T"]
+        assert isinstance(jacket_measurement, TimeValueQualityTriplet)
+        assert isinstance(reactor_measurement, TimeValueQualityTriplet)
+
+        heat_duty = self.kw * self.area * (jacket_measurement.value - reactor_measurement.value)
+        ok = jacket_measurement.ok and reactor_measurement.ok
+        return TimeValueQualityTriplet(t=t, value=heat_duty, ok=ok)
+
+
 class VanDeVusseSystem(System):
     """Readable implementation of the Van de Vusse reactor model."""
 
     @staticmethod
     def _calculate_algebraic_values(
         y: NDArray,
-        StateMap: Type[Enum],
-        control_elements: ControlElements,
-        system_constants: Dict,
-    ) -> Dict[str, Any]:
-        """No algebraic states are computed for this system."""
-
-        return {}
+        y_map: Type[Enum],
+        u: NDArray,
+        u_map: Type[Enum],
+        k: NDArray,
+        k_map: Type[Enum],
+    ) -> NDArray:
+        del y, y_map, u, u_map, k, k_map
+        return np.zeros(0, dtype=np.float64)
 
     @staticmethod
     def rhs(
         t: float,
         y: NDArray,
-        StateMap: Type[Enum],
-        algebraic_values_dict: Dict[str, Any],
-        control_elements: ControlElements,
-        system_constants: Dict,
+        y_map: Type[Enum],
+        u: NDArray,
+        u_map: Type[Enum],
+        k: NDArray,
+        k_map: Type[Enum],
+        algebraic: NDArray,
+        algebraic_map: Type[Enum],
     ) -> NDArray:
-        del algebraic_values_dict  # Unused, but part of the interface.
+        del t, algebraic, algebraic_map
 
-        Ca = y[StateMap.Ca.value]  # type: ignore[index]
-        Cb = y[StateMap.Cb.value]  # type: ignore[index]
-        T = y[StateMap.T.value]  # type: ignore[index]
-        Tk = y[StateMap.Tk.value]  # type: ignore[index]
+        Ca = float(y[y_map.Ca.value])  # type: ignore[arg-type]
+        Cb = float(y[y_map.Cb.value])  # type: ignore[arg-type]
+        T = float(y[y_map.T.value])  # type: ignore[arg-type]
+        Tk = float(y[y_map.Tk.value])  # type: ignore[arg-type]
 
-        F = system_constants["F"]
-        Ca0 = system_constants["Ca0"]
-        T0 = system_constants["T0"]
-        k10 = system_constants["k10"]
-        E1 = system_constants["E1"]
-        dHr1 = system_constants["dHr1"]
-        rho = system_constants["rho"]
-        Cp = system_constants["Cp"]
-        kw = system_constants["kw"]
-        AR = system_constants["AR"]
-        VR = system_constants["VR"]
-        mK = system_constants["mK"]
-        CpK = system_constants["CpK"]
-        Fj = system_constants["Fj"]
+        F = float(k[k_map.F.value])  # type: ignore[arg-type]
+        Ca0 = float(k[k_map.Ca0.value])  # type: ignore[arg-type]
+        T0 = float(k[k_map.T0.value])  # type: ignore[arg-type]
+        k10 = float(k[k_map.k10.value])  # type: ignore[arg-type]
+        E1 = float(k[k_map.E1.value])  # type: ignore[arg-type]
+        dHr1 = float(k[k_map.dHr1.value])  # type: ignore[arg-type]
+        rho = float(k[k_map.rho.value])  # type: ignore[arg-type]
+        Cp = float(k[k_map.Cp.value])  # type: ignore[arg-type]
+        kw = float(k[k_map.kw.value])  # type: ignore[arg-type]
+        AR = float(k[k_map.AR.value])  # type: ignore[arg-type]
+        VR = float(k[k_map.VR.value])  # type: ignore[arg-type]
+        mK = float(k[k_map.mK.value])  # type: ignore[arg-type]
+        CpK = float(k[k_map.CpK.value])  # type: ignore[arg-type]
+        Fj = float(k[k_map.Fj.value])  # type: ignore[arg-type]
 
-        Tj_in = control_elements.Tj_in  # type: ignore[attr-defined]
+        Tj_in = float(u[u_map.Tj_in.value])  # type: ignore[arg-type]
 
         temperature_kelvin = max(1e-6, T + 273.15)
 
@@ -127,10 +159,10 @@ class VanDeVusseSystem(System):
         ) / jacket_capacity_term
 
         dy = np.zeros_like(y)
-        dy[StateMap.Ca.value] = dCa  # type: ignore[index]
-        dy[StateMap.Cb.value] = dCb  # type: ignore[index]
-        dy[StateMap.T.value] = dT  # type: ignore[index]
-        dy[StateMap.Tk.value] = dTk  # type: ignore[index]
+        dy[y_map.Ca.value] = dCa  # type: ignore[arg-type]
+        dy[y_map.Cb.value] = dCb  # type: ignore[arg-type]
+        dy[y_map.T.value] = dT  # type: ignore[arg-type]
+        dy[y_map.Tk.value] = dTk  # type: ignore[arg-type]
         return dy
 
 
@@ -178,6 +210,7 @@ class VanDeVusseFastSystem(FastSystem):
         control_elements_arr: NDArray,
         constants_arr: NDArray,
     ) -> NDArray:
+        del t, algebraic_states_arr
 
         Ca, Cb, T, Tk = y
 
@@ -199,13 +232,12 @@ class VanDeVusseFastSystem(FastSystem):
         Tj_in = control_elements_arr[0]
 
         temperature_kelvin = max(1e-6, T + 273.15)
-        k1 = k10 * np.exp(-E1 / temperature_kelvin)
 
+        k1 = k10 * np.exp(-E1 / temperature_kelvin)
         r1 = k1 * VR * Ca
 
         dCa = (-r1 + F * (Ca0 - Ca)) / VR
         dCb = (r1 - F * Cb) / VR
-
 
         heat_capacity_term = max(1e-9, rho * Cp * VR)
         dT = (
@@ -223,20 +255,6 @@ class VanDeVusseFastSystem(FastSystem):
         return np.array([dCa, dCb, dT, dTk], dtype=np.float64)
 
 
-class ConstantTrajectory(Trajectory):
-    """Maintains a constant setpoint value over time."""
-
-    def __init__(self, value: float) -> None:
-        self.value = value
-
-    def __call__(self, t: float) -> float:
-        del t
-        return self.value
-
-    def change(self, new_value: float) -> None:
-        self.value = new_value
-
-
 class PIController(Controller):
     """Simple PI controller with configurable output limits."""
 
@@ -252,19 +270,26 @@ class PIController(Controller):
 
     def _control_algorithm(
         self,
-        pv_value: float,
-        sp_value: float,
-        usable_results: Dict[str, Any],
+        cv_value: TimeValueQualityTriplet,
+        sp_value: TimeValueQualityTriplet | float | NDArray,
         t: float,
-    ) -> float:
-        del usable_results
+    ) -> TimeValueQualityTriplet:
+        if isinstance(sp_value, TimeValueQualityTriplet):
+            sp_ok = sp_value.ok
+            sp_val = float(sp_value.value)
+        else:
+            sp_ok = True
+            sp_val = float(sp_value)
+
+        if not cv_value.ok or not sp_ok:
+            return TimeValueQualityTriplet(t=t, value=float(self._last_value.value), ok=False)
 
         dt = t - self._last_t
         if dt <= 0.0:
             dt = 1e-9
         self._last_t = t
 
-        error = sp_value - pv_value
+        error = sp_val - float(cv_value.value)
         self._integral += error * dt
 
         integral_term = 0.0
@@ -272,5 +297,18 @@ class PIController(Controller):
             integral_term = (self.Kp / self.Ti) * self._integral
 
         output = self.Kp * error + integral_term
-        output = min(self.u_max, max(self.u_min, output))
-        return output
+        output = float(np.clip(output, self.u_min, self.u_max))
+        return TimeValueQualityTriplet(t=t, value=output, ok=True)
+
+
+class ConstantTrajectory(Trajectory):
+    """Maintains a constant setpoint value over time."""
+
+    def __init__(self, value: float) -> None:
+        super().__init__(y0=value)
+
+    def __call__(self, t: float) -> float:
+        return float(self.eval(t))
+
+    def change(self, new_value: float) -> None:
+        self.set_now(0.0, new_value)

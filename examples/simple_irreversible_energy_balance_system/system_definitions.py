@@ -1,11 +1,12 @@
-import numpy as np
 from enum import Enum
-from typing import Dict, Any, Type, ClassVar, List
-import numba  # type: ignore
+from typing import ClassVar, List, Type
 
-from modular_simulation.measurables import States, ControlElements, AlgebraicStates
-from modular_simulation.system import System, FastSystem
+import numba  # type: ignore
+import numpy as np
 from numpy.typing import NDArray
+
+from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
+from modular_simulation.system import FastSystem, System
 
 
 # 1. Define the Data Structures for the System
@@ -46,8 +47,27 @@ class EnergyBalanceAlgebraicStates(AlgebraicStates):
     F_out: float  # Outlet flow rate, an algebraic function of volume
 
 
+class EnergyBalanceConstants(Constants):
+    """Container for the physical constants used in the model."""
+
+    k0: float
+    activation_energy: float
+    gas_constant: float
+    Cv: float
+    CA_in: float
+    T_in: float
+    reaction_enthalpy: float
+    rho_cp: float
+    overall_heat_transfer_coefficient: float
+    heat_transfer_area: float
+    jacket_volume: float
+    jacket_rho_cp: float
+    jacket_inlet_temperature: float
+
+
 # 2. Define the System Dynamics
 # =============================
+
 
 class EnergyBalanceSystem(System):
     """Dynamic model of an irreversible reaction with an energy balance."""
@@ -55,86 +75,94 @@ class EnergyBalanceSystem(System):
     @staticmethod
     def _calculate_algebraic_values(
         y: NDArray,
-        StateMap: Type[Enum],
-        control_elements: ControlElements,
-        system_constants: Dict,
-    ) -> Dict[str, Any]:
+        y_map: Type[Enum],
+        u: NDArray,
+        u_map: Type[Enum],
+        k: NDArray,
+        k_map: Type[Enum],
+    ) -> NDArray:
         """Calculate the outlet flow (F_out) from the current reactor volume."""
 
-        volume = max(1e-6, y[StateMap.V.value])  # type: ignore
-        F_out = system_constants["Cv"] * (volume**0.5)
-        return {"F_out": F_out}
+        del u, u_map
+        volume = max(1e-6, float(y[y_map.V.value]))  # type: ignore[arg-type]
+        Cv = float(k[k_map.Cv.value])  # type: ignore[arg-type]
+        F_out = Cv * np.sqrt(volume)
+        return np.asarray([F_out], dtype=np.float64)
 
     @staticmethod
     def rhs(
         t: float,
         y: NDArray,
-        StateMap: Type[Enum],
-        algebraic_values_dict: Dict[str, Any],
-        control_elements: ControlElements,
-        system_constants: Dict,
+        y_map: Type[Enum],
+        u: NDArray,
+        u_map: Type[Enum],
+        k: NDArray,
+        k_map: Type[Enum],
+        algebraic: NDArray,
+        algebraic_map: Type[Enum],
     ) -> NDArray:
         """Calculate the differential state derivatives."""
 
-        F_out = algebraic_values_dict["F_out"]
-        F_in = control_elements.F_in
-        F_J_in = control_elements.F_J_in
+        del t
+        F_out = float(algebraic[algebraic_map.F_out.value])  # type: ignore[arg-type]
+        F_in = float(u[u_map.F_in.value])  # type: ignore[arg-type]
+        F_J_in = float(u[u_map.F_J_in.value])  # type: ignore[arg-type]
 
-        k0 = system_constants["k0"]
-        activation_energy = system_constants["activation_energy"]
-        gas_constant = system_constants.get("gas_constant", 8.314)
-        CA_in = system_constants["CA_in"]
-        feed_temperature = system_constants["T_in"]
-        reaction_enthalpy = system_constants["reaction_enthalpy"]
-        rho_cp = max(1e-9, system_constants["rho_cp"])
-        overall_heat_transfer_coefficient = system_constants["overall_heat_transfer_coefficient"]
-        heat_transfer_area = system_constants["heat_transfer_area"]
+        k0 = float(k[k_map.k0.value])  # type: ignore[arg-type]
+        activation_energy = float(k[k_map.activation_energy.value])  # type: ignore[arg-type]
+        gas_constant = float(k[k_map.gas_constant.value])  # type: ignore[arg-type]
+        CA_in = float(k[k_map.CA_in.value])  # type: ignore[arg-type]
+        feed_temperature = float(k[k_map.T_in.value])  # type: ignore[arg-type]
+        reaction_enthalpy = float(k[k_map.reaction_enthalpy.value])  # type: ignore[arg-type]
+        rho_cp = max(1e-9, float(k[k_map.rho_cp.value]))  # type: ignore[arg-type]
+        overall_heat_transfer_coefficient = float(k[k_map.overall_heat_transfer_coefficient.value])  # type: ignore[arg-type]
+        heat_transfer_area = float(k[k_map.heat_transfer_area.value])  # type: ignore[arg-type]
+        jacket_volume = max(1e-9, float(k[k_map.jacket_volume.value]))  # type: ignore[arg-type]
+        jacket_rho_cp = max(1e-9, float(k[k_map.jacket_rho_cp.value]))  # type: ignore[arg-type]
+        jacket_inlet_temperature = float(k[k_map.jacket_inlet_temperature.value])  # type: ignore[arg-type]
+
         UA = overall_heat_transfer_coefficient * heat_transfer_area
 
-        jacket_volume = max(1e-9, system_constants["jacket_volume"])
-        jacket_rho_cp = max(1e-9, system_constants["jacket_rho_cp"])
-        jacket_inlet_temperature = system_constants["jacket_inlet_temperature"]
+        volume = max(1e-6, float(y[y_map.V.value]))  # type: ignore[arg-type]
+        molarity_A = float(y[y_map.A.value])  # type: ignore[arg-type]
+        molarity_B = float(y[y_map.B.value])  # type: ignore[arg-type]
+        reactor_temperature = float(y[y_map.T.value])  # type: ignore[arg-type]
+        jacket_temperature = float(y[y_map.T_J.value])  # type: ignore[arg-type]
 
-        volume = max(1e-6, y[StateMap.V.value])  # type: ignore
-        molarity_A = y[StateMap.A.value]  # type: ignore
-        molarity_B = y[StateMap.B.value]  # type: ignore
-        reactor_temperature = y[StateMap.T.value]  # type: ignore
-        jacket_temperature = y[StateMap.T_J.value]  # type: ignore
-
-        arrhenius_temperature = max(1e-6, reactor_temperature) #type: ignore
+        arrhenius_temperature = max(1e-6, reactor_temperature)
         rate_constant = k0 * np.exp(-activation_energy / (gas_constant * arrhenius_temperature))
         reaction_rate = molarity_A * volume * rate_constant
 
         dy = np.zeros_like(y)
         dV_dt = F_in - F_out
-        dy[StateMap.V.value] = dV_dt  # type: ignore
+        dy[y_map.V.value] = dV_dt  # type: ignore[arg-type]
 
-        dy[StateMap.A.value] = (1 / volume) * ( # type: ignore
+        dy[y_map.A.value] = (1.0 / volume) * (
             -reaction_rate
             + F_in * CA_in
             - F_out * molarity_A
             - molarity_A * dV_dt
-        )  
+        )
 
-        dy[StateMap.B.value] = (1 / volume) * (# type: ignore
+        dy[y_map.B.value] = (1.0 / volume) * (
             2.0 * reaction_rate
             - F_out * molarity_B
             - molarity_B * dV_dt
-        )  
+        )
 
-        heat_generation = (reaction_enthalpy) * reaction_rate
-        dy[StateMap.T.value] = ( # type: ignore
+        heat_generation = reaction_enthalpy * reaction_rate
+        dy[y_map.T.value] = (
             (F_in / volume) * (feed_temperature - reactor_temperature)
             + heat_generation / (rho_cp * volume)
             - UA * (reactor_temperature - jacket_temperature) / (rho_cp * volume)
-        )  
+        )
 
-        dy[StateMap.T_J.value] = ( # type: ignore
+        dy[y_map.T_J.value] = (
             (F_J_in / jacket_volume)
             * (jacket_inlet_temperature - jacket_temperature)
             + UA * (reactor_temperature - jacket_temperature)
             / (jacket_rho_cp * jacket_volume)
-        )  # type: ignore
+        )
 
         return dy
 
@@ -168,26 +196,28 @@ class EnergyBalanceFastSystem(FastSystem):
         return ["F_in", "F_J_in"]
 
     @staticmethod
-    @numba.jit(nopython = True)
+    @numba.jit(nopython=True)
     def _calculate_algebraic_values_fast(
         y: NDArray,
         control_elements_arr: NDArray,
         constants_arr: NDArray,
     ) -> NDArray:
+        del control_elements_arr
         Cv = constants_arr[3]
         volume = max(1e-6, y[0])
-        F_out = Cv * (volume**0.5)
-        return np.array([F_out])
+        F_out = Cv * np.sqrt(volume)
+        return np.asarray([F_out], dtype=np.float64)
 
     @staticmethod
-    @numba.jit(nopython = True)
+    @numba.jit(nopython=True)
     def rhs_fast(
         t: float,
         y: NDArray,
-        constants_arr: NDArray,
-        control_elements_arr: NDArray,
         algebraic_states_arr: NDArray,
+        control_elements_arr: NDArray,
+        constants_arr: NDArray,
     ) -> NDArray:
+        del t
         V_idx, A_idx, B_idx, T_idx, Tj_idx = 0, 1, 2, 3, 4
 
         volume = max(1e-6, y[V_idx])
@@ -237,7 +267,7 @@ class EnergyBalanceFastSystem(FastSystem):
             - molarity_B * dV_dt
         )
 
-        heat_generation = (reaction_enthalpy) * reaction_rate
+        heat_generation = reaction_enthalpy * reaction_rate
         dy[T_idx] = (
             (F_in / volume) * (feed_temperature - reactor_temperature)
             + heat_generation / (rho_cp * volume)

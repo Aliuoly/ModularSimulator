@@ -82,6 +82,7 @@ def _initialize_sensors_and_calculations(
             usable.sensors,
             usable.calculations
             )
+    usable.update(t = 0)
 
 def _initialize_controllers(
         measurable: "MeasurableQuantities", 

@@ -4,12 +4,12 @@ from typing import List, TYPE_CHECKING
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from modular_simulation.control_system import PIDController, Trajectory
+from modular_simulation.control_system import PIDController, Trajectory, CascadeController
 from modular_simulation.plotting import plot_triplet_series
 from modular_simulation.system import create_system
 from modular_simulation.usables import SampledDelayedSensor
 
-from .system_definitions import (
+from system_definitions import (
     EnergyBalanceAlgebraicStates,
     EnergyBalanceConstants,
     EnergyBalanceControlElements,
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 # =======================================================
 
 initial_states = EnergyBalanceStates(V=100.0, A=1.0, B=0.0, T=350.0, T_J=300.0)
-initial_controls = EnergyBalanceControlElements(F_in=1.0, F_J_in=1.0)
+initial_controls = EnergyBalanceControlElements(F_in=1.0, T_J_in=300)
 initial_algebraic = EnergyBalanceAlgebraicStates(F_out=1.0)
 
 sensors = [
@@ -41,7 +41,8 @@ sensors = [
     SampledDelayedSensor(measurement_tag="V"),
     SampledDelayedSensor(measurement_tag="T"),
     SampledDelayedSensor(measurement_tag="T_J"),
-    SampledDelayedSensor(measurement_tag="F_J_in"),
+    SampledDelayedSensor(measurement_tag="T_J_in"),
+    SampledDelayedSensor(measurement_tag="jacket_flow"),
 ]
 
 calculations: List["Calculation"] = []
@@ -55,15 +56,27 @@ controllers = [
         Ti=100.0,
         mv_range=(0.0, 1.0e6),
     ),
-    PIDController(
-        cv_tag="B",
-        mv_tag="F_J_in",
-        sp_trajectory=Trajectory(0.5),
-        Kp=1.0e6,
-        Ti=1.0,
-        mv_range=(274.0, 350.0),
-        inverted=True,
-    ),
+    CascadeController( # control B by controlling T (inner loop), which is controlled by F_J_in (inner loop)
+        inner_loop = PIDController(
+            cv_tag="T",
+            mv_tag="T_J_in",
+            sp_trajectory=Trajectory(0.5),
+            Kp=1.0e1,
+            Ti=100.0,
+            mv_range=(200, 300),
+            inverted=False,
+        ),
+        outer_loop = PIDController(
+            cv_tag="B",
+            mv_tag="T",
+            sp_trajectory=Trajectory(0.02),
+            Kp=1.0e1,
+            Ti=100.0,
+            mv_range=(250.0, 350.0),
+            inverted=False,
+        )
+    )
+    
 ]
 
 system_constants = EnergyBalanceConstants(
@@ -77,9 +90,9 @@ system_constants = EnergyBalanceConstants(
     rho_cp=4000.0,
     overall_heat_transfer_coefficient=500000.0,
     heat_transfer_area=10.0,
-    jacket_volume=200.0,
-    jacket_rho_cp=4200.0,
-    jacket_inlet_temperature=290.0,
+    jacket_volume=2000.0,
+    jacket_rho_cp=1200.0,
+    jacket_flow = 500.0,
 )
 
 
@@ -97,35 +110,35 @@ readable_system = create_system(
     system_constants=system_constants,
 )
 
-fast_system = create_system(
-    dt=dt,
-    system_class=EnergyBalanceFastSystem,
-    initial_states=initial_states,
-    initial_controls=initial_controls,
-    initial_algebraic=initial_algebraic,
-    sensors=sensors,
-    calculations=calculations,
-    controllers=controllers,
-    system_constants=system_constants,
-)
+# fast_system = create_system(
+#     dt=dt,
+#     system_class=EnergyBalanceFastSystem,
+#     initial_states=initial_states,
+#     initial_controls=initial_controls,
+#     initial_algebraic=initial_algebraic,
+#     sensors=sensors,
+#     calculations=calculations,
+#     controllers=controllers,
+#     system_constants=system_constants,
+# )
 
 
 # --- 3. Run the Simulation ---
-systems = {"readable": readable_system, "fast": fast_system}
+systems = {"readable": readable_system}
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.basicConfig(level=logging.DEBUG, format="%(message)s")
     mpl.set_loglevel("warning")
     plt.figure(figsize=(14, 10))
     linestyles = ["-", "--"]
 
     for j, (name, system) in enumerate(systems.items()):
-        for _ in range(5000):
+        for _ in range(500):
             system.step()
 
-        system.extend_controller_trajectory(cv_tag="B", value=0.2)
+        system.extend_controller_trajectory(cv_tag="B", value=0.005)
 
-        for _ in range(5000):
+        for _ in range(500):
             system.step()
 
         history = system.measured_history
@@ -209,10 +222,23 @@ if __name__ == "__main__":
         plt.ylabel("Temperature (K)")
         plt.grid(True)
 
+        ax = plt.subplot(4, 2, 7)
+        plot_triplet_series(
+            ax,
+            sensor_hist["T_J_in"],
+            style="step",
+            line_kwargs={"linestyle": linestyles[j]},
+            label=name,
+        )
+        plt.title("Jacket Inlet Temp (T_J_in)")
+        plt.xlabel("Time")
+        plt.ylabel("Temperature (K)")
+        plt.grid(True)
+
         ax = plt.subplot(4, 2, 8)
         plot_triplet_series(
             ax,
-            sensor_hist["F_J_in"],
+            sensor_hist["jacket_flow"],
             style="step",
             line_kwargs={"linestyle": linestyles[j]},
             label=name,

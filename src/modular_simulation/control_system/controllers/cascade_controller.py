@@ -74,10 +74,10 @@ class CascadeController(Controller):
         self._auto_source = self.inner_loop.active_sp_trajectory()
         return self
 
-    def _initialize(self, usable_quantities, control_elements) -> None:  # type: ignore[override]
+    def _initialize(self, usable_quantities, control_elements, **kwargs) -> None:  # type: ignore[override]
         self._usables = usable_quantities
-
-        self.outer_loop._initialize(usable_quantities, control_elements)
+        # don't initialize the outerloop's mv_setter 
+        self.outer_loop._initialize(usable_quantities, control_elements, is_cascade_outerloop = True)
         self.inner_loop._initialize(usable_quantities, control_elements)
 
         self._cv_getter = self.outer_loop._cv_getter

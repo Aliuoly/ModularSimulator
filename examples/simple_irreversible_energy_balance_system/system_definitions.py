@@ -38,7 +38,7 @@ class EnergyBalanceControlElements(ControlElements):
     """dataclass for the externally controlled variables."""
 
     F_in: float  # Inlet flow rate
-    F_J_in: float  # Jacket inlet flow rate
+    T_J_in: float  # Jacket inlet flow rate
 
 
 class EnergyBalanceAlgebraicStates(AlgebraicStates):
@@ -62,7 +62,7 @@ class EnergyBalanceConstants(Constants):
     heat_transfer_area: float
     jacket_volume: float
     jacket_rho_cp: float
-    jacket_inlet_temperature: float
+    jacket_flow: float
 
 
 # 2. Define the System Dynamics
@@ -106,7 +106,7 @@ class EnergyBalanceSystem(System):
         del t
         F_out = float(algebraic[algebraic_map.F_out.value])  # type: ignore[arg-type]
         F_in = float(u[u_map.F_in.value])  # type: ignore[arg-type]
-        F_J_in = float(u[u_map.F_J_in.value])  # type: ignore[arg-type]
+        F_J_in = float(k[k_map.jacket_flow.value])  # type: ignore[arg-type]
 
         k0 = float(k[k_map.k0.value])  # type: ignore[arg-type]
         activation_energy = float(k[k_map.activation_energy.value])  # type: ignore[arg-type]
@@ -119,7 +119,7 @@ class EnergyBalanceSystem(System):
         heat_transfer_area = float(k[k_map.heat_transfer_area.value])  # type: ignore[arg-type]
         jacket_volume = max(1e-9, float(k[k_map.jacket_volume.value]))  # type: ignore[arg-type]
         jacket_rho_cp = max(1e-9, float(k[k_map.jacket_rho_cp.value]))  # type: ignore[arg-type]
-        jacket_inlet_temperature = float(k[k_map.jacket_inlet_temperature.value])  # type: ignore[arg-type]
+        jacket_inlet_temperature = float(u[u_map.T_J_in.value])  # type: ignore[arg-type]
 
         UA = overall_heat_transfer_coefficient * heat_transfer_area
 
@@ -202,7 +202,7 @@ class EnergyBalanceFastSystem(FastSystem):
         control_elements_arr: NDArray,
         constants_arr: NDArray,
     ) -> NDArray:
-        del control_elements_arr
+        
         Cv = constants_arr[3]
         volume = max(1e-6, y[0])
         F_out = Cv * np.sqrt(volume)

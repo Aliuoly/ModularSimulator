@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from typing import Dict, TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List
 
 
 from system_definitions import (
@@ -13,7 +13,6 @@ from system_definitions import (
 from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.system import create_system
 from modular_simulation.control_system import Trajectory
-from numpy import inf
 
 if TYPE_CHECKING:
     from modular_simulation.usables import Calculation

@@ -3,15 +3,14 @@ from system_definitions import (
     IrreversibleStates,
     IrreversibleControlElements,
     IrreversibleAlgebraicStates,
-    IrreversibleSystem,
-    IrreversibleFastSystem
+    IrreversibleConstants,
+    IrreversibleSystem
 )
 from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.plotting import plot_triplet_series
 from modular_simulation.system import create_system
 from modular_simulation.control_system import Trajectory, PIDController
 from typing import List, TYPE_CHECKING
-from numpy import inf
 import logging
 import matplotlib as mpl
 
@@ -32,6 +31,12 @@ initial_controls = IrreversibleControlElements(F_in=0.0)
 # Initial values for algebraic states (can be placeholders, they are calculated).
 initial_algebraic = IrreversibleAlgebraicStates(F_out=0.0)
 
+# Define the system's physical constants and solver params
+system_constants = IrreversibleConstants(
+    k = 1e-3, 
+    Cv = 1e-1, 
+    CA_in = 1.0
+)
 # The MeasurableQuantities object now holds all state-like data.
 
 
@@ -70,13 +75,13 @@ controllers=[
     )
 ]
 
-# Define the system's physical constants and solver params
-system_constants = {'k': 1e-3, 'Cv': 1e-1, 'CA_in': 1.0}
-solver_options = {'method': 'LSODA'}
+
+
 
 # --- 2. Assemble and Initialize the System ---
-
+dt = 30.
 readable_system = create_system(
+    dt = dt,
     system_class = IrreversibleSystem,
     initial_states = initial_states,
     initial_controls = initial_controls,
@@ -85,24 +90,22 @@ readable_system = create_system(
     calculations = calculations,
     controllers = controllers,
     system_constants = system_constants,
-    solver_options = solver_options,
 )
 
-fast_system = create_system(
-    system_class = IrreversibleFastSystem,
-    initial_states = initial_states,
-    initial_controls = initial_controls,
-    initial_algebraic = initial_algebraic,
-    sensors = sensors,
-    calculations = calculations,
-    controllers = controllers,
-    system_constants = system_constants,
-    solver_options = solver_options,
-)
+# fast_system = create_system(
+#     system_class = IrreversibleFastSystem,
+#     initial_states = initial_states,
+#     initial_controls = initial_controls,
+#     initial_algebraic = initial_algebraic,
+#     sensors = sensors,
+#     calculations = calculations,
+#     controllers = controllers,
+#     system_constants = system_constants,
+#     solver_options = solver_options,
+# )
 
 # --- 3. Run the Simulation ---
-dt = 30
-systems = {'fast': fast_system,"readable": readable_system}
+systems = {"readable": readable_system}
 if __name__ == "__main__":
 
     logging.basicConfig(
@@ -115,13 +118,13 @@ if __name__ == "__main__":
     for j, (system_name, system) in enumerate(systems.items()):
         # --- First simulation run ---
         for i in range(5000):
-            system.step(dt) #type: ignore
+            system.step() #type: ignore
 
         # --- Change the setpoint and continue the simulation ---
         # Access the controller via the controllable_quantities object.
         system.extend_controller_trajectory(cv_tag = "B", value = 0.2)
         for i in range(5000):
-            system.step(dt)  #type: ignore
+            system.step()  #type: ignore
 
         # 3. Plot the results.
         # =====================

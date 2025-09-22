@@ -1,13 +1,11 @@
 import pytest
-
 matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
-
 import matplotlib.pyplot as plt
 import numpy as np
-
 from modular_simulation.plotting import plot_triplet_series, triplets_from_history, triplets_to_arrays
 from modular_simulation.usables import TimeValueQualityTriplet
+
 
 
 def _sample_series() -> list[TimeValueQualityTriplet]:

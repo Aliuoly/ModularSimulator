@@ -40,3 +40,8 @@ dev = [
 viz = [
   "matplotlib>=3.10.6",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.13.1",
+]

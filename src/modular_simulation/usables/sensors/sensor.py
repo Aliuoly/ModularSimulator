@@ -2,12 +2,12 @@ from numpy.typing import NDArray
 import numpy as np
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
-from typing import TYPE_CHECKING, Any, Callable, Optional, Union, List
+from typing import TYPE_CHECKING, Any, List
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
-from operator import attrgetter
 
 if TYPE_CHECKING:
     from modular_simulation.quantities import MeasurableQuantities
+    from modular_simulation.measurables.base_classes import BaseIndexedModel
 
 class Sensor(BaseModel, ABC):
 
@@ -41,11 +41,10 @@ class Sensor(BaseModel, ABC):
 
     _rng: np.random.Generator = PrivateAttr()
     _last_value: TimeValueQualityTriplet | None = PrivateAttr(default = None)
-    _measurement_function: Callable | None = PrivateAttr(default = None)
-    _measurables: Union["MeasurableQuantities", None] = PrivateAttr(default = None)
+    _measurement_owner: "BaseIndexedModel" = PrivateAttr()
     _initialized: bool = PrivateAttr(default = False)
     _history: List["TimeValueQualityTriplet"] = PrivateAttr(default_factory = list)
-
+    
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def model_post_init(self, __context: Any) -> None:
@@ -58,27 +57,25 @@ class Sensor(BaseModel, ABC):
         finds the correct attribute to measure and creates a simple callable for it.
         This runs during system initialization.
         """
-        self._measurables = measurable_quantities
         search_order = list(measurable_quantities.__class__.model_fields.keys())
-        found_path = None
-
-        for category in search_order:
-            category_obj = getattr(measurable_quantities, category)
-            if category_obj and hasattr(category_obj, self.measurement_tag):
-                if found_path is not None:
-                    raise AttributeError(f"Tag '{self.measurement_tag}' \
-                                         is ambiguous and found in multiple fields of measurable_quantities.")
-                found_path = f"{category}.{self.measurement_tag}"
+        found_owner = None
         
-        if found_path is None:
+        for category in search_order:
+            owner = getattr(measurable_quantities, category)
+            if owner is not None and hasattr(owner, self.measurement_tag):
+                if found_owner is not None:
+                    raise AttributeError(
+                        f"Tag '{self.measurement_tag}' is ambiguous and found in multiple fields of measurable_quantities."
+                        )
+                found_owner = owner
+        if found_owner is None:
             raise AttributeError(
                 f"Tag '{self.measurement_tag}' not found in any field of measurable_quantities. "
                 f"Available measurable quantities are: {', '.join(measurable_quantities.available_tags)}"
                 )
         
-        # Create a simple function to get the value from the path
-        getter = attrgetter(found_path)
-        self._measurement_function = lambda: getter(measurable_quantities)
+        # Store raw pieces
+        self._measurement_owner = found_owner          # new PrivateAttr
         self._initialized = True
 
     # --- Template Method ---
@@ -93,7 +90,7 @@ class Sensor(BaseModel, ABC):
 
         # 2. Get the true, raw value from the system. At this point, 
         #       measurement function is NOT None, so Mypy shut up lol (hence type: ignore)
-        raw_value = self._measurement_function() #type: ignore
+        raw_value = getattr(self._measurement_owner, self.measurement_tag)
 
         # 3. Apply subclass-specific processing (e.g., time delay) to the true value
         processed_value = self._get_processed_value(raw_value, t)
@@ -104,12 +101,10 @@ class Sensor(BaseModel, ABC):
         # 5. Create and store the new measurement. Notice is_faulty is not used. 
         #     This is to simulate the fact that the sensor itself doesnt know its faulty yet. 
         #     If you want to use it though, change it lol. 
-        ok = True
-        if self.faulty_aware:
-            ok = not is_faulty
+        ok = True if not self.faulty_aware else (not is_faulty)
         new_measurement = TimeValueQualityTriplet(t = t, value = final_value, ok = ok)
         self._last_value = new_measurement
-        self._history += [new_measurement]
+        self._history.append(new_measurement)
         return new_measurement
     
     @abstractmethod

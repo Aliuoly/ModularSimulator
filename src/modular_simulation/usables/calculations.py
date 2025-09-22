@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, List
-import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -112,7 +111,7 @@ class Calculation(BaseModel, ABC):
         )
         result.ok = self.ok
         self._last_value = result
-        self._history += [result]
+        self._history.append(result)
         return result
 
     def history(self) -> List[TimeValueQualityTriplet]:

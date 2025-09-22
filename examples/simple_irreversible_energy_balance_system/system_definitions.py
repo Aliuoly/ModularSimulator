@@ -1,12 +1,9 @@
 import numpy as np
-from pydantic import ConfigDict, Field
 from enum import Enum
 from typing import Dict, Any, Type, ClassVar, List
 import numba  # type: ignore
-from dataclasses import dataclass
 
 from modular_simulation.measurables import States, ControlElements, AlgebraicStates
-from modular_simulation.control_system import Trajectory, PIDController
 from modular_simulation.system import System, FastSystem
 from numpy.typing import NDArray
 

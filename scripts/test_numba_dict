@@ -1,0 +1,72 @@
+from numba.typed.typeddict import Dict as nDict
+from numba.experimental import jitclass
+from numba import types, typed, jit
+import numba
+from timeit import timeit
+from enum import Enum
+import numpy as np
+from collections import namedtuple
+
+class DummyEnum(Enum):
+    A = slice(0,2)
+    B = slice(2,3)
+    C = slice(3,5)
+    D = slice(5,6)
+
+DummyNT = namedtuple(typename = 'lookup', field_names = ['A','B','C','D'])
+nt = DummyNT(
+    A = slice(0,2),
+    B = slice(2,3),
+    C = slice(3,5),
+    D = slice(5,6)
+)
+print(nt)
+array = np.array([0,1,2,3,4], dtype = np.float32)
+
+@jit(nopython = True)
+def test_numba_dict(dict, array):
+    A, B, C, D = array[dict['A']], array[dict['B']],array[dict['C']],array[dict['D']]
+    A2, B2, C2, D2 = A**2, B**2, C**2, D**2
+    return A2, B2, C2, D2
+
+@jit(nopython = True)
+def test_named_tuple(nt, array):
+    A, B, C, D = array[nt.A], array[nt.B], array[nt.C], array[nt.D]
+    A2, B2, C2, D2 = A**2, B**2, C**2, D**2
+    return A2, B2, C2, D2
+
+def test_enum(enum, array):
+    A, B, C, D = array[enum.A.value], array[enum.B.value], array[enum.C.value], array[enum.D.value]
+    A2, B2, C2, D2 = A**2, B**2, C**2, D**2
+    return A2, B2, C2, D2
+
+
+
+@jit
+def test_magic(array):
+    A, B, C, D = array[0], array[1], array[2], array[3]
+    A2, B2, C2, D2 = A**2, B**2, C**2, D**2
+    return A2, B2, C2, D2
+
+pydict = {name: DummyEnum[name].value for name, index in DummyEnum.__members__.items()}
+typeddict = nDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
+for member, value in DummyEnum.__members__.items():
+    print(f'{member}:{DummyEnum[member].value}')
+    typeddict[member] = DummyEnum[member].value
+
+
+func1 = lambda : test_numba_dict(typeddict, array)
+func1()
+print(timeit(func1 , number = 100_000))
+
+func2 = lambda : test_named_tuple(nt, array)
+func2()
+print(timeit(func2, number = 100_000))
+
+func3 = lambda : test_enum(DummyEnum, array)
+func3()
+print(timeit(func3, number = 100_000))
+
+
+
+

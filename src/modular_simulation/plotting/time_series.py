@@ -19,9 +19,10 @@ SeriesInput = Sequence[TimeValueQualityTriplet] | Mapping[str, Sequence[Any]]
 
 def _coerce_scalar(value: Any) -> float:
     arr = np.asarray(value)
-    if arr.shape != ():
+    if arr.shape != () and arr.shape != (1, ):
         raise ValueError(
-            "Plotting only supports scalar values; received array with shape " f"{arr.shape}."
+            "Plotting only supports scalar values; received array with shape " 
+            f"{arr.shape}."
         )
     return float(arr.item())
 

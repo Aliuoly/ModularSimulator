@@ -2,22 +2,33 @@ from modular_simulation.quantities.measurable_quantities import MeasurableQuanti
 from modular_simulation.quantities.usable_quantities import UsableQuantities
 from modular_simulation.quantities.controllable_quantities import ControllableQuantities
 from abc import ABC, abstractmethod
-from numpy.typing import NDArray
-from typing import Any, Type, Dict, List, TYPE_CHECKING, Optional
-from enum import Enum
+from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
+from numpy.typing import NDArray, ArrayLike
+from typing import Any, Type, Dict, List, TYPE_CHECKING, Tuple, Callable
+from enum import Enum, IntEnum
 from scipy.integrate import solve_ivp #type: ignore
 from modular_simulation.validation import validate_and_link
 from functools import cached_property
+from operator import attrgetter
 import numpy as np
+from modular_simulation.measurables.base_classes import BaseIndexedModel
 if TYPE_CHECKING:
-    from modular_simulation.measurables import States, AlgebraicStates, ControlElements
+    from modular_simulation.measurables import States, AlgebraicStates, ControlElements, Constants
     from modular_simulation.usables import Sensor, Calculation, TimeValueQualityTriplet
     from modular_simulation.control_system import Controller, Trajectory
 from copy import deepcopy
 import logging
 logger = logging.getLogger(__name__)
 
-class System(ABC):
+class StaticParamEnum(IntEnum):
+    STATE_MAP = 0
+    CONTROL_MAP = 1
+    CONSTANT_MAP = 2
+    ALGEBRAIC_MAP = 3
+    CONSTANTS = 4
+
+
+class System(BaseModel, ABC):
     """
     Abstract base class for a simulation system focused on readability and ease of use.
 
@@ -44,98 +55,90 @@ class System(ABC):
         _t (float): The current simulation time.
         _history (List[Dict]): A log of the system's state at each time step.
     """
-    measurable_quantities: "MeasurableQuantities"
-    usable_quantities: "UsableQuantities"
-    controllable_quantities: "ControllableQuantities"
-    system_constants: Dict[str, Any]
-    solver_options: Dict[str, Any]
+    dt: float = Field(
+        ...,
+        description = (
+            "How often the system's sensors, calculations, and controllers update. "
+            "The solver takes adaptive 'internal steps' regardless of this value to update the system's states. "
+        )
+    )
+    measurable_quantities: "MeasurableQuantities" = Field(
+        ...,
+        description = (
+            "A container for all constants, state, control, and algebraic variables that can be measured or recorded. "
+        )
+    )
+    usable_quantities: "UsableQuantities" = Field(
+        ...,
+        description = (
+            "Defines how sensors and calculations are used to generate measurements from the system's measurable_quantities."
+        )
+    )
+    controllable_quantities: "ControllableQuantities" = Field(
+        ...,
+        description = (
+            "Defines the controllers that manipulate the system's `ControlElements`."
+        )
+    )
+    solver_options: Dict[str, Any] = Field(
+        default_factory = lambda : {'method': 'LSODA'},
+        description = (
+            "arguments to scipy.integrate.solve_ivp call done by the system when taking steps."
+        )
+    )
+    record_history: bool = Field(
+        default = False,
+        description = (
+            "Whether or not to historize the underlying measurable_quantities of the system. "
+            "The usable_quantities, which are measured or calculation, are always historized regardless. "
+        )
+    )
 
-    _history: Dict[str, NDArray]
+    _history: Dict[str, List[ArrayLike]] = PrivateAttr(default_factory = dict)
+    _t: float = PrivateAttr(default = 0.)
+    _rhs_static_params: Tuple[Type[Enum], Type[Enum], Type[Enum], Type[Enum], NDArray] = PrivateAttr()
 
-    def __init__(
-            self,
-            measurable_quantities: MeasurableQuantities,
-            usable_quantities: UsableQuantities,
-            controllable_quantities: ControllableQuantities,
-            system_constants: Dict[str, Any],
-            solver_options: Dict[str, Any],
-            *,
-            record_history: bool = True,
-            ):
-        """
-        Initializes the System object.
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
 
-        Args:
-            measurable_quantities: An object holding the system's state vectors.
-            usable_quantities: An object defining sensors and calculations.
-            controllable_quantities: An object defining the system's controllers.
-            system_constants: A dictionary containing fixed parameters for the simulation.
-            solver_options: A dictionary of keyword arguments to be passed to `solve_ivp`.
-            record_history: If ``False``, disable recording of state history snapshots.
-        """
-        self.measurable_quantities = measurable_quantities
-        self.usable_quantities = usable_quantities
-        self.controllable_quantities = controllable_quantities
-        
-        self.system_constants = system_constants
-        self.solver_options = solver_options
-        self._record_history = record_history
+    # add private attrs
+    _history_slots: List[Tuple[Callable[[Any], Any], List]] = PrivateAttr(default_factory=list)
 
+    def model_post_init(self, __context: Any) -> None:
+        global StaticParamEnum
+        super().model_post_init(__context)
         validate_and_link(self)
 
-        self._t = 0.
-        self._buffer_size = 10_000
-        self._history = {}
-        self._history_size = 0
-        self._usable_snapshot = None
+        params: List[Any] = [0] * 5
+        params[StaticParamEnum.STATE_MAP]     = self.measurable_quantities.states._index_map
+        params[StaticParamEnum.CONTROL_MAP]   = self.measurable_quantities.control_elements._index_map
+        params[StaticParamEnum.CONSTANT_MAP]  = self.measurable_quantities.constants._index_map
+        params[StaticParamEnum.ALGEBRAIC_MAP] = self.measurable_quantities.algebraic_states._index_map
+        params[StaticParamEnum.CONSTANTS]     = self.measurable_quantities.constants.to_array()
+        self._rhs_static_params = tuple(params)
 
-        # take one single step to get things populated
-        self.step(dt = 0)
+        if self.record_history:
+            # Build history dict and accessors exactly once
+            mq = self.measurable_quantities
+            for mq_name in mq.__class__.model_fields.keys():
+                mq_obj: BaseIndexedModel = getattr(mq, mq_name)
+                for tag in mq_obj.__class__.model_fields.keys():
+                    lst = [] # type:ignore
+                    self._history[tag] = lst
+                    getter = attrgetter(tag)
+                    # capture the object reference and append list ref
+                    self._history_slots.append((lambda o=mq_obj, g=getter: g(o), lst)) #type:ignore[misc]
+            self._history['time'] = []
 
     def _update_history(self) -> None:
-        """Creates a serializable dictionary snapshot of the current system state for logging."""
-
-        if not self._record_history:
+        if not self.record_history:
             return
-
-        if not self._history:
-            for measurable_obj_name in self.measurable_quantities.__class__.model_fields.keys():
-                measurable_obj = getattr(self.measurable_quantities, measurable_obj_name)
-                for tag in measurable_obj.__class__.model_fields.keys():
-                    first_value = getattr(measurable_obj, tag)
-                    value_array = np.asarray(first_value)
-                    is_scalar = value_array.shape == ()
-                    array_shape = (self._buffer_size,) if is_scalar else (self._buffer_size, *value_array.shape)
-                    values = np.empty(array_shape, dtype=value_array.dtype)
-                    values[0] = value_array.item() if is_scalar else value_array
-                    self._history[tag] = values
-            time_values = np.empty(self._buffer_size, dtype=float)
-            time_values[0] = self._t
-            self._history['time'] = time_values
-            self._history_size = 1
-            return
-
-        if self._history_size >= self._history['time'].shape[0]:
-            for tag, values in self._history.items():
-                new_shape = (values.shape[0] + self._buffer_size, *values.shape[1:])
-                expanded = np.empty(new_shape, dtype=values.dtype)
-                expanded[:values.shape[0]] = values
-                self._history[tag] = expanded
-
-        for measurable_obj_name in self.measurable_quantities.__class__.model_fields.keys():
-            measurable_obj = getattr(self.measurable_quantities, measurable_obj_name)
-            for tag in measurable_obj.__class__.model_fields.keys():
-                current_value = getattr(measurable_obj, tag)
-                value_array = np.asarray(current_value)
-                if value_array.shape == ():
-                    self._history[tag][self._history_size] = value_array.item()
-                else:
-                    self._history[tag][self._history_size] = value_array
-        self._history['time'][self._history_size] = self._t
-        self._history_size += 1
+        # simple tight loop: call getter, append to pre-bound list
+        for getter, lst in self._history_slots:
+            lst.append(getter()) #type:ignore[call-arg]
+        self._history['time'].append(self._t)
 
 
-    def _pre_integration_step(self) -> NDArray:
+    def _pre_integration_step(self) -> Tuple[NDArray, NDArray]:
         """
         Handles the control loop logic before integration.
 
@@ -146,17 +149,21 @@ class System(ABC):
         self.usable_quantities.update(self._t)
         self.controllable_quantities.update(self._t) # returns results too, but I don't need it here.
         # control elements is already updated here by reference.
-        y0 = self.measurable_quantities.states.to_array()
-        return y0
+        return (
+            self.measurable_quantities.states.to_array(),
+            self.measurable_quantities.control_elements.to_array(),
+        )
 
     @staticmethod
     @abstractmethod
     def _calculate_algebraic_values(
             y: NDArray, 
-            StateMap: Type[Enum], 
-            control_elements: "ControlElements", 
-            system_constants: Dict
-            ) -> Dict[str, Any]:
+            y_map: Type[Enum], 
+            u: NDArray,
+            u_map: Type[Enum],
+            k: NDArray,
+            k_map: Type[Enum],
+            ) -> NDArray:
         """
         Calculates derived quantities based on the provided state array, controls, and constants.
 
@@ -179,10 +186,13 @@ class System(ABC):
     def rhs(
             t: float, 
             y: NDArray, 
-            StateMap: Type[Enum], 
-            algebraic_values_dict: Dict[str, Any],
-            control_elements: "ControlElements", 
-            system_constants: Dict
+            y_map: Type[Enum], 
+            u: NDArray, 
+            u_map: Type[Enum], 
+            k: NDArray,
+            k_map: Type[Enum], 
+            algebraic: NDArray,
+            algebraic_map: Type[Enum], 
             ) -> NDArray:
         """
         Defines the right-hand side of the system's ordinary differential equations.
@@ -206,86 +216,77 @@ class System(ABC):
             self, 
             t: float, 
             y: NDArray, 
-            StateMap: Type[Enum],
-            control_elements: "ControlElements",
-            system_constants: Dict[str, Any],
+            u: NDArray,
+            params: Tuple,
             ) -> NDArray:
         """
         A concrete wrapper called by the solver. It recalculates algebraic states
         before calling the user-defined `rhs` for the derivatives. This ensures
         correctness even when the solver rejects and retries steps.
         """
-        algebraic_values_dict = self._calculate_algebraic_values(
-            y=y,
-            StateMap=StateMap,
-            control_elements=control_elements,
-            system_constants=system_constants
-        )
-        return self.rhs(t, y, StateMap, algebraic_values_dict, control_elements, system_constants)
+        global StaticParamEnum
+        y_map = params[StaticParamEnum.STATE_MAP]
+        u_map = params[StaticParamEnum.CONTROL_MAP]
+        k = params[StaticParamEnum.CONSTANTS]
+        k_map = params[StaticParamEnum.CONSTANT_MAP]
+        algebraic_map = params[StaticParamEnum.ALGEBRAIC_MAP]
 
-    def _step(
-            self, 
-            dt: float, 
-            y0: NDArray
-            ) -> NDArray:
+        algebraic_array = self._calculate_algebraic_values(
+            y = y,
+            y_map = y_map,
+            u = u,
+            u_map = u_map,
+            k = k,
+            k_map = k_map
+        )
+        return self.rhs(
+            t, 
+            y = y, y_map = y_map, 
+            u = u, u_map = u_map,
+            k = k, k_map = k_map,
+            algebraic = algebraic_array, algebraic_map = algebraic_map
+            )
+    
+    def step(self) -> None:
         """
+        The main public method to advance the simulation by one time step.
+
         Performs one integration step by calling the ODE solver.
 
         It configures and runs `solve_ivp`, then updates the system's algebraic
         states with the final, successful result.
         """
-        # This tuple contains everything that is constant for the duration of the step.
-        static_params = (
-            self.measurable_quantities.states.__class__.StateMap,
-            self.measurable_quantities.control_elements,
-            self.system_constants,
-        )
+        global StaticParamEnum
 
-        result = solve_ivp(
-            fun=self._rhs_wrapper,
-            t_span=(0, dt),
-            y0=y0,
-            args=static_params,
-            **self.solver_options
-        )
-        
-        final_y = result.y[:, -1]
-        
+        y0, u0 = self._pre_integration_step()
+
+        final_y = y0
+        if self.measurable_quantities.states:
+            result = solve_ivp(
+                fun = self._rhs_wrapper,
+                t_span = (self._t, self._t + self.dt),
+                y0 = y0,
+                args = (u0, self._rhs_static_params),
+                **self.solver_options
+            )
+            final_y = result.y[:, -1]
+            self.measurable_quantities.states.update_from_array(final_y)
 
         # After the final SUCCESSFUL step, update the actual algebraic_states object.
         if self.measurable_quantities.algebraic_states:
             final_algebraic_values = self._calculate_algebraic_values(
-                y=final_y,
-                StateMap=self.measurable_quantities.states.__class__.StateMap,
-                control_elements=self.measurable_quantities.control_elements,
-                system_constants=self.system_constants
+                y = final_y,
+                y_map = self._rhs_static_params[StaticParamEnum.STATE_MAP], # type: ignore 
+                u = u0,
+                u_map = self._rhs_static_params[StaticParamEnum.CONTROL_MAP], # type: ignore 
+                k = self._rhs_static_params[StaticParamEnum.CONSTANTS], # type: ignore 
+                k_map = self._rhs_static_params[StaticParamEnum.CONSTANT_MAP], # type: ignore 
             )
-            self.measurable_quantities.algebraic_states = \
-                self.measurable_quantities.algebraic_states.__class__(**final_algebraic_values)
-
-        return final_y
-    
-    def step(self, dt: float) -> None:
-        """
-        The main public method to advance the simulation by one time step.
+            self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
         
-        Args:
-            dt: The duration of the time step.
-        """
-        y0 = self._pre_integration_step()
-        #printable = self.measurable_quantities.states.from_array(y0).model_dump()
-        #printable.update(self.measurable_quantities.control_elements.model_dump())
-        #printable = {key: f"{val:.3f}" for key, val in printable.items()}
-        #print(printable)
-        if dt > 0:
-            y = self._step(dt, y0)
-            self.measurable_quantities.states.update_from_array(y)
-            #printable = self.measurable_quantities.states.__dict__
-            #printable.update(self.measurable_quantities.control_elements.__dict__)
-            #printable.update(self.measurable_quantities.algebraic_states.__dict__)
-            #print(printable)
-            self._t += dt
+        self._t += self.dt
         self._update_history()
+        return 
     
     def extend_controller_trajectory(self, cv_tag: str, value: float | None = None) -> "Trajectory":
         """
@@ -344,16 +345,16 @@ class System(ABC):
         return history
 
     @property
-    def history(self) -> Dict[str, NDArray]:
+    def history(self) -> Dict[str, List]:
         """Returns a trimmed copy of the full history dictionary."""
-        if not self._record_history:
+        if not self.record_history:
             return {}
-        return {k: v[:self._history_size].copy() for k, v in self._history.items()}
+        return self._history
 
     @property
-    def setpoint_history(self) -> Dict[str, Dict[str, NDArray]]:
+    def setpoint_history(self) -> Dict[str, Dict[str, List]]:
         """Returns historized controller setpoints keyed by ``cv_tag``."""
-        history: Dict[str, Dict[str, NDArray]] = {}
+        history: Dict[str, Dict[str, List]] = {}
         for controller in self.controllable_quantities.controllers:
             traj_hist = controller.sp_trajectory.history()
             history[controller.cv_tag] = {
@@ -473,15 +474,16 @@ class FastSystem(System):
 
 def create_system(
         system_class: Type[System],
+        dt: float,
         initial_states: "States",
         initial_controls: "ControlElements",
         initial_algebraic: "AlgebraicStates",
+        system_constants: "Constants",
         sensors: List["Sensor"],
         calculations: List["Calculation"],
         controllers: List["Controller"],
-        system_constants: Dict[str, Any],
-        solver_options: Dict[str, Any],
         *,
+        solver_options: Dict[str, Any] = {'method': 'LSODA'},
         record_history: bool = True,
         ) -> System:
     """
@@ -505,7 +507,8 @@ def create_system(
     measurables = MeasurableQuantities(
         states=copied_states,
         control_elements=copied_controls,
-        algebraic_states=copied_algebraic
+        algebraic_states=copied_algebraic,
+        constants = copied_constants,
     )
     
     usables = UsableQuantities(
@@ -529,10 +532,10 @@ def create_system(
     
     # 3. Assemble the final system object
     system = system_class(
+        dt = dt,
         measurable_quantities=measurables,
         usable_quantities=usables,
         controllable_quantities=controllables,
-        system_constants=copied_constants,
         solver_options=solver_options,
         record_history=record_history,
     )

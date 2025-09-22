@@ -174,11 +174,11 @@ class Trajectory:
             return self.y0
         return self._history_values[idx]
 
-    def history(self) -> dict[str, np.ndarray]:
-        """Return historized setpoint samples as numpy arrays."""
+    def history(self) -> dict[str, List]:
+        """Return historized setpoint samples as dictionary of Lists."""
         return {
-            "time": np.asarray(self._history_times, dtype=float),
-            "value": np.asarray(self._history_values, dtype=float),
+            "time": self._history_times,
+            "value": self._history_values,
         }
 
     def last_setpoint(self) -> Number:

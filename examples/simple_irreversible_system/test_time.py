@@ -3,7 +3,6 @@ import pytest
 pytest.importorskip("matplotlib")
 
 from run_simulation import fast_system
-import timeit
 
 import cProfile
 import pstats

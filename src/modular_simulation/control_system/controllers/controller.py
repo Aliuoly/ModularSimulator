@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import math
-from typing import Union, List, Callable, Tuple, TYPE_CHECKING
+from typing import Union, Callable, Tuple, TYPE_CHECKING
 from numpy.typing import NDArray
 import numpy as np
 from pydantic import BaseModel, PrivateAttr, Field, ConfigDict

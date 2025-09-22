@@ -1,11 +1,11 @@
 import numpy as np
 from pydantic import ConfigDict, Field
 from enum import Enum
-from typing import Dict, Any, Type, ClassVar, List
+from typing import Type, ClassVar, List
 import numba #type: ignore
 
-from modular_simulation.measurables import States, ControlElements, AlgebraicStates
-from modular_simulation.control_system import Trajectory, PIDController
+from modular_simulation.measurables import States, ControlElements, AlgebraicStates, Constants
+from modular_simulation.control_system import Trajectory
 from modular_simulation.system import System, FastSystem
 from numpy.typing import NDArray
 
@@ -35,6 +35,12 @@ class IrreversibleAlgebraicStates(AlgebraicStates):
     model_config = ConfigDict(extra='forbid')
     F_out: float # Outlet flow rate, an algebraic function of Volume
 
+class IrreversibleConstants(Constants):
+    """"""
+    k: float
+    Cv: float
+    CA_in: float
+    
 # 2. Define the System Dynamics
 # =============================
 
@@ -46,58 +52,63 @@ class IrreversibleSystem(System):
 
     @staticmethod
     def _calculate_algebraic_values(
-            y: NDArray,
-            StateMap: Type[Enum],
-            control_elements: ControlElements,
-            system_constants: Dict
-            ) -> Dict[str, Any]:
+            y: NDArray, 
+            y_map: Type[Enum], 
+            u: NDArray,
+            u_map: Type[Enum],
+            k: NDArray,
+            k_map: Type[Enum],
+            ) -> NDArray:
         """
         Calculates the outlet flow (F_out) based on the current reactor volume.
         This is the algebraic part of the DAE system.
         """
         # Ensure volume doesn't go to zero to prevent division errors.
-        volume = max(1e-6, y[StateMap.V.value]) #type: ignore
+        volume = max(1e-6, y[y_map.V.value]) #type: ignore
         
         # F_out = Cv * sqrt(V)
-        F_out = system_constants['Cv'] * (volume**0.5)
+        F_out = k[k_map.Cv.value]* (volume**0.5) #type: ignore
         
-        return {"F_out": F_out}
+        return F_out
 
     @staticmethod
     def rhs(
             t: float,
-            y: NDArray,
-            StateMap: Type[Enum],
-            algebraic_values_dict: Dict[str, Any],
-            control_elements: ControlElements,
-            system_constants: Dict
+            y: NDArray, 
+            y_map: Type[Enum], 
+            u: NDArray, 
+            u_map: Type[Enum], 
+            k: NDArray,
+            k_map: Type[Enum], 
+            algebraic: NDArray,
+            algebraic_map: Type[Enum], 
             ) -> NDArray:
         """
         Calculates the derivatives for the differential states (dV/dt, dA/dt, dB/dt).
         This is the differential part of the DAE system.
         """
         # Unpack values from the inputs
-        F_out = algebraic_values_dict['F_out']
-        F_in = control_elements.F_in
-        k = system_constants['k']
-        CA_in = system_constants['CA_in']
+        F_out = algebraic[algebraic_map.F_out.value] #type: ignore
+        F_in = u[u_map.F_in.value] #type: ignore
+        kc = k[k_map.k.value] #type: ignore
+        CA_in = k[k_map.CA_in.value] #type: ignore
 
         # Unpack current state values using the StateMap for clarity
-        volume = max(1e-6, y[StateMap.V.value]) #type: ignore
-        molarity_A = y[StateMap.A.value] #type: ignore
-        molarity_B = y[StateMap.B.value] #type: ignore
+        volume = max(1e-6, y[y_map.V.value]) #type: ignore
+        molarity_A = y[y_map.A.value] #type: ignore
+        molarity_B = y[y_map.B.value] #type: ignore
         
         # Calculate reaction rate: r = k * [A] * V
-        reaction_rate = molarity_A * volume * k
+        reaction_rate = molarity_A * volume * kc
         
         # Initialize the derivative array
         dy = np.zeros_like(y)
         
         # Calculate the derivatives
         dV_dt = F_in - F_out
-        dy[StateMap.V.value] = dV_dt #type: ignore
-        dy[StateMap.A.value] = (1/volume) * (-reaction_rate + F_in * CA_in - F_out * molarity_A - molarity_A * dV_dt) #type: ignore 
-        dy[StateMap.B.value] = (1/volume) * (2*reaction_rate - F_out * molarity_B - molarity_B * dV_dt) #type: ignore
+        dy[y_map.V.value] = dV_dt #type: ignore
+        dy[y_map.A.value] = (1/volume) * (-reaction_rate + F_in * CA_in - F_out * molarity_A - molarity_A * dV_dt) #type: ignore 
+        dy[y_map.B.value] = (1/volume) * (2*reaction_rate - F_out * molarity_B - molarity_B * dV_dt) #type: ignore
 
         return dy
 

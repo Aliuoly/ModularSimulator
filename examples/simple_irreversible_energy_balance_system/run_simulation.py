@@ -63,7 +63,7 @@ controllers = [
             mv_tag="T_J_in",
             sp_trajectory=Trajectory(300),
             Kp=1.0e-1,
-            Ti=10.0,
+            Ti=50.0,
             mv_range=(200, 350),
             inverted=False,
         ),
@@ -80,9 +80,9 @@ controllers = [
             outer_loop = PIDController(
                 cv_tag="B",
                 mv_tag="T",
-                sp_trajectory=Trajectory(0.02),
-                Kp=8.0e-2,
-                Ti=1.0,
+                sp_trajectory=Trajectory().hold(duration = 15e3, value = 0.02).hold(15e3, 0.05).hold(15e3, 0.1).hold(15e3, 0.01),
+                Kp=2.0e-1,
+                Ti=5.0,
                 mv_range=(250.0, 350.0),
                 inverted=False,
             )
@@ -102,8 +102,8 @@ system_constants = EnergyBalanceConstants(
     rho_cp=4000.0,
     overall_heat_transfer_coefficient=500000.0,
     heat_transfer_area=10.0,
-    jacket_volume=2000.0,
-    jacket_rho_cp=1200.0,
+    jacket_volume=500000.0,
+    jacket_rho_cp=3200.0,
     jacket_flow = 500.0,
 )
 
@@ -124,6 +124,125 @@ readable_system = create_system(
 
 fast_system = readable_system
 
+def plot(system):
+    history = system.measured_history
+    sensor_hist = history["sensors"]
+    sp_hist = system.setpoint_history
+
+    ax = plt.subplot(4, 2, 1)
+    plot_triplet_series(
+        ax,
+        sensor_hist["B"],
+        style="step",
+        line_kwargs={"linestyle": linestyles[j]},
+        label=name,
+    )
+    ax.step(sp_hist['B']['time'], sp_hist['B']['value'], color = 'red', label = 'SP')
+    plt.title("Concentration of B")
+    plt.xlabel("Time")
+    plt.ylabel("[B] (mol/L)")
+    plt.grid(True)
+
+    ax = plt.subplot(4, 2, 2)
+    plot_triplet_series(
+        ax,
+        sensor_hist["F_in"],
+        style="step",
+        line_kwargs={"linestyle": linestyles[j]},
+        label=name,
+    )
+    plt.title("Inlet Flow Rate (F_in)")
+    plt.xlabel("Time")
+    plt.ylabel("Flow (L/s)")
+    plt.grid(True)
+
+    ax = plt.subplot(4, 2, 3)
+    plot_triplet_series(
+        ax,
+        sensor_hist["V"],
+        style="step",
+        line_kwargs={"linestyle": linestyles[j]},
+        label=name,
+    )
+    plt.title("Reactor Volume (V)")
+    plt.xlabel("Time")
+    plt.ylabel("Volume (L)")
+    plt.grid(True)
+
+    ax = plt.subplot(4, 2, 4)
+    plot_triplet_series(
+        ax,
+        sensor_hist["F_out"],
+        style="step",
+        line_kwargs={"linestyle": linestyles[j]},
+        label=name,
+    )
+    plt.title("Outlet Flow Rate (F_out)")
+    plt.xlabel("Time")
+    plt.ylabel("Flow (L/s)")
+    plt.grid(True)
+
+    ax = plt.subplot(4, 2, 5)
+    plot_triplet_series(
+        ax,
+        sensor_hist["T"],
+        style="step",
+        line_kwargs={"linestyle": linestyles[j]},
+        label=name,
+    )
+    ax.step(sp_hist['T']['time'], sp_hist['T']['value'], color = 'red', label = 'SP')
+    plt.title("Reactor Temperature (T)")
+    plt.xlabel("Time")
+    plt.ylabel("Temperature (K)")
+    plt.grid(True)
+
+    ax = plt.subplot(4, 2, 6)
+    plot_triplet_series(
+        ax,
+        sensor_hist["T_J"],
+        style="step",
+        line_kwargs={"linestyle": linestyles[j]},
+        label=name,
+    )
+    
+    ax.step(sp_hist['T_J']['time'], sp_hist['T_J']['value'], color = 'red', label = 'SP')
+    plt.title("Jacket Temperature (T_J)")
+    plt.xlabel("Time")
+    plt.ylabel("Temperature (K)")
+    plt.grid(True)
+
+    ax = plt.subplot(4, 2, 7)
+    plot_triplet_series(
+        ax,
+        sensor_hist["T_J_in"],
+        style="step",
+        line_kwargs={"linestyle": linestyles[j]},
+        label=name,
+    )
+    plt.title("Jacket Inlet Temp (T_J_in)")
+    plt.xlabel("Time")
+    plt.ylabel("Temperature (K)")
+    plt.grid(True)
+
+    ax = plt.subplot(4, 2, 8)
+    plot_triplet_series(
+        ax,
+        sensor_hist["jacket_flow"],
+        style="step",
+        line_kwargs={"linestyle": linestyles[j]},
+        label=name,
+    )
+    plt.title("Jacket Inlet Flow (F_J_in)")
+    plt.xlabel("Time")
+    plt.ylabel("Flow (L/s)")
+    plt.grid(True)
+
+    for idx in range(8):
+        plt.subplot(4, 2, idx + 1)
+        plt.legend()
+
+    plt.tight_layout()
+    plt.show()
 
 # --- 3. Run the Simulation ---
 systems = {"readable": readable_system}
@@ -136,125 +255,7 @@ if __name__ == "__main__":
 
     for j, (name, system) in enumerate(systems.items()):
 
-        system.step(nsteps = 1000)
-        system.extend_controller_trajectory(cv_tag="B", value=0.01)
-        system.step(nsteps = 1000)
+        system.step(nsteps = 2000)
 
-        history = system.measured_history
-        sensor_hist = history["sensors"]
-        sp_hist = system.setpoint_history
+    plot(system)
 
-        ax = plt.subplot(4, 2, 1)
-        plot_triplet_series(
-            ax,
-            sensor_hist["B"],
-            style="step",
-            line_kwargs={"linestyle": linestyles[j]},
-            label=name,
-        )
-        ax.step(sp_hist['B']['time'], sp_hist['B']['value'], color = 'red', label = 'SP')
-        plt.title("Concentration of B")
-        plt.xlabel("Time")
-        plt.ylabel("[B] (mol/L)")
-        plt.grid(True)
-
-        ax = plt.subplot(4, 2, 2)
-        plot_triplet_series(
-            ax,
-            sensor_hist["F_in"],
-            style="step",
-            line_kwargs={"linestyle": linestyles[j]},
-            label=name,
-        )
-        plt.title("Inlet Flow Rate (F_in)")
-        plt.xlabel("Time")
-        plt.ylabel("Flow (L/s)")
-        plt.grid(True)
-
-        ax = plt.subplot(4, 2, 3)
-        plot_triplet_series(
-            ax,
-            sensor_hist["V"],
-            style="step",
-            line_kwargs={"linestyle": linestyles[j]},
-            label=name,
-        )
-        plt.title("Reactor Volume (V)")
-        plt.xlabel("Time")
-        plt.ylabel("Volume (L)")
-        plt.grid(True)
-
-        ax = plt.subplot(4, 2, 4)
-        plot_triplet_series(
-            ax,
-            sensor_hist["F_out"],
-            style="step",
-            line_kwargs={"linestyle": linestyles[j]},
-            label=name,
-        )
-        plt.title("Outlet Flow Rate (F_out)")
-        plt.xlabel("Time")
-        plt.ylabel("Flow (L/s)")
-        plt.grid(True)
-
-        ax = plt.subplot(4, 2, 5)
-        plot_triplet_series(
-            ax,
-            sensor_hist["T"],
-            style="step",
-            line_kwargs={"linestyle": linestyles[j]},
-            label=name,
-        )
-        ax.step(sp_hist['T']['time'], sp_hist['T']['value'], color = 'red', label = 'SP')
-        plt.title("Reactor Temperature (T)")
-        plt.xlabel("Time")
-        plt.ylabel("Temperature (K)")
-        plt.grid(True)
-
-        ax = plt.subplot(4, 2, 6)
-        plot_triplet_series(
-            ax,
-            sensor_hist["T_J"],
-            style="step",
-            line_kwargs={"linestyle": linestyles[j]},
-            label=name,
-        )
-        
-        ax.step(sp_hist['T_J']['time'], sp_hist['T_J']['value'], color = 'red', label = 'SP')
-        plt.title("Jacket Temperature (T_J)")
-        plt.xlabel("Time")
-        plt.ylabel("Temperature (K)")
-        plt.grid(True)
-
-        ax = plt.subplot(4, 2, 7)
-        plot_triplet_series(
-            ax,
-            sensor_hist["T_J_in"],
-            style="step",
-            line_kwargs={"linestyle": linestyles[j]},
-            label=name,
-        )
-        plt.title("Jacket Inlet Temp (T_J_in)")
-        plt.xlabel("Time")
-        plt.ylabel("Temperature (K)")
-        plt.grid(True)
-
-        ax = plt.subplot(4, 2, 8)
-        plot_triplet_series(
-            ax,
-            sensor_hist["jacket_flow"],
-            style="step",
-            line_kwargs={"linestyle": linestyles[j]},
-            label=name,
-        )
-        plt.title("Jacket Inlet Flow (F_J_in)")
-        plt.xlabel("Time")
-        plt.ylabel("Flow (L/s)")
-        plt.grid(True)
-
-    for idx in range(8):
-        plt.subplot(4, 2, idx + 1)
-        plt.legend()
-
-    plt.tight_layout()
-    plt.show()

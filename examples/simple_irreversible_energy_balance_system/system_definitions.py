@@ -73,39 +73,40 @@ class EnergyBalanceSystem(System):
     """Dynamic model of an irreversible reaction with an energy balance."""
 
     @staticmethod
-    def _calculate_algebraic_values(
+    def calculate_algebraic_values(
         y: NDArray,
-        y_map: Type[Enum],
         u: NDArray,
-        u_map: Type[Enum],
         k: NDArray,
+        y_map: Type[Enum],
+        u_map: Type[Enum],
         k_map: Type[Enum],
+        algebraic_map: Type[Enum],
     ) -> NDArray:
         """Calculate the outlet flow (F_out) from the current reactor volume."""
+        return_array = np.zeros(len(algebraic_map))
 
-        del u, u_map
         volume = max(1e-6, float(y[y_map.V.value]))  # type: ignore[arg-type]
         Cv = float(k[k_map.Cv.value])  # type: ignore[arg-type]
-        F_out = Cv * np.sqrt(volume)
-        return np.asarray([F_out], dtype=np.float64)
+        return_array[algebraic_map.F_out.value] = Cv * np.sqrt(volume)
+        return return_array
 
     @staticmethod
     def rhs(
         t: float,
         y: NDArray,
-        y_map: Type[Enum],
         u: NDArray,
-        u_map: Type[Enum],
         k: NDArray,
-        k_map: Type[Enum],
         algebraic: NDArray,
+        y_map: Type[Enum],
+        u_map: Type[Enum],
+        k_map: Type[Enum],
         algebraic_map: Type[Enum],
-    ) -> NDArray:
+        ) -> NDArray:
         """Calculate the differential state derivatives."""
 
         del t
-        F_out = float(algebraic[algebraic_map.F_out.value])  # type: ignore[arg-type]
-        F_in = float(u[u_map.F_in.value])  # type: ignore[arg-type]
+        F_out = float(algebraic[algebraic_map.F_out.value])  # type: ignore
+        F_in = float(u[u_map.F_in.value])  # type: ignore[arg-type]as
         F_J_in = float(k[k_map.jacket_flow.value])  # type: ignore[arg-type]
 
         k0 = float(k[k_map.k0.value])  # type: ignore[arg-type]

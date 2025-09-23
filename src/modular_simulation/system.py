@@ -11,6 +11,8 @@ from modular_simulation.validation import validate_and_link
 from functools import cached_property
 from operator import attrgetter
 import numpy as np
+from numba.typed.typeddict import Dict as NDict
+from numba import types
 from modular_simulation.measurables.base_classes import BaseIndexedModel
 from modular_simulation.control_system.controllers.cascade_controller import CascadeController
 if TYPE_CHECKING:
@@ -21,12 +23,12 @@ from copy import deepcopy
 import logging
 logger = logging.getLogger(__name__)
 
-class StaticParamEnum(IntEnum):
+class StaticMapEnum(IntEnum):
     STATE_MAP = 0
     CONTROL_MAP = 1
     CONSTANT_MAP = 2
     ALGEBRAIC_MAP = 3
-    CONSTANTS = 4
+
 
 
 class System(BaseModel, ABC):
@@ -97,7 +99,8 @@ class System(BaseModel, ABC):
 
     _history: Dict[str, List[ArrayLike]] = PrivateAttr(default_factory = dict)
     _t: float = PrivateAttr(default = 0.)
-    _rhs_static_params: Tuple[Type[Enum], Type[Enum], Type[Enum], Type[Enum], NDArray] = PrivateAttr()
+    _rhs_static_maps: Tuple[Type[Enum], Type[Enum], Type[Enum], Type[Enum]] = PrivateAttr()
+    _constants: NDArray = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
 
@@ -105,17 +108,10 @@ class System(BaseModel, ABC):
     _history_slots: List[Tuple[Callable[[Any], Any], List]] = PrivateAttr(default_factory=list)
 
     def model_post_init(self, __context: Any) -> None:
-        global StaticParamEnum
+        global StaticMapEnum
         super().model_post_init(__context)
         validate_and_link(self)
-
-        params: List[Any] = [0] * 5
-        params[StaticParamEnum.STATE_MAP]     = self.measurable_quantities.states._index_map
-        params[StaticParamEnum.CONTROL_MAP]   = self.measurable_quantities.control_elements._index_map
-        params[StaticParamEnum.CONSTANT_MAP]  = self.measurable_quantities.constants._index_map
-        params[StaticParamEnum.ALGEBRAIC_MAP] = self.measurable_quantities.algebraic_states._index_map
-        params[StaticParamEnum.CONSTANTS]     = self.measurable_quantities.constants.to_array()
-        self._rhs_static_params = tuple(params)
+        self._construct_static_params()
 
         if self.record_history:
             # Build history dict and accessors exactly once
@@ -129,6 +125,15 @@ class System(BaseModel, ABC):
                     # capture the object reference and append list ref
                     self._history_slots.append((lambda o=mq_obj, g=getter: g(o), lst)) #type:ignore[misc]
             self._history['time'] = []
+
+    def _construct_static_params(self) -> None:
+        maps: List[Any] = [0] * 4
+        maps[StaticMapEnum.STATE_MAP]     = self.measurable_quantities.states._index_map
+        maps[StaticMapEnum.CONTROL_MAP]   = self.measurable_quantities.control_elements._index_map
+        maps[StaticMapEnum.CONSTANT_MAP]  = self.measurable_quantities.constants._index_map
+        maps[StaticMapEnum.ALGEBRAIC_MAP] = self.measurable_quantities.algebraic_states._index_map
+        self._constants = self.measurable_quantities.constants.to_array()
+        self._rhs_static_maps = tuple(maps)
 
     def _update_history(self) -> None:
         if not self.record_history:
@@ -157,13 +162,15 @@ class System(BaseModel, ABC):
 
     @staticmethod
     @abstractmethod
-    def _calculate_algebraic_values(
+    def calculate_algebraic_values(
             y: NDArray, 
-            y_map: Type[Enum], 
             u: NDArray,
-            u_map: Type[Enum],
             k: NDArray,
+            y_map: Type[Enum], 
+            u_map: Type[Enum],
             k_map: Type[Enum],
+            algebraic_map: Type[Enum],
+            *args
             ) -> NDArray:
         """
         Calculates derived quantities based on the provided state array, controls, and constants.
@@ -187,13 +194,13 @@ class System(BaseModel, ABC):
     def rhs(
             t: float, 
             y: NDArray, 
-            y_map: Type[Enum], 
             u: NDArray, 
-            u_map: Type[Enum], 
             k: NDArray,
-            k_map: Type[Enum], 
             algebraic: NDArray,
-            algebraic_map: Type[Enum], 
+            u_map: Type[Enum],
+            y_map: Type[Enum],
+            k_map: Type[Enum],
+            algebraic_map: Type[Enum],
             ) -> NDArray:
         """
         Defines the right-hand side of the system's ordinary differential equations.
@@ -212,40 +219,44 @@ class System(BaseModel, ABC):
             A NumPy array of the calculated derivatives (dy/dt).
         """
         pass
-
+    
+    @staticmethod
     def _rhs_wrapper(
-            self, 
             t: float, 
             y: NDArray, 
             u: NDArray,
-            params: Tuple,
+            k: NDArray,
+            y_map: Type[Enum],
+            u_map: Type[Enum],
+            k_map: Type[Enum],
+            algebraic_map: Type[Enum],
+            algebraic_values_function: Callable,
+            rhs_function: Callable,
             ) -> NDArray:
         """
         A concrete wrapper called by the solver. It recalculates algebraic states
         before calling the user-defined `rhs` for the derivatives. This ensures
         correctness even when the solver rejects and retries steps.
         """
-        global StaticParamEnum
-        y_map = params[StaticParamEnum.STATE_MAP]
-        u_map = params[StaticParamEnum.CONTROL_MAP]
-        k = params[StaticParamEnum.CONSTANTS]
-        k_map = params[StaticParamEnum.CONSTANT_MAP]
-        algebraic_map = params[StaticParamEnum.ALGEBRAIC_MAP]
-
-        algebraic_array = self._calculate_algebraic_values(
+        algebraic_array = algebraic_values_function(
             y = y,
-            y_map = y_map,
             u = u,
-            u_map = u_map,
             k = k,
-            k_map = k_map
+            y_map = y_map,
+            u_map = u_map,
+            k_map = k_map,
+            algebraic_map = algebraic_map
         )
-        return self.rhs(
+        return rhs_function(
             t, 
-            y = y, y_map = y_map, 
-            u = u, u_map = u_map,
-            k = k, k_map = k_map,
-            algebraic = algebraic_array, algebraic_map = algebraic_map
+            y = y,
+            u = u,
+            k = k,
+            algebraic = algebraic_array, 
+            y_map = y_map,
+            u_map = u_map,
+            k_map = k_map,
+            algebraic_map = algebraic_map
             )
     
     def step(self, nsteps: int = 1) -> None:
@@ -257,17 +268,24 @@ class System(BaseModel, ABC):
         It configures and runs `solve_ivp`, then updates the system's algebraic
         states with the final, successful result.
         """
-        global StaticParamEnum
+        global StaticMapEnum
+        
+        partial_args = (
+            self._constants,
+            *self._rhs_static_maps,
+            self.calculate_algebraic_values,
+            self.rhs
+            )
         for _ in range(nsteps):
             y0, u0 = self._pre_integration_step()
-
+            complete_args = (u0, *partial_args)
             final_y = y0
             if self.measurable_quantities.states:
                 result = solve_ivp(
                     fun = self._rhs_wrapper,
                     t_span = (self._t, self._t + self.dt),
                     y0 = y0,
-                    args = (u0, self._rhs_static_params),
+                    args = complete_args,
                     **self.solver_options
                 )
                 final_y = result.y[:, -1]
@@ -275,13 +293,9 @@ class System(BaseModel, ABC):
 
             # After the final SUCCESSFUL step, update the actual algebraic_states object.
             if self.measurable_quantities.algebraic_states:
-                final_algebraic_values = self._calculate_algebraic_values(
-                    y = final_y,
-                    y_map = self._rhs_static_params[StaticParamEnum.STATE_MAP], # type: ignore 
-                    u = u0,
-                    u_map = self._rhs_static_params[StaticParamEnum.CONTROL_MAP], # type: ignore 
-                    k = self._rhs_static_params[StaticParamEnum.CONSTANTS], # type: ignore 
-                    k_map = self._rhs_static_params[StaticParamEnum.CONSTANT_MAP], # type: ignore 
+                final_algebraic_values = self.calculate_algebraic_values(
+                    final_y,
+                    *complete_args[:-2] # omit the two callables used for solve_ivp
                 )
                 self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
             
@@ -361,6 +375,7 @@ class System(BaseModel, ABC):
         return history
 
 
+
 class FastSystem(System):
     """
     An abstract base class for performance-optimized systems.
@@ -372,33 +387,14 @@ class FastSystem(System):
     This class overrides the standard simulation loop to call the `_fast` methods.
     """
 
-    def __init__(self, *args, **kwargs):
-        """Initializes the FastSystem, creating the key-to-index mappings."""
-        super().__init__(*args, **kwargs)
-        self._constants_map = self._get_constants_map()
-        self._controls_map = self._get_controls_map()
-
-    # Silences the abstract methods from the parent `System` class.
-    # Users of FastSystem do not implement these readable methods.
-    @staticmethod
-    def _calculate_algebraic_values(*args): pass
-
-    @staticmethod
-    def rhs(*args) : pass
-
-    # --- Performant Path Abstract Methods ---
-    @staticmethod
-    @abstractmethod
-    def _get_constants_map() -> List[str]:
-        """Return an ordered list of keys for the constants dictionary."""
-        pass
-
-    @staticmethod
-    @abstractmethod
-    def _get_controls_map() -> List[str]:
-        """Return an ordered list of keys for the control elements."""
-        pass
+    # replaces System's privateAttr of the same name for numba njit support
+    _rhs_static_maps: Tuple[NDict, NDict, NDict, NDict, NDArray] = PrivateAttr()
     
+    def _construct_static_params(self):
+        """
+        overwrites System's method of the same name to support numba njit decoration
+        """
+        
     @staticmethod
     @abstractmethod
     def _calculate_algebraic_values_fast(y: NDArray, control_elements_arr: NDArray, constants_arr: NDArray) -> NDArray:
@@ -436,38 +432,6 @@ class FastSystem(System):
             control_elements_arr,
             constants_arr,
         )
-
-    def _step(self, dt: float, y0: NDArray) -> NDArray:
-        """Overrides the base `_step` to handle the performant path's data conversion."""
-
-        constants_arr = np.asarray([self.system_constants[k] for k in self._constants_map], dtype=np.float64)
-        control_elements_arr = np.asarray(
-            [getattr(self.measurable_quantities.control_elements, k) for k in self._controls_map],
-            dtype=np.float64,
-        )
-        static_params = (
-            control_elements_arr,
-            constants_arr, # order matters lol
-        )
-        result = solve_ivp(
-            fun=self._rhs_wrapper, t_span=(0, dt), y0=y0, args=static_params, **self.solver_options
-        )
-        
-        final_y = result.y[:, -1]
-
-        if self.measurable_quantities.algebraic_states:
-            constants_arr = np.asarray([self.system_constants[k] for k in self._constants_map], dtype=np.float64)
-            controls_arr = np.asarray(
-                [getattr(self.measurable_quantities.control_elements, k) for k in self._controls_map],
-                dtype=np.float64,
-            )
-            final_alg_arr = self.__class__._calculate_algebraic_values_fast(
-                final_y,
-                controls_arr,
-                constants_arr,
-            )
-            self.measurable_quantities.algebraic_states.update_from_array(final_alg_arr)
-        return final_y
 
 
 

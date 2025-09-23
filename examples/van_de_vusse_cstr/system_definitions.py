@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar, Dict, List, Type
+from typing import Any, ClassVar, Dict, Type
 
-import numba  # type: ignore
+from numba import njit
+from numba.typed.typeddict import Dict as NDict
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import ConfigDict, Field, PrivateAttr
@@ -170,68 +171,60 @@ class VanDeVusseFastSystem(FastSystem):
     """Numba-friendly version of the Van de Vusse reactor."""
 
     @staticmethod
-    def _get_constants_map() -> List[str]:
-        return [
-            "F",
-            "Ca0",
-            "T0",
-            "k10",
-            "E1",
-            "dHr1",
-            "rho",
-            "Cp",
-            "kw",
-            "AR",
-            "VR",
-            "mK",
-            "CpK",
-            "Fj",
-        ]
-
-    @staticmethod
-    def _get_controls_map() -> List[str]:
-        return ["Tj_in"]
-
-    @staticmethod
-    def _calculate_algebraic_values_fast(
+    @njit
+    def calculate_algebraic_values_fast(
         y: NDArray,
-        control_elements_arr: NDArray,
-        constants_arr: NDArray,
+        u: NDArray,
+        k: NDArray,
+        y_map: NDict,
+        u_map: NDict,
+        k_map: NDict,
+        algebraic_map: NDict,
+        algebraic_size: int,
     ) -> NDArray:
-        del y, control_elements_arr, constants_arr
-        return np.zeros(0, dtype=np.float64)
+        del y, u, k, y_map, u_map, k_map, algebraic_map
+        return np.zeros(algebraic_size)
 
     @staticmethod
-    @numba.jit(nopython=True)
+    @njit
     def rhs_fast(
         t: float,
         y: NDArray,
-        algebraic_states_arr: NDArray,
-        control_elements_arr: NDArray,
-        constants_arr: NDArray,
+        u: NDArray,
+        k: NDArray,
+        algebraic: NDArray,
+        y_map: NDict,
+        u_map: NDict,
+        k_map: NDict,
+        algebraic_map: NDict,
     ) -> NDArray:
-        del t, algebraic_states_arr
+        del t, algebraic, algebraic_map
 
-        Ca, Cb, T, Tk = y
+        Ca = y[y_map["Ca"]][0]
+        Cb = y[y_map["Cb"]][0]
+        T = y[y_map["T"]][0]
+        Tk = y[y_map["Tk"]][0]
 
-        F = constants_arr[0]
-        Ca0 = constants_arr[1]
-        T0 = constants_arr[2]
-        k10 = constants_arr[3]
-        E1 = constants_arr[4]
-        dHr1 = constants_arr[5]
-        rho = constants_arr[6]
-        Cp = constants_arr[7]
-        kw = constants_arr[8]
-        AR = constants_arr[9]
-        VR = constants_arr[10]
-        mK = constants_arr[11]
-        CpK = constants_arr[12]
-        Fj = constants_arr[13]
+        F = k[k_map["F"]][0]
+        Ca0 = k[k_map["Ca0"]][0]
+        T0 = k[k_map["T0"]][0]
+        k10 = k[k_map["k10"]][0]
+        E1 = k[k_map["E1"]][0]
+        dHr1 = k[k_map["dHr1"]][0]
+        rho = k[k_map["rho"]][0]
+        Cp = k[k_map["Cp"]][0]
+        kw = k[k_map["kw"]][0]
+        AR = k[k_map["AR"]][0]
+        VR = k[k_map["VR"]][0]
+        mK = k[k_map["mK"]][0]
+        CpK = k[k_map["CpK"]][0]
+        Fj = k[k_map["Fj"]][0]
 
-        Tj_in = control_elements_arr[0]
+        Tj_in = u[u_map["Tj_in"]][0]
 
-        temperature_kelvin = max(1e-6, T + 273.15)
+        temperature_kelvin = T + 273.15
+        if temperature_kelvin < 1e-6:
+            temperature_kelvin = 1e-6
 
         k1 = k10 * np.exp(-E1 / temperature_kelvin)
         r1 = k1 * VR * Ca
@@ -239,20 +232,30 @@ class VanDeVusseFastSystem(FastSystem):
         dCa = (-r1 + F * (Ca0 - Ca)) / VR
         dCb = (r1 - F * Cb) / VR
 
-        heat_capacity_term = max(1e-9, rho * Cp * VR)
+        heat_capacity_term = rho * Cp * VR
+        if heat_capacity_term < 1e-9:
+            heat_capacity_term = 1e-9
         dT = (
             F * rho * Cp * (T0 - T)
             - r1 * dHr1
             + kw * AR * (Tk - T)
         ) / heat_capacity_term
 
-        jacket_capacity_term = max(1e-9, mK * CpK)
+        jacket_capacity_term = mK * CpK
+        if jacket_capacity_term < 1e-9:
+            jacket_capacity_term = 1e-9
         dTk = (
             Fj * CpK * (Tj_in - Tk)
             + kw * AR * (T - Tk)
         ) / jacket_capacity_term
 
-        return np.array([dCa, dCb, dT, dTk], dtype=np.float64)
+        dy = np.zeros_like(y)
+        dy[y_map["Ca"]] = dCa
+        dy[y_map["Cb"]] = dCb
+        dy[y_map["T"]] = dT
+        dy[y_map["Tk"]] = dTk
+
+        return dy
 
 
 class PIController(Controller):

@@ -1,7 +1,8 @@
 from enum import Enum
-from typing import ClassVar, List, Type
+from typing import ClassVar, Type
 
-import numba  # type: ignore
+from numba import njit
+from numba.typed.typeddict import Dict as NDict
 import numpy as np
 from numpy.typing import NDArray
 
@@ -175,107 +176,109 @@ class EnergyBalanceFastSystem(FastSystem):
     """A performance-optimized implementation of the energy balance system."""
 
     @staticmethod
-    def _get_constants_map() -> List[str]:
-        return [
-            "k0",
-            "activation_energy",
-            "gas_constant",
-            "Cv",
-            "CA_in",
-            "T_in",
-            "reaction_enthalpy",
-            "rho_cp",
-            "overall_heat_transfer_coefficient",
-            "heat_transfer_area",
-            "jacket_volume",
-            "jacket_rho_cp",
-            "jacket_inlet_temperature",
-        ]
-
-    @staticmethod
-    def _get_controls_map() -> List[str]:
-        return ["F_in", "F_J_in"]
-
-    @staticmethod
-    @numba.jit(nopython=True)
-    def _calculate_algebraic_values_fast(
+    @njit
+    def calculate_algebraic_values_fast(
         y: NDArray,
-        control_elements_arr: NDArray,
-        constants_arr: NDArray,
+        u: NDArray,
+        k: NDArray,
+        y_map: NDict,
+        u_map: NDict,
+        k_map: NDict,
+        algebraic_map: NDict,
+        algebraic_size: int,
     ) -> NDArray:
-        del control_elements_arr
-        Cv = constants_arr[3]
-        volume = max(1e-6, y[0])
-        F_out = Cv * np.sqrt(volume)
-        return np.asarray([F_out], dtype=np.float64)
+        del u
+        result = np.zeros(algebraic_size)
+        volume_slice = y_map["V"]
+        volume = y[volume_slice][0]
+        if volume < 1e-6:
+            volume = 1e-6
+
+        Cv = k[k_map["Cv"]][0]
+        result_slice = algebraic_map["F_out"]
+        result[result_slice] = Cv * (volume ** 0.5)
+        return result
 
     @staticmethod
-    @numba.jit(nopython=True)
+    @njit
     def rhs_fast(
         t: float,
         y: NDArray,
-        algebraic_states_arr: NDArray,
-        control_elements_arr: NDArray,
-        constants_arr: NDArray,
+        u: NDArray,
+        k: NDArray,
+        algebraic: NDArray,
+        y_map: NDict,
+        u_map: NDict,
+        k_map: NDict,
+        algebraic_map: NDict,
     ) -> NDArray:
         del t
-        V_idx, A_idx, B_idx, T_idx, Tj_idx = 0, 1, 2, 3, 4
 
-        volume = max(1e-6, y[V_idx])
-        molarity_A = y[A_idx]
-        molarity_B = y[B_idx]
-        reactor_temperature = y[T_idx]
-        jacket_temperature = y[Tj_idx]
+        volume_slice = y_map["V"]
+        volume = y[volume_slice][0]
+        if volume < 1e-6:
+            volume = 1e-6
+        molarity_A = y[y_map["A"]][0]
+        molarity_B = y[y_map["B"]][0]
+        reactor_temperature = y[y_map["T"]][0]
+        jacket_temperature = y[y_map["T_J"]][0]
 
-        k0 = constants_arr[0]
-        activation_energy = constants_arr[1]
-        gas_constant = constants_arr[2]
+        F_out = algebraic[algebraic_map["F_out"]][0]
+        F_in = u[u_map["F_in"]][0]
+        F_J_in = k[k_map["jacket_flow"]][0]
 
-        CA_in = constants_arr[4]
-        feed_temperature = constants_arr[5]
-        reaction_enthalpy = constants_arr[6]
-        rho_cp = max(1e-9, constants_arr[7])
-        overall_heat_transfer_coefficient = constants_arr[8]
-        heat_transfer_area = constants_arr[9]
-        jacket_volume = max(1e-9, constants_arr[10])
-        jacket_rho_cp = max(1e-9, constants_arr[11])
-        jacket_inlet_temperature = constants_arr[12]
+        k0 = k[k_map["k0"]][0]
+        activation_energy = k[k_map["activation_energy"]][0]
+        gas_constant = k[k_map["gas_constant"]][0]
+        CA_in = k[k_map["CA_in"]][0]
+        feed_temperature = k[k_map["T_in"]][0]
+        reaction_enthalpy = k[k_map["reaction_enthalpy"]][0]
+        rho_cp = k[k_map["rho_cp"]][0]
+        if rho_cp < 1e-9:
+            rho_cp = 1e-9
+        overall_heat_transfer_coefficient = k[k_map["overall_heat_transfer_coefficient"]][0]
+        heat_transfer_area = k[k_map["heat_transfer_area"]][0]
+        jacket_volume = k[k_map["jacket_volume"]][0]
+        if jacket_volume < 1e-9:
+            jacket_volume = 1e-9
+        jacket_rho_cp = k[k_map["jacket_rho_cp"]][0]
+        if jacket_rho_cp < 1e-9:
+            jacket_rho_cp = 1e-9
+        jacket_inlet_temperature = u[u_map["T_J_in"]][0]
 
         UA = overall_heat_transfer_coefficient * heat_transfer_area
 
-        F_in = control_elements_arr[0]
-        F_J_in = control_elements_arr[1]
-        F_out = algebraic_states_arr[0]
-
-        arrhenius_temperature = max(1e-6, reactor_temperature)
+        arrhenius_temperature = reactor_temperature
+        if arrhenius_temperature < 1e-6:
+            arrhenius_temperature = 1e-6
         rate_constant = k0 * np.exp(-activation_energy / (gas_constant * arrhenius_temperature))
         reaction_rate = molarity_A * volume * rate_constant
 
         dy = np.zeros_like(y)
         dV_dt = F_in - F_out
-        dy[V_idx] = dV_dt
+        dy[y_map["V"]] = dV_dt
 
-        dy[A_idx] = (1.0 / volume) * (
+        dy[y_map["A"]] = (1.0 / volume) * (
             -reaction_rate
             + F_in * CA_in
             - F_out * molarity_A
             - molarity_A * dV_dt
         )
 
-        dy[B_idx] = (1.0 / volume) * (
+        dy[y_map["B"]] = (1.0 / volume) * (
             2.0 * reaction_rate
             - F_out * molarity_B
             - molarity_B * dV_dt
         )
 
         heat_generation = reaction_enthalpy * reaction_rate
-        dy[T_idx] = (
+        dy[y_map["T"]] = (
             (F_in / volume) * (feed_temperature - reactor_temperature)
             + heat_generation / (rho_cp * volume)
             - UA * (reactor_temperature - jacket_temperature) / (rho_cp * volume)
         )
 
-        dy[Tj_idx] = (
+        dy[y_map["T_J"]] = (
             (F_J_in / jacket_volume)
             * (jacket_inlet_temperature - jacket_temperature)
             + UA * (reactor_temperature - jacket_temperature)

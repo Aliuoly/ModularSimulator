@@ -4,14 +4,12 @@ from modular_simulation.quantities.controllable_quantities import ControllableQu
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from numpy.typing import NDArray, ArrayLike
-from typing import Any, Type, Dict, List, TYPE_CHECKING, Tuple, Callable
+from typing import Any, Type, Dict, List, TYPE_CHECKING, Tuple
 from enum import Enum, IntEnum
 from scipy.integrate import solve_ivp #type: ignore
 from modular_simulation.validation import validate_and_link
 from functools import cached_property
-from operator import attrgetter
 import numpy as np
-from modular_simulation.measurables.base_classes import BaseIndexedModel
 if TYPE_CHECKING:
     from modular_simulation.measurables import States, AlgebraicStates, ControlElements, Constants
     from modular_simulation.usables import Sensor, Calculation, TimeValueQualityTriplet
@@ -56,7 +54,7 @@ class System(BaseModel, ABC):
         _history (List[Dict]): A log of the system's state at each time step.
     """
     dt: float = Field(
-        ...,
+        default=1.0,
         description = (
             "How often the system's sensors, calculations, and controllers update. "
             "The solver takes adaptive 'internal steps' regardless of this value to update the system's states. "
@@ -80,6 +78,13 @@ class System(BaseModel, ABC):
             "Defines the controllers that manipulate the system's `ControlElements`."
         )
     )
+    system_constants: Dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional dictionary of constants for backward compatibility. "
+            "When provided, the measurable quantities' constants are updated with these values."
+        ),
+    )
     solver_options: Dict[str, Any] = Field(
         default_factory = lambda : {'method': 'LSODA'},
         description = (
@@ -94,14 +99,10 @@ class System(BaseModel, ABC):
         )
     )
 
-    _history: Dict[str, List[ArrayLike]] = PrivateAttr(default_factory = dict)
     _t: float = PrivateAttr(default = 0.)
     _rhs_static_params: Tuple[Type[Enum], Type[Enum], Type[Enum], Type[Enum], NDArray] = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
-
-    # add private attrs
-    _history_slots: List[Tuple[Callable[[Any], Any], List]] = PrivateAttr(default_factory=list)
 
     def model_post_init(self, __context: Any) -> None:
         global StaticParamEnum
@@ -116,26 +117,19 @@ class System(BaseModel, ABC):
         params[StaticParamEnum.CONSTANTS]     = self.measurable_quantities.constants.to_array()
         self._rhs_static_params = tuple(params)
 
+        if self.system_constants:
+            updated_constants = self.measurable_quantities.constants.model_copy(
+                update=self.system_constants
+            )
+            object.__setattr__(self.measurable_quantities, "constants", updated_constants)
+
         if self.record_history:
-            # Build history dict and accessors exactly once
-            mq = self.measurable_quantities
-            for mq_name in mq.__class__.model_fields.keys():
-                mq_obj: BaseIndexedModel = getattr(mq, mq_name)
-                for tag in mq_obj.__class__.model_fields.keys():
-                    lst = [] # type:ignore
-                    self._history[tag] = lst
-                    getter = attrgetter(tag)
-                    # capture the object reference and append list ref
-                    self._history_slots.append((lambda o=mq_obj, g=getter: g(o), lst)) #type:ignore[misc]
-            self._history['time'] = []
+            self.measurable_quantities.initialize_history()
 
     def _update_history(self) -> None:
         if not self.record_history:
             return
-        # simple tight loop: call getter, append to pre-bound list
-        for getter, lst in self._history_slots:
-            lst.append(getter()) #type:ignore[call-arg]
-        self._history['time'].append(self._t)
+        self.measurable_quantities.record_history(self._t)
 
 
     def _pre_integration_step(self) -> Tuple[NDArray, NDArray]:
@@ -213,9 +207,9 @@ class System(BaseModel, ABC):
         pass
 
     def _rhs_wrapper(
-            self, 
-            t: float, 
-            y: NDArray, 
+            self,
+            t: float,
+            y: NDArray,
             u: NDArray,
             params: Tuple,
             ) -> NDArray:
@@ -231,23 +225,73 @@ class System(BaseModel, ABC):
         k_map = params[StaticParamEnum.CONSTANT_MAP]
         algebraic_map = params[StaticParamEnum.ALGEBRAIC_MAP]
 
-        algebraic_array = self._calculate_algebraic_values(
-            y = y,
-            y_map = y_map,
-            u = u,
-            u_map = u_map,
-            k = k,
-            k_map = k_map
+        algebraic_array = self._call_calculate_algebraic_values(y, y_map, u, u_map, k, k_map)
+        return self._call_rhs(
+            t,
+            y,
+            y_map,
+            u,
+            u_map,
+            k,
+            k_map,
+            algebraic_array,
+            algebraic_map,
         )
-        return self.rhs(
-            t, 
-            y = y, y_map = y_map, 
-            u = u, u_map = u_map,
-            k = k, k_map = k_map,
-            algebraic = algebraic_array, algebraic_map = algebraic_map
+
+    def _call_calculate_algebraic_values(
+        self,
+        y: NDArray,
+        y_map: Type[Enum],
+        u: NDArray,
+        u_map: Type[Enum],
+        k: NDArray,
+        k_map: Type[Enum],
+    ) -> NDArray:
+        try:
+            return self._calculate_algebraic_values(y, y_map, u, u_map, k, k_map)
+        except TypeError:
+            return self._calculate_algebraic_values(
+                y,
+                y_map,
+                self.measurable_quantities.control_elements,
+                self.measurable_quantities.constants,
+            )
+
+    def _call_rhs(
+        self,
+        t: float,
+        y: NDArray,
+        y_map: Type[Enum],
+        u: NDArray,
+        u_map: Type[Enum],
+        k: NDArray,
+        k_map: Type[Enum],
+        algebraic: NDArray,
+        algebraic_map: Type[Enum],
+    ) -> NDArray:
+        try:
+            return self.rhs(
+                t,
+                y=y,
+                y_map=y_map,
+                u=u,
+                u_map=u_map,
+                k=k,
+                k_map=k_map,
+                algebraic=algebraic,
+                algebraic_map=algebraic_map,
+            )
+        except TypeError:
+            return self.rhs(
+                t,
+                y,
+                y_map,
+                {},
+                self.measurable_quantities.control_elements,
+                self.measurable_quantities.constants,
             )
     
-    def step(self) -> None:
+    def step(self, steps: int | float | None = None) -> None:
         """
         The main public method to advance the simulation by one time step.
 
@@ -257,37 +301,39 @@ class System(BaseModel, ABC):
         states with the final, successful result.
         """
         global StaticParamEnum
+        iterations = int(steps) if steps is not None else 1
+        if iterations <= 0:
+            return
 
-        y0, u0 = self._pre_integration_step()
+        for _ in range(iterations):
+            y0, u0 = self._pre_integration_step()
 
-        final_y = y0
-        if self.measurable_quantities.states:
-            result = solve_ivp(
-                fun = self._rhs_wrapper,
-                t_span = (self._t, self._t + self.dt),
-                y0 = y0,
-                args = (u0, self._rhs_static_params),
-                **self.solver_options
-            )
-            final_y = result.y[:, -1]
-            self.measurable_quantities.states.update_from_array(final_y)
+            final_y = y0
+            if self.measurable_quantities.states:
+                result = solve_ivp(
+                    fun = self._rhs_wrapper,
+                    t_span = (self._t, self._t + self.dt),
+                    y0 = y0,
+                    args = (u0, self._rhs_static_params),
+                    **self.solver_options
+                )
+                final_y = result.y[:, -1]
+                self.measurable_quantities.states.update_from_array(final_y)
 
-        # After the final SUCCESSFUL step, update the actual algebraic_states object.
-        if self.measurable_quantities.algebraic_states:
-            final_algebraic_values = self._calculate_algebraic_values(
-                y = final_y,
-                y_map = self._rhs_static_params[StaticParamEnum.STATE_MAP], # type: ignore 
-                u = u0,
-                u_map = self._rhs_static_params[StaticParamEnum.CONTROL_MAP], # type: ignore 
-                k = self._rhs_static_params[StaticParamEnum.CONSTANTS], # type: ignore 
-                k_map = self._rhs_static_params[StaticParamEnum.CONSTANT_MAP], # type: ignore 
-            )
-            self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
-        
-        self._t += self.dt
-        self._update_history()
-        return 
-    
+            if self.measurable_quantities.algebraic_states:
+                final_algebraic_values = self._call_calculate_algebraic_values(
+                    final_y,
+                    self._rhs_static_params[StaticParamEnum.STATE_MAP],  # type: ignore
+                    u0,
+                    self._rhs_static_params[StaticParamEnum.CONTROL_MAP],  # type: ignore
+                    self._rhs_static_params[StaticParamEnum.CONSTANTS],  # type: ignore
+                    self._rhs_static_params[StaticParamEnum.CONSTANT_MAP],  # type: ignore
+                )
+                self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
+
+            self._t += self.dt
+            self._update_history()
+
     def extend_controller_trajectory(self, cv_tag: str, value: float | None = None) -> "Trajectory":
         """
         used to 'extend' the setpoint trajectory of a controller from the current time onwards.
@@ -329,39 +375,19 @@ class System(BaseModel, ABC):
     def measured_history(self) -> Dict[str, Any]:
         """Returns historized measurements and calculations."""
 
-        sensors_detail: Dict[str, List[TimeValueQualityTriplet]] = {}
-        calculations_detail: Dict[str, List[TimeValueQualityTriplet]] = {}
-        history: Dict[str, Any] = {
-            "sensors": sensors_detail,
-            "calculations": calculations_detail,
-        }
-
-        for sensor in self.usable_quantities.sensors:
-            sensors_detail[sensor.measurement_tag] = sensor.measurement_history()
-
-        for calculation in self.usable_quantities.calculations:
-            calculations_detail[calculation.output_tag] = calculation.history()
-
-        return history
+        return self.usable_quantities.history
 
     @property
     def history(self) -> Dict[str, List]:
         """Returns a trimmed copy of the full history dictionary."""
         if not self.record_history:
             return {}
-        return self._history
+        return self.measurable_quantities.history
 
     @property
     def setpoint_history(self) -> Dict[str, Dict[str, List]]:
         """Returns historized controller setpoints keyed by ``cv_tag``."""
-        history: Dict[str, Dict[str, List]] = {}
-        for controller in self.controllable_quantities.controllers:
-            traj_hist = controller.sp_trajectory.history()
-            history[controller.cv_tag] = {
-                "time": traj_hist["time"].copy(),
-                "value": traj_hist["value"].copy(),
-            }
-        return history
+        return self.controllable_quantities.setpoint_history
 
 
 class FastSystem(System):

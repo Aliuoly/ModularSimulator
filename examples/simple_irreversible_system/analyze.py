@@ -3,7 +3,7 @@ import pstats
 import io
 
 # Import your existing simulation setups
-from run_simulation import readable_system
+from run_simulation import readable_system, fast_system
 import numpy as np
 from tqdm import tqdm
 
@@ -23,12 +23,11 @@ else:
     sp_trajs = sp_trajs[:N_STEPS]
 
 def run_simulation(system, iterations: int, dt: float):
-    """A simple function to run the simulation steps."""
     for i in tqdm(range(iterations)):
         system.step()
         system.extend_controller_trajectory(cv_tag = 'B', value = sp_trajs[i])
 
-systems = { "readable": readable_system,}
+systems = { "readable": readable_system,"fast": fast_system}
 print("--- Starting Profiling Session ---")
 print(f"Running {N_STEPS} steps with dt={DT} for system .")
 
@@ -42,9 +41,8 @@ for name, system in systems.items():
     run_simulation(system, N_STEPS, DT)
     profiler.disable()
     s = io.StringIO()
-    sortby = pstats.SortKey.FILENAME
-    ps = pstats.Stats(profiler, stream=s).sort_stats(sortby)
-    ps.sort_stats(pstats.SortKey.FILENAME).print_stats("modular_simulation|simple_Irreversible_system")
+    ps = pstats.Stats(profiler, stream=s)
+    ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats("modular_simulation|simple_Irreversible_system")
     print(s.getvalue())
 
     print(f"System '{name}' profiling complete. ")

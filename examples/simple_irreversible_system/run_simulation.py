@@ -118,14 +118,11 @@ if __name__ == "__main__":
     linestyles = ['-', '--']
     for j, (system_name, system) in enumerate(systems.items()):
         # --- First simulation run ---
-        for i in range(5000):
-            system.step() #type: ignore
-
+        system.step(nsteps = 5000) #type: ignore
         # --- Change the setpoint and continue the simulation ---
-        # Access the controller via the controllable_quantities object.
         system.extend_controller_trajectory(cv_tag = "B", value = 0.2)
-        for i in range(5000):
-            system.step()  #type: ignore
+        system.step(nsteps = 5000)  #type: ignore
+            
 
         # 3. Plot the results.
         # =====================

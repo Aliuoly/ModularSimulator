@@ -74,23 +74,59 @@ class CascadeController(Controller):
         self._auto_source = self.inner_loop.active_sp_trajectory()
         return self
 
-    def _initialize(self, usable_quantities, control_elements) -> None:  # type: ignore[override]
+    def _initialize(
+        self,
+        usable_quantities, 
+        control_elements,
+        is_cascade_outerloop: bool = False,
+        **kwargs,
+        ) -> None:  # type: ignore[override]
         self._usables = usable_quantities
 
-        self.outer_loop._initialize(usable_quantities, control_elements)
-        self.inner_loop._initialize(usable_quantities, control_elements)
+        # Initialize the inner loop first so its MV linkage is established before
+        # the cascade rewires it. When this cascade acts as the outer loop of a
+        # higher-level cascade, ``is_cascade_outerloop`` is True and the inner
+        # loop should avoid binding directly to the final control element.
+        self.inner_loop._initialize(
+            usable_quantities,
+            control_elements,
+            is_cascade_outerloop=is_cascade_outerloop,
+            **kwargs,
+        )
 
-        self._cv_getter = self.outer_loop._cv_getter
-        self._mv_setter = self.inner_loop._mv_setter
+        # don't initialize the outerloop's mv_setter
+        self.outer_loop._initialize(
+            usable_quantities,
+            control_elements,
+            is_cascade_outerloop=True,
+            **kwargs,
+        )
+
+
+        self._cv_getter = self.outer_loop._cv_getter #type:ignore
         self._last_value = self.inner_loop._last_value
 
-        def _assign_inner_setpoint(value):
+        original_inner_mv_setter = self.inner_loop._mv_setter
+        self._mv_setter = original_inner_mv_setter
+
+        def _cascade_inner_mv_dispatch(value):
+            target = self._mv_setter
+            if target is None:
+                raise RuntimeError(
+                    "Cascade controller inner loop is not linked to a manipulated variable. "
+                    "Ensure the cascade is attached to a downstream control element or controller."
+                )
+            target(value)
+
+        self.inner_loop._mv_setter = _cascade_inner_mv_dispatch
+        def _outer_loop_time() -> float:
             last = self.outer_loop._last_value
             if last is None:
                 raise RuntimeError("Outer loop has not produced a value yet.")
-            self.inner_loop.update_trajectory(last.t, value)
+            return float(last.t)
 
-        self.outer_loop._mv_setter = _assign_inner_setpoint
+        writer = self.inner_loop.active_sp_trajectory().writer(_outer_loop_time)
+        self.outer_loop._mv_setter = writer
 
     def update(self, t: float) -> TimeValueQualityTriplet:  # type: ignore[override]
         if self.mode is ControllerMode.cascade:
@@ -103,7 +139,19 @@ class CascadeController(Controller):
         result = self.inner_loop.update(t)
         self._last_value = result
         return result
-
+    @property
+    def sp_history(self):
+        controller = self
+        return_dict = {}
+        while isinstance(controller, CascadeController):
+            # get inner loop history and append to result
+            return_dict.update(controller.inner_loop.sp_history)
+            # proceed to the outer loop
+            controller = controller.outer_loop
+        # once out of loop, the controller is a normal controller
+        return_dict.update(controller.sp_history)
+        return return_dict
+    
     def active_sp_trajectory(self) -> Trajectory:
         if self.mode is ControllerMode.cascade:
             return self.outer_loop.active_sp_trajectory()

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import math
-from typing import Union, Callable, Tuple, TYPE_CHECKING
+from typing import Union, Callable, Tuple, TYPE_CHECKING, Dict, List
 from numpy.typing import NDArray
 import numpy as np
 from pydantic import BaseModel, PrivateAttr, Field, ConfigDict
@@ -47,6 +47,7 @@ class Controller(BaseModel, ABC):
     _u0: float | NDArray = PrivateAttr(default = 0.)
     _last_sp_command: float | None = PrivateAttr(default=None)
     _last_sp_time: float | None = PrivateAttr(default=None)
+    _sp_history: Dict[str, List] = PrivateAttr(default_factory = lambda : {'time': [], 'value': []})
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
     
     def _initialize_cv_getter(
@@ -82,27 +83,49 @@ class Controller(BaseModel, ABC):
             )
     def _initialize_mv_setter(
         self,
-        control_elements: "ControlElements"
+        control_elements: "ControlElements",
+        usable_quantities: "UsableQuantities",
+        is_cascade_outerloop: bool = False,
         ) -> None:
+        
         found = False
-        for control_element_name in control_elements.__class__.model_fields:
-            if control_element_name == self.mv_tag:
-                # set the '0 point' value with whatever the measurement is
-                self._u0 = getattr(control_elements, control_element_name)
-                self._mv_setter = lambda value : setattr(control_elements, self.mv_tag, value)
+        if not is_cascade_outerloop:
+            for control_element_name in control_elements.__class__.model_fields:
+                if control_element_name == self.mv_tag:
+                    # set the '0 point' value with whatever the measurement is
+                    self._u0 = getattr(control_elements, control_element_name)
+                    self._mv_setter = lambda value : setattr(control_elements, self.mv_tag, value)
+                    found = True
+                    break
+            if not found:
+                raise AttributeError(
+                    f"{self.cv_tag} controller's could not be initialized. "
+                    f"The specified manipulated variable tag '{self.mv_tag}' is not defined as a control element."
+                    f"Available control elements are: {', '.join([ce for ce in control_elements.__class__.model_fields])}."
+                )
+        else:
+            for tag, initial_val in usable_quantities.usable_results.items():
+                if tag == self.mv_tag:
+                    self._u0 = initial_val.value
+                    found = True
+                    break
+            if not found and hasattr(control_elements, self.mv_tag):
+                self._u0 = getattr(control_elements, self.mv_tag)
                 found = True
-        if not found:
-            raise AttributeError(
-                f"{self.cv_tag} controller's could not be initialized. "
-                f"The specified manipulated variable tag '{self.mv_tag}' is not defined as a control element."
-                f"Available control elements are: {', '.join([ce for ce in control_elements.__class__.model_fields])}."
-            )
+            if not found:
+                raise AttributeError(
+                    f"outerloop controller for '{self.cv_tag}' could not be initialized. "
+                    f"The specified manipulated variable tag '{self.mv_tag}' is not defined as a usable quantity."
+                    f"Available usable quantities are: {', '.join([uq for uq in usable_quantities.usable_results])}."
+                )
+
         self._last_value = TimeValueQualityTriplet(t = 0, value = self._u0, ok = True)
         
     def _initialize(
         self,
         usable_quantities: "UsableQuantities",
         control_elements: ControlElements,
+        is_cascade_outerloop: bool = False,
         ) -> None:
         """
         establish the link between sensor corresponding to the CV and 
@@ -110,7 +133,7 @@ class Controller(BaseModel, ABC):
         """
         self._usables = usable_quantities
         self._initialize_cv_getter(usable_quantities.sensors, usable_quantities.calculations)
-        self._initialize_mv_setter(control_elements)
+        self._initialize_mv_setter(control_elements, usable_quantities, is_cascade_outerloop)
 
     def update(self, t: float) -> Union[float, NDArray[np.float64]]:
         # 1. get pv
@@ -118,6 +141,8 @@ class Controller(BaseModel, ABC):
         # 2. get sp
         raw_sp = self.sp_trajectory(t)
         sp = self._apply_setpoint_ramp(raw_sp, t)
+        self._sp_history['time'].append(t)
+        self._sp_history['value'].append(raw_sp)
         # 3. compute control output
         control_output = self._control_algorithm(cv, sp, t)
 
@@ -135,6 +160,10 @@ class Controller(BaseModel, ABC):
                 "Make sure system was initialized with the create_system function."
                 )
         return self._last_value
+    
+    @property
+    def sp_history(self):
+        return {self.cv_tag: self._sp_history.copy()}
 
     def update_trajectory(
             self,

@@ -8,7 +8,7 @@ from modular_simulation.system import create_system
 from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.plotting import plot_triplet_series
 
-from .system_definitions import (
+from system_definitions import (
     ConstantTrajectory,
     HeatDutyCalculation,
     PIController,
@@ -106,7 +106,7 @@ fast_system = create_system(
     system_constants=system_constants,
 )
 
-systems = {"readable": readable_system, "fast": fast_system}
+systems = {"readable": readable_system}
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -118,8 +118,7 @@ if __name__ == "__main__":
         for _ in range(6000):
             system.step()
 
-        controller = system.controllable_quantities.controllers[0]
-        controller.sp_trajectory.change(85.0)
+        system.extend_controller_trajectory(cv_tag = "T", value = 90)
 
         for _ in range(6000):
             system.step()

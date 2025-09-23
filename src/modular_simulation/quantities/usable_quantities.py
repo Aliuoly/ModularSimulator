@@ -30,4 +30,10 @@ class UsableQuantities(BaseModel):
             self._usable_results[calculation.output_tag] = calculation.calculate(t)
         
         return self._usable_results
+    
+    @property
+    def usable_results(self):
+        if len(self._usable_results.keys()) == 0:
+            self.update(t = 0)
+        return self._usable_results
 

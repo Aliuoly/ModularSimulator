@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field, replace
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Callable
 import bisect
 import math
 import numpy as np
@@ -180,7 +180,16 @@ class Trajectory:
             "time": self._history_times,
             "value": self._history_values,
         }
+    def writer(self, time_getter: Callable[[], float]) -> Callable[[Number], None]:
+        """Return a callable that writes setpoints at the time provided by ``time_getter``."""
 
+        def _write(value: Number) -> None:
+            t = time_getter()
+            if t is None:
+                raise RuntimeError("Cannot write to trajectory without a valid time reference.")
+            self.set_now(float(t), float(value))
+
+        return _write
     def last_setpoint(self) -> Number:
         if self._last_set_value is not None:
             return self._last_set_value

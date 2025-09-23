@@ -12,6 +12,7 @@ from functools import cached_property
 from operator import attrgetter
 import numpy as np
 from modular_simulation.measurables.base_classes import BaseIndexedModel
+from modular_simulation.control_system.controllers.cascade_controller import CascadeController
 if TYPE_CHECKING:
     from modular_simulation.measurables import States, AlgebraicStates, ControlElements, Constants
     from modular_simulation.usables import Sensor, Calculation, TimeValueQualityTriplet
@@ -247,7 +248,7 @@ class System(BaseModel, ABC):
             algebraic = algebraic_array, algebraic_map = algebraic_map
             )
     
-    def step(self) -> None:
+    def step(self, nsteps: int = 1) -> None:
         """
         The main public method to advance the simulation by one time step.
 
@@ -257,35 +258,35 @@ class System(BaseModel, ABC):
         states with the final, successful result.
         """
         global StaticParamEnum
+        for _ in range(nsteps):
+            y0, u0 = self._pre_integration_step()
 
-        y0, u0 = self._pre_integration_step()
+            final_y = y0
+            if self.measurable_quantities.states:
+                result = solve_ivp(
+                    fun = self._rhs_wrapper,
+                    t_span = (self._t, self._t + self.dt),
+                    y0 = y0,
+                    args = (u0, self._rhs_static_params),
+                    **self.solver_options
+                )
+                final_y = result.y[:, -1]
+                self.measurable_quantities.states.update_from_array(final_y)
 
-        final_y = y0
-        if self.measurable_quantities.states:
-            result = solve_ivp(
-                fun = self._rhs_wrapper,
-                t_span = (self._t, self._t + self.dt),
-                y0 = y0,
-                args = (u0, self._rhs_static_params),
-                **self.solver_options
-            )
-            final_y = result.y[:, -1]
-            self.measurable_quantities.states.update_from_array(final_y)
-
-        # After the final SUCCESSFUL step, update the actual algebraic_states object.
-        if self.measurable_quantities.algebraic_states:
-            final_algebraic_values = self._calculate_algebraic_values(
-                y = final_y,
-                y_map = self._rhs_static_params[StaticParamEnum.STATE_MAP], # type: ignore 
-                u = u0,
-                u_map = self._rhs_static_params[StaticParamEnum.CONTROL_MAP], # type: ignore 
-                k = self._rhs_static_params[StaticParamEnum.CONSTANTS], # type: ignore 
-                k_map = self._rhs_static_params[StaticParamEnum.CONSTANT_MAP], # type: ignore 
-            )
-            self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
-        
-        self._t += self.dt
-        self._update_history()
+            # After the final SUCCESSFUL step, update the actual algebraic_states object.
+            if self.measurable_quantities.algebraic_states:
+                final_algebraic_values = self._calculate_algebraic_values(
+                    y = final_y,
+                    y_map = self._rhs_static_params[StaticParamEnum.STATE_MAP], # type: ignore 
+                    u = u0,
+                    u_map = self._rhs_static_params[StaticParamEnum.CONTROL_MAP], # type: ignore 
+                    k = self._rhs_static_params[StaticParamEnum.CONSTANTS], # type: ignore 
+                    k_map = self._rhs_static_params[StaticParamEnum.CONSTANT_MAP], # type: ignore 
+                )
+                self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
+            
+            self._t += self.dt
+            self._update_history()
         return 
     
     def extend_controller_trajectory(self, cv_tag: str, value: float | None = None) -> "Trajectory":
@@ -356,11 +357,7 @@ class System(BaseModel, ABC):
         """Returns historized controller setpoints keyed by ``cv_tag``."""
         history: Dict[str, Dict[str, List]] = {}
         for controller in self.controllable_quantities.controllers:
-            traj_hist = controller.sp_trajectory.history()
-            history[controller.cv_tag] = {
-                "time": traj_hist["time"].copy(),
-                "value": traj_hist["value"].copy(),
-            }
+            history.update(controller.sp_history)
         return history
 
 

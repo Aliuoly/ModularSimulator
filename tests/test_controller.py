@@ -1,5 +1,10 @@
 import pytest
 
+from enum import Enum
+from typing import ClassVar, Type
+
+from pydantic import ConfigDict, Field
+
 pytest.importorskip("numpy")
 
 from modular_simulation.control_system.controllers.cascade_controller import (
@@ -8,7 +13,9 @@ from modular_simulation.control_system.controllers.cascade_controller import (
 )
 from modular_simulation.control_system.controllers.controller import Controller
 from modular_simulation.control_system.trajectory import Trajectory
-from modular_simulation.usables import TimeValueQualityTriplet
+from modular_simulation.measurables import ControlElements, States
+from modular_simulation.quantities import MeasurableQuantities, UsableQuantities
+from modular_simulation.usables import Sensor, TimeValueQualityTriplet
 
 
 class DummyController(Controller):
@@ -228,3 +235,81 @@ def test_cascade_active_trajectory_delegates_to_outer_cascade():
 
     cascade.mode = ControllerMode.auto
     assert cascade.active_sp_trajectory() is inner_main.sp_trajectory
+
+
+class ImmediateSensor(Sensor):
+    """Sensor that always returns the underlying value without delay."""
+
+    def _should_update(self, t: float) -> bool:  # type: ignore[override]
+        return True
+
+    def _get_processed_value(self, raw_value, t):  # type: ignore[override]
+        return raw_value
+
+
+class MultiStateMap(Enum):
+    inner_cv = 0
+    bridge_cv = 1
+    outer_cv = 2
+
+
+class MultiStates(States):
+    model_config = ConfigDict(extra="forbid")
+    StateMap: ClassVar[Type[Enum]] = MultiStateMap
+    inner_cv: float = Field(0.0)
+    bridge_cv: float = Field(0.0)
+    outer_cv: float = Field(0.0)
+
+
+class MultiControlElements(ControlElements):
+    inner_mv: float = 0.0
+
+
+def test_multi_level_cascade_initialization_allows_nested_updates():
+    sensors = [
+        ImmediateSensor(measurement_tag="inner_cv"),
+        ImmediateSensor(measurement_tag="bridge_cv"),
+        ImmediateSensor(measurement_tag="outer_cv"),
+    ]
+
+    measurables = MeasurableQuantities(
+        states=MultiStates(),
+        control_elements=MultiControlElements(),
+    )
+    for sensor in sensors:
+        sensor._initialize(measurables)
+    usable = UsableQuantities(sensors=sensors, calculations=[])
+    usable.update(0.0)
+
+    inner = EchoController(
+        mv_tag="inner_mv",
+        cv_tag="inner_cv",
+        sp_trajectory=Trajectory(y0=0.0, t0=0.0),
+        mv_range=(-10.0, 10.0),
+    )
+    bridge = EchoController(
+        mv_tag="inner_mv",
+        cv_tag="bridge_cv",
+        sp_trajectory=Trajectory(y0=0.0, t0=0.0),
+        mv_range=(-10.0, 10.0),
+    )
+    outer = EchoController(
+        mv_tag="bridge_cv",
+        cv_tag="outer_cv",
+        sp_trajectory=Trajectory(y0=0.0, t0=0.0),
+        mv_range=(-10.0, 10.0),
+    )
+
+    outer_cascade = CascadeController(inner_loop=bridge, outer_loop=outer)
+    cascade = CascadeController(inner_loop=inner, outer_loop=outer_cascade)
+
+    cascade._initialize(usable, measurables.control_elements)
+
+    outer.sp_trajectory.set_now(0.0, 2.5)
+    result = cascade.update(0.0)
+
+    assert result.value == pytest.approx(2.5)
+    assert measurables.control_elements.inner_mv == pytest.approx(2.5)
+    assert inner._observed_setpoints[-1] == pytest.approx(2.5)
+    assert bridge._observed_setpoints[-1] == pytest.approx(2.5)
+    assert outer._observed_setpoints[-1] == pytest.approx(2.5)

@@ -4,7 +4,6 @@ from typing import Callable, ClassVar, Dict, Any
 from scipy.integrate import solve_ivp #type: ignore
 from numba.typed.typeddict import Dict as NDict
 from numba import types, njit
-from numba.core.errors import TypingError
 from modular_simulation.framework.system import System
 
 import logging

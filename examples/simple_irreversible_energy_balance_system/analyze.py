@@ -4,6 +4,7 @@ import io
 
 from run_simulation import systems, plot
 import numpy as np
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 N_STEPS = 3000

@@ -4,16 +4,22 @@ from modular_simulation.quantities.controllable_quantities import ControllableQu
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from numpy.typing import NDArray, ArrayLike
-from typing import Any, Dict, List, Mapping, TYPE_CHECKING, Tuple, Callable
+from typing import Any, Dict, List, Mapping, TYPE_CHECKING, Tuple, Callable, Type
 from enum import IntEnum
 from scipy.integrate import solve_ivp #type: ignore
 from modular_simulation.validation import validate_and_link
 from functools import cached_property
 from operator import attrgetter
+import numpy as np
+from numba.typed.typeddict import Dict as NDict
+from numba import types, njit
 from modular_simulation.measurables.base_classes import BaseIndexedModel
+from modular_simulation.control_system.controllers.cascade_controller import CascadeController
 if TYPE_CHECKING:
-    from modular_simulation.usables import TimeValueQualityTriplet
+    from modular_simulation.measurables import States, AlgebraicStates, ControlElements, Constants
+    from modular_simulation.usables import Sensor, Calculation, TimeValueQualityTriplet
     from modular_simulation.control_system import Controller, Trajectory
+from copy import deepcopy
 import logging
 logger = logging.getLogger(__name__)
 

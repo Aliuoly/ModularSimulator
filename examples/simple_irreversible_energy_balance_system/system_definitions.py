@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import ClassVar, Type
+from typing import ClassVar, Mapping
 
 from numba import njit
 from numba.typed.typeddict import Dict as NDict
@@ -78,17 +78,17 @@ class EnergyBalanceSystem(System):
         y: NDArray,
         u: NDArray,
         k: NDArray,
-        y_map: Type[Enum],
-        u_map: Type[Enum],
-        k_map: Type[Enum],
-        algebraic_map: Type[Enum],
+        y_map: Mapping[str, slice],
+        u_map: Mapping[str, slice],
+        k_map: Mapping[str, slice],
+        algebraic_map: Mapping[str, slice],
     ) -> NDArray:
         """Calculate the outlet flow (F_out) from the current reactor volume."""
         return_array = np.zeros(len(algebraic_map))
 
-        volume = max(1e-6, float(y[y_map.V.value]))  # type: ignore[arg-type]
-        Cv = float(k[k_map.Cv.value])  # type: ignore[arg-type]
-        return_array[algebraic_map.F_out.value] = Cv * np.sqrt(volume)
+        volume = max(1e-6, float(y[y_map["V"]]))  # type: ignore[arg-type]
+        Cv = float(k[k_map["Cv"]])  # type: ignore[arg-type]
+        return_array[algebraic_map["F_out"]] = Cv * np.sqrt(volume)
         return return_array
 
     @staticmethod
@@ -98,38 +98,38 @@ class EnergyBalanceSystem(System):
         u: NDArray,
         k: NDArray,
         algebraic: NDArray,
-        y_map: Type[Enum],
-        u_map: Type[Enum],
-        k_map: Type[Enum],
-        algebraic_map: Type[Enum],
+        y_map: Mapping[str, slice],
+        u_map: Mapping[str, slice],
+        k_map: Mapping[str, slice],
+        algebraic_map: Mapping[str, slice],
         ) -> NDArray:
         """Calculate the differential state derivatives."""
 
         del t
-        F_out = float(algebraic[algebraic_map.F_out.value])  # type: ignore
-        F_in = float(u[u_map.F_in.value])  # type: ignore[arg-type]as
-        F_J_in = float(k[k_map.jacket_flow.value])  # type: ignore[arg-type]
+        F_out = float(algebraic[algebraic_map["F_out"]])  # type: ignore[arg-type]
+        F_in = float(u[u_map["F_in"]])  # type: ignore[arg-type]
+        F_J_in = float(k[k_map["jacket_flow"]])  # type: ignore[arg-type]
 
-        k0 = float(k[k_map.k0.value])  # type: ignore[arg-type]
-        activation_energy = float(k[k_map.activation_energy.value])  # type: ignore[arg-type]
-        gas_constant = float(k[k_map.gas_constant.value])  # type: ignore[arg-type]
-        CA_in = float(k[k_map.CA_in.value])  # type: ignore[arg-type]
-        feed_temperature = float(k[k_map.T_in.value])  # type: ignore[arg-type]
-        reaction_enthalpy = float(k[k_map.reaction_enthalpy.value])  # type: ignore[arg-type]
-        rho_cp = max(1e-9, float(k[k_map.rho_cp.value]))  # type: ignore[arg-type]
-        overall_heat_transfer_coefficient = float(k[k_map.overall_heat_transfer_coefficient.value])  # type: ignore[arg-type]
-        heat_transfer_area = float(k[k_map.heat_transfer_area.value])  # type: ignore[arg-type]
-        jacket_volume = max(1e-9, float(k[k_map.jacket_volume.value]))  # type: ignore[arg-type]
-        jacket_rho_cp = max(1e-9, float(k[k_map.jacket_rho_cp.value]))  # type: ignore[arg-type]
-        jacket_inlet_temperature = float(u[u_map.T_J_in.value])  # type: ignore[arg-type]
+        k0 = float(k[k_map["k0"]])  # type: ignore[arg-type]
+        activation_energy = float(k[k_map["activation_energy"]])  # type: ignore[arg-type]
+        gas_constant = float(k[k_map["gas_constant"]])  # type: ignore[arg-type]
+        CA_in = float(k[k_map["CA_in"]])  # type: ignore[arg-type]
+        feed_temperature = float(k[k_map["T_in"]])  # type: ignore[arg-type]
+        reaction_enthalpy = float(k[k_map["reaction_enthalpy"]])  # type: ignore[arg-type]
+        rho_cp = max(1e-9, float(k[k_map["rho_cp"]]))  # type: ignore[arg-type]
+        overall_heat_transfer_coefficient = float(k[k_map["overall_heat_transfer_coefficient"]])  # type: ignore[arg-type]
+        heat_transfer_area = float(k[k_map["heat_transfer_area"]])  # type: ignore[arg-type]
+        jacket_volume = max(1e-9, float(k[k_map["jacket_volume"]]))  # type: ignore[arg-type]
+        jacket_rho_cp = max(1e-9, float(k[k_map["jacket_rho_cp"]]))  # type: ignore[arg-type]
+        jacket_inlet_temperature = float(u[u_map["T_J_in"]])  # type: ignore[arg-type]
 
         UA = overall_heat_transfer_coefficient * heat_transfer_area
 
-        volume = max(1e-6, float(y[y_map.V.value]))  # type: ignore[arg-type]
-        molarity_A = float(y[y_map.A.value])  # type: ignore[arg-type]
-        molarity_B = float(y[y_map.B.value])  # type: ignore[arg-type]
-        reactor_temperature = float(y[y_map.T.value])  # type: ignore[arg-type]
-        jacket_temperature = float(y[y_map.T_J.value])  # type: ignore[arg-type]
+        volume = max(1e-6, float(y[y_map["V"]]))  # type: ignore[arg-type]
+        molarity_A = float(y[y_map["A"]])  # type: ignore[arg-type]
+        molarity_B = float(y[y_map["B"]])  # type: ignore[arg-type]
+        reactor_temperature = float(y[y_map["T"]])  # type: ignore[arg-type]
+        jacket_temperature = float(y[y_map["T_J"]])  # type: ignore[arg-type]
 
         arrhenius_temperature = max(1e-6, reactor_temperature)
         rate_constant = k0 * np.exp(-activation_energy / (gas_constant * arrhenius_temperature))
@@ -137,29 +137,29 @@ class EnergyBalanceSystem(System):
 
         dy = np.zeros_like(y)
         dV_dt = F_in - F_out
-        dy[y_map.V.value] = dV_dt  # type: ignore[arg-type]
+        dy[y_map["V"]] = dV_dt  # type: ignore[arg-type]
 
-        dy[y_map.A.value] = (1.0 / volume) * (
+        dy[y_map["A"]] = (1.0 / volume) * (
             -reaction_rate
             + F_in * CA_in
             - F_out * molarity_A
             - molarity_A * dV_dt
         )
 
-        dy[y_map.B.value] = (1.0 / volume) * (
+        dy[y_map["B"]] = (1.0 / volume) * (
             2.0 * reaction_rate
             - F_out * molarity_B
             - molarity_B * dV_dt
         )
 
         heat_generation = reaction_enthalpy * reaction_rate
-        dy[y_map.T.value] = (
+        dy[y_map["T"]] = (
             (F_in / volume) * (feed_temperature - reactor_temperature)
             + heat_generation / (rho_cp * volume)
             - UA * (reactor_temperature - jacket_temperature) / (rho_cp * volume)
         )
 
-        dy[y_map.T_J.value] = (
+        dy[y_map["T_J"]] = (
             (F_J_in / jacket_volume)
             * (jacket_inlet_temperature - jacket_temperature)
             + UA * (reactor_temperature - jacket_temperature)

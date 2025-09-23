@@ -90,7 +90,16 @@ class Sensor(BaseModel, ABC):
 
         # 2. Get the true, raw value from the system. At this point, 
         #       measurement function is NOT None, so Mypy shut up lol (hence type: ignore)
-        raw_value = getattr(self._measurement_owner, self.measurement_tag)
+        owner = getattr(self, "_measurement_owner", None)
+        if owner is not None:
+            raw_value = getattr(owner, self.measurement_tag)
+        else:
+            measurement_function = getattr(self, "_measurement_function", None)
+            if measurement_function is None:
+                raise AttributeError(
+                    "Sensor must be initialized with a measurement owner before calling measure()."
+                )
+            raw_value = measurement_function()
 
         # 3. Apply subclass-specific processing (e.g., time delay) to the true value
         processed_value = self._get_processed_value(raw_value, t)

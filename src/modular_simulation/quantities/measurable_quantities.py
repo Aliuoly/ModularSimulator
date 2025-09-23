@@ -25,7 +25,7 @@ class MeasurableQuantities(BaseModel):
         )
     )
     algebraic_states: AlgebraicStates = Field(
-        default_factory = AlgebraicStates(),
+        default_factory = AlgebraicStates,
         description = (
             "Algebraic states of the system to which this MeasurableQuantities definition applies. "
             "e.g., the outlet flow of a pressure driven stream dictated by the valve equation, "

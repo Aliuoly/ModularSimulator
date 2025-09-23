@@ -387,7 +387,12 @@ class FastSystem(System):
     This class overrides the standard simulation loop to call the `_fast` methods.
     """
 
-    
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        self._construct_static_params()
+
+
     def _construct_static_params(self) -> None:
         """
         overwrites System's method of the same name to support numba njit decoration
@@ -414,11 +419,14 @@ class FastSystem(System):
         for member in index_map:
             algebraic_map[member] = index_map[member].value
 
+        algebraic_size = self.measurable_quantities.algebraic_states.get_total_size()
+
         self._params = {
             'y_map': y_map,
             'u_map': u_map,
             'k_map': k_map,
             'algebraic_map': algebraic_map,
+            'algebraic_size': algebraic_size,
             'k': self.measurable_quantities.constants.to_array(),
             'algebraic_values_function': self.calculate_algebraic_values_fast,
             'rhs_function': self.rhs_fast,
@@ -434,15 +442,16 @@ class FastSystem(System):
             u_map: NDict,
             k_map: NDict,
             algebraic_map: NDict,
+            algebraic_size: int,
             ) -> NDArray:
         pass
 
     @staticmethod
     @abstractmethod
     def rhs_fast(
-            t: float, 
-            y: NDArray, 
-            u: NDArray, 
+            t: float,
+            y: NDArray,
+            u: NDArray,
             k: NDArray,
             algebraic: NDArray,
             u_map: NDict,
@@ -463,6 +472,7 @@ class FastSystem(System):
             u_map: NDict,
             k_map: NDict,
             algebraic_map: NDict,
+            algebraic_size: int,
             algebraic_values_function: Callable,
             rhs_function: Callable,
             ) -> NDArray:
@@ -478,10 +488,11 @@ class FastSystem(System):
             y_map = y_map,
             u_map = u_map,
             k_map = k_map,
-            algebraic_map = algebraic_map
+            algebraic_map = algebraic_map,
+            algebraic_size = algebraic_size
         )
         return rhs_function(
-            t, 
+            t,
             y = y,
             u = u,
             k = k,
@@ -506,6 +517,7 @@ class FastSystem(System):
         u_map = self._params['u_map']
         k_map = self._params['k_map']
         algebraic_map = self._params['algebraic_map']
+        algebraic_size = self._params['algebraic_size']
         k = self._params['k']
         algebraic_values_function = self.calculate_algebraic_values_fast
         rhs_function = self.rhs_fast
@@ -518,7 +530,7 @@ class FastSystem(System):
                     fun = self._rhs_wrapper,
                     t_span = (self._t, self._t + self.dt),
                     y0 = y0,
-                    args = (u0, k, y_map, u_map, k_map, algebraic_map, algebraic_values_function, rhs_function),
+                    args = (u0, k, y_map, u_map, k_map, algebraic_map, algebraic_size, algebraic_values_function, rhs_function),
                     **self.solver_options
                 )
                 final_y = result.y[:, -1]
@@ -527,7 +539,7 @@ class FastSystem(System):
             # After the final SUCCESSFUL step, update the actual algebraic_states object.
             if self.measurable_quantities.algebraic_states:
                 final_algebraic_values = algebraic_values_function(
-                    final_y,u0, k, y_map, u_map, k_map, algebraic_map
+                    final_y,u0, k, y_map, u_map, k_map, algebraic_map, algebraic_size
                 )
                 self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
             

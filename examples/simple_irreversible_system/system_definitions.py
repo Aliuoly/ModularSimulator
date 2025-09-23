@@ -2,12 +2,9 @@ import numpy as np
 from pydantic import ConfigDict, Field
 from enum import Enum
 from typing import ClassVar, Mapping
-from numba import njit
-from numba.typed.typeddict import Dict as NDict
-
 from modular_simulation.measurables import States, ControlElements, AlgebraicStates, Constants
 from modular_simulation.control_system import Trajectory
-from modular_simulation.framework.system import System, FastSystem
+from modular_simulation.framework import System, FastSystem
 from numpy.typing import NDArray
 
 # 1. Define the Data Structures for the System
@@ -118,88 +115,8 @@ class IrreversibleSystem(System):
 
         return dy
 
-# --- Fast System Implementation ---
-
-class IrreversibleFastSystem(FastSystem):
-    """
-    A performance-optimized implementation of the irreversible reaction system.
-
-    The core logic in `rhs_fast` is JIT-compiled with Numba for high speed.
-    """
-
-    
-    @staticmethod
-    @njit
-    # This function is not JIT-compiled because it uses an Enum (StateMap),
-    # but it's called outside the solver's hot loop, so performance is not critical.
-    def calculate_algebraic_values_fast(
-        y: NDArray, 
-        u: NDArray,
-        k: NDArray,
-        y_map: NDict, 
-        u_map: NDict,
-        k_map: NDict,
-        algebraic_map: NDict,
-        algebraic_size: int
-        ) -> NDArray:
-        """
-        Calculates the outlet flow (F_out) based on the current reactor volume.
-        This is the algebraic part of the DAE system.
-        """
-        result = np.zeros(algebraic_size)
-        # Ensure volume doesn't go to zero to prevent division errors.
-        volume_slice = y_map['V']
-        volume = y[volume_slice][0]
-        if volume < 1e-6:
-            volume = 1e-6
-
-        # F_out = Cv * sqrt(V)
-        Cv = k[k_map["Cv"]][0]
-        result_slice = algebraic_map["F_out"]
-        result[result_slice] = Cv * (volume**0.5)
-        return result
-
-    @staticmethod
-    @njit
-    def rhs_fast(
-        t: float,
-        y: NDArray,
-        u: NDArray,
-        k: NDArray,
-        algebraic: NDArray,
-        y_map: NDict,
-        u_map: NDict,
-        k_map: NDict,
-        algebraic_map: NDict, 
-    ) -> NDArray:
-        # Unpack values from the inputs
-        F_out = algebraic[algebraic_map["F_out"]][0] #type: ignore
-        F_in = u[u_map["F_in"]][0] #type: ignore
-        kc = k[k_map["k"]][0] #type: ignore
-        CA_in = k[k_map["CA_in"]][0] #type: ignore
-
-        # Unpack current state values using the StateMap for clarity
-        volume_slice = y_map["V"]
-        volume = y[volume_slice][0] #type: ignore
-        if volume < 1e-6:
-            volume = 1e-6
-        molarity_A = y[y_map["A"]][0] #type: ignore
-        molarity_B = y[y_map["B"]][0] #type: ignore
-        
-        # Calculate reaction rate: r = k * [A] * V
-        reaction_rate = molarity_A * volume * kc
-        
-        # Initialize the derivative array
-        dy = np.zeros_like(y)
-        
-        # Calculate the derivatives
-        dV_dt = F_in - F_out
-        dy[y_map["V"]] = dV_dt #type: ignore
-        dy[y_map["A"]] = (1/volume) * (-reaction_rate + F_in * CA_in - F_out * molarity_A - molarity_A * dV_dt) #type: ignore 
-        dy[y_map["B"]] = (1/volume) * (2*reaction_rate - F_out * molarity_B - molarity_B * dV_dt) #type: ignore
-
-        
-        return dy
+class IrreversibleFastSystem(FastSystem, IrreversibleSystem):
+    """Fast variant that reuses the readable implementation via numba."""
 
 class ConstantTrajectory(Trajectory):
     """Provides a constant setpoint value over time."""

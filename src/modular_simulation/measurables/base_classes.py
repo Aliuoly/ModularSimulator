@@ -55,7 +55,7 @@ class BaseIndexedModel(BaseModel):
         """updates the class in place using the provided array."""
         for member in self._index_map:
             setattr(self, member.name, array[member.value])
-
+    
     def index_map_dict(self) -> Dict[str, slice]:
         """Returns a dictionary mapping field names to their array slices."""
         return self._index_dict

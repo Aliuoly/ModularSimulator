@@ -1,7 +1,7 @@
 """Utilities for validating system configurations before simulation."""
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from modular_simulation.system import System
+    from modular_simulation.framework.system import System
     from modular_simulation.quantities import (
         MeasurableQuantities,
         UsableQuantities,

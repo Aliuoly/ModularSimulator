@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover - support direct script execution
     )
 from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.plotting import plot_triplet_series
-from modular_simulation.system import create_system
+from modular_simulation.framework import create_system
 from modular_simulation.control_system import Trajectory, PIDController
 from typing import List, TYPE_CHECKING
 import logging

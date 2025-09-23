@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-N_STEPS = 10000
+N_STEPS = 3000
 DT = 60
 sp_segments = 10
 np.random.seed(0)

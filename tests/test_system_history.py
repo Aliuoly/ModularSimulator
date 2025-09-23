@@ -16,7 +16,7 @@ from modular_simulation.control_system.controllers.controller import Controller
 from modular_simulation.control_system.trajectory import Trajectory
 from modular_simulation.measurables import ControlElements, States
 from modular_simulation.quantities import ControllableQuantities, MeasurableQuantities, UsableQuantities
-from modular_simulation.system import System
+from modular_simulation.framework.system import System
 from modular_simulation.usables import Calculation, Sensor, TimeValueQualityTriplet
 
 

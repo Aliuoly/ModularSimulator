@@ -10,7 +10,7 @@ from pydantic import ConfigDict, Field, PrivateAttr
 
 from modular_simulation.control_system import Controller, Trajectory
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
-from modular_simulation.system import FastSystem, System
+from modular_simulation.framework.system import FastSystem, System
 from modular_simulation.usables import Calculation, TimeValueQualityTriplet
 
 

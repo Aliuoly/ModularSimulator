@@ -7,27 +7,17 @@ import numpy as np
 from numpy.typing import NDArray
 
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
-from modular_simulation.system import FastSystem, System
+from modular_simulation.framework import FastSystem, System
 
 
 # 1. Define the Data Structures for the System
 # ============================================
 
 
-class EnergyBalanceStateMap(Enum):
-    """Maps the differential state names to their index in the NumPy array."""
-
-    V = 0  # Reactor Volume
-    A = 1  # Concentration of A
-    B = 2  # Concentration of B
-    T = 3  # Reactor temperature
-    T_J = 4  # Cooling jacket temperature
-
 
 class EnergyBalanceStates(States):
     """Pydantic model for the differential states of the system."""
 
-    StateMap: ClassVar = EnergyBalanceStateMap
     V: float
     A: float
     B: float
@@ -73,6 +63,7 @@ class EnergyBalanceConstants(Constants):
 class EnergyBalanceSystem(System):
     """Dynamic model of an irreversible reaction with an energy balance."""
 
+    
     @staticmethod
     def calculate_algebraic_values(
         y: NDArray,
@@ -105,7 +96,6 @@ class EnergyBalanceSystem(System):
         ) -> NDArray:
         """Calculate the differential state derivatives."""
 
-        del t
         F_out = float(algebraic[algebraic_map["F_out"]])  # type: ignore[arg-type]
         F_in = float(u[u_map["F_in"]])  # type: ignore[arg-type]
         F_J_in = float(k[k_map["jacket_flow"]])  # type: ignore[arg-type]

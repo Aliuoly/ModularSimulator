@@ -4,7 +4,7 @@ from typing import List, TYPE_CHECKING
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from modular_simulation.system import create_system
+from modular_simulation.framework import create_system
 from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.plotting import plot_triplet_series
 

@@ -7,7 +7,7 @@ from numba.typed.typeddict import Dict as NDict
 
 from modular_simulation.measurables import States, ControlElements, AlgebraicStates, Constants
 from modular_simulation.control_system import Trajectory
-from modular_simulation.system import System, FastSystem
+from modular_simulation.framework.system import System, FastSystem
 from numpy.typing import NDArray
 
 # 1. Define the Data Structures for the System

@@ -10,14 +10,24 @@ from modular_simulation.system import create_system
 from modular_simulation.usables import SampledDelayedSensor
 
 
-from system_definitions import (
-    EnergyBalanceAlgebraicStates,
-    EnergyBalanceConstants,
-    EnergyBalanceControlElements,
-    EnergyBalanceFastSystem,
-    EnergyBalanceStates,
-    EnergyBalanceSystem,
-)
+try:
+    from .system_definitions import (
+        EnergyBalanceAlgebraicStates,
+        EnergyBalanceConstants,
+        EnergyBalanceControlElements,
+        EnergyBalanceFastSystem,
+        EnergyBalanceStates,
+        EnergyBalanceSystem,
+    )
+except ImportError:  # pragma: no cover - support direct script execution
+    from system_definitions import (  # type: ignore
+        EnergyBalanceAlgebraicStates,
+        EnergyBalanceConstants,
+        EnergyBalanceControlElements,
+        EnergyBalanceFastSystem,
+        EnergyBalanceStates,
+        EnergyBalanceSystem,
+    )
 
 if TYPE_CHECKING:
     from modular_simulation.usables import Calculation

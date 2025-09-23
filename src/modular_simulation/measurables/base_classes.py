@@ -1,5 +1,5 @@
 from pydantic import BaseModel, PrivateAttr, ConfigDict
-from typing import Type
+from typing import Dict, Type
 import numpy as np
 from numpy.typing import NDArray
 from enum import Enum
@@ -13,6 +13,7 @@ class BaseIndexedModel(BaseModel):
     """
 
     _index_map: Type[Enum] = PrivateAttr()
+    _index_dict: Dict[str, slice] = PrivateAttr()
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
     
     def model_post_init(self, context):
@@ -31,6 +32,9 @@ class BaseIndexedModel(BaseModel):
             enum_members[field_name] = slice(slice_start, slice_end)
             slice_start = slice_end
         self._index_map = Enum("index_map", enum_members)
+        self._index_dict = {
+            name: member.value for name, member in self._index_map.__members__.items()  # type: ignore[attr-defined]
+        }
 
 
     def get_total_size(self) -> int:
@@ -49,8 +53,12 @@ class BaseIndexedModel(BaseModel):
     
     def update_from_array(self, array: NDArray[np.float64]) -> None:
         """updates the class in place using the provided array."""
-        for member in self._index_map: 
+        for member in self._index_map:
             setattr(self, member.name, array[member.value])
+
+    def index_map_dict(self) -> Dict[str, slice]:
+        """Returns a dictionary mapping field names to their array slices."""
+        return self._index_dict
 
 class ControlElements(BaseIndexedModel):
     """

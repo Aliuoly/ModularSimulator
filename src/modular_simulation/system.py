@@ -4,8 +4,8 @@ from modular_simulation.quantities.controllable_quantities import ControllableQu
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from numpy.typing import NDArray, ArrayLike
-from typing import Any, Type, Dict, List, TYPE_CHECKING, Tuple, Callable
-from enum import Enum, IntEnum
+from typing import Any, Dict, List, Mapping, TYPE_CHECKING, Tuple, Callable, Type
+from enum import IntEnum
 from scipy.integrate import solve_ivp #type: ignore
 from modular_simulation.validation import validate_and_link
 from functools import cached_property
@@ -59,7 +59,7 @@ class System(BaseModel, ABC):
         _history (List[Dict]): A log of the system's state at each time step.
     """
     dt: float = Field(
-        ...,
+        default = 1.0,
         description = (
             "How often the system's sensors, calculations, and controllers update. "
             "The solver takes adaptive 'internal steps' regardless of this value to update the system's states. "
@@ -83,6 +83,10 @@ class System(BaseModel, ABC):
             "Defines the controllers that manipulate the system's `ControlElements`."
         )
     )
+    system_constants: Dict[str, Any] = Field(
+        default_factory = dict,
+        description = "A dictionary of constant parameters for the system.",
+    )
     solver_options: Dict[str, Any] = Field(
         default_factory = lambda : {'method': 'LSODA'},
         description = (
@@ -99,7 +103,7 @@ class System(BaseModel, ABC):
 
     _history: Dict[str, List[ArrayLike]] = PrivateAttr(default_factory = dict)
     _t: float = PrivateAttr(default = 0.)
-    _params: Dict[str, Any] = PrivateAttr() # NDict for numba implementation, Type[Enum] for otherwise
+    _params: Dict[str, Any] = PrivateAttr() # NDict for numba implementation, Dict[str, slice] otherwise
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
 
@@ -127,10 +131,10 @@ class System(BaseModel, ABC):
 
     def _construct_params(self) -> None:
         self._params = {
-            'y_map': self.measurable_quantities.states._index_map,
-            'u_map': self.measurable_quantities.control_elements._index_map,
-            'k_map': self.measurable_quantities.constants._index_map,
-            'algebraic_map': self.measurable_quantities.algebraic_states._index_map,
+            'y_map': self.measurable_quantities.states.index_map_dict(),
+            'u_map': self.measurable_quantities.control_elements.index_map_dict(),
+            'k_map': self.measurable_quantities.constants.index_map_dict(),
+            'algebraic_map': self.measurable_quantities.algebraic_states.index_map_dict(),
             'k': self.measurable_quantities.constants.to_array(),
             'algebraic_values_function': self.calculate_algebraic_values,
             'rhs_function': self.rhs,
@@ -167,10 +171,10 @@ class System(BaseModel, ABC):
             y: NDArray,
             u: NDArray,
             k: NDArray,
-            y_map: Type[Enum], 
-            u_map: Type[Enum],
-            k_map: Type[Enum],
-            algebraic_map: Type[Enum],
+            y_map: Mapping[str, slice],
+            u_map: Mapping[str, slice],
+            k_map: Mapping[str, slice],
+            algebraic_map: Mapping[str, slice],
             ) -> NDArray:
         """
         Calculates derived quantities based on the provided state array, controls, and constants.
@@ -180,27 +184,28 @@ class System(BaseModel, ABC):
 
         Args:
             y: The current values of the differential state variables as a flat NumPy array.
-            StateMap: The Enum class used to map state names to indices in `y`.
-            control_elements: The Pydantic object of control element values for the current step.
-            system_constants: The dictionary of system constants.
+            y_map: A mapping from state names to their slices within ``y``.
+            u_map: A mapping from control element names to their slices within ``u``.
+            k_map: A mapping from constant names to their slices within ``k``.
+            algebraic_map: A mapping from algebraic state names to their slices within the resulting array.
 
         Returns:
-            A dictionary of the calculated algebraic values.
+            A NumPy array containing the calculated algebraic values.
         """
         pass
 
     @staticmethod
     @abstractmethod
     def rhs(
-            t: float, 
-            y: NDArray, 
-            u: NDArray, 
+            t: float,
+            y: NDArray,
+            u: NDArray,
             k: NDArray,
             algebraic: NDArray,
-            u_map: Type[Enum],
-            y_map: Type[Enum],
-            k_map: Type[Enum],
-            algebraic_map: Type[Enum],
+            u_map: Mapping[str, slice],
+            y_map: Mapping[str, slice],
+            k_map: Mapping[str, slice],
+            algebraic_map: Mapping[str, slice],
             ) -> NDArray:
         """
         Defines the right-hand side of the system's ordinary differential equations.
@@ -210,10 +215,11 @@ class System(BaseModel, ABC):
         Args:
             t: The current simulation time.
             y: The current values of the differential state variables as a flat NumPy array.
-            StateMap: The Enum class used to map state names to indices in `y`.
-            algebraic_values_dict: A dictionary of freshly calculated algebraic values for this `y`.
-            control_elements: The Pydantic object of control element values for the current step.
-            system_constants: The dictionary of system constants.
+            y_map: A mapping from state names to their slices within ``y``.
+            algebraic: A NumPy array of freshly calculated algebraic values for this ``y``.
+            u_map: A mapping from control element names to their slices within ``u``.
+            k_map: A mapping from constant names to their slices within ``k``.
+            algebraic_map: A mapping from algebraic state names to their slices within ``algebraic``.
 
         Returns:
             A NumPy array of the calculated derivatives (dy/dt).
@@ -226,10 +232,10 @@ class System(BaseModel, ABC):
             y: NDArray, 
             u: NDArray,
             k: NDArray,
-            y_map: Type[Enum],
-            u_map: Type[Enum],
-            k_map: Type[Enum],
-            algebraic_map: Type[Enum],
+            y_map: Mapping[str, slice],
+            u_map: Mapping[str, slice],
+            k_map: Mapping[str, slice],
+            algebraic_map: Mapping[str, slice],
             algebraic_values_function: Callable,
             rhs_function: Callable,
             ) -> NDArray:
@@ -269,6 +275,12 @@ class System(BaseModel, ABC):
         states with the final, successful result.
         """
         global StaticMapEnum
+
+        if not isinstance(nsteps, int):
+            if isinstance(nsteps, float) and nsteps.is_integer():
+                nsteps = int(nsteps)
+            else:
+                raise TypeError("nsteps must be an integer number of steps")
 
         y_map = self._params['y_map']
         u_map = self._params['u_map']

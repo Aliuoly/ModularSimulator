@@ -36,11 +36,31 @@ class DummyControlElements(ControlElements):
 
 class DummySystem(System):
     @staticmethod
-    def _calculate_algebraic_values(y, StateMap, control_elements, system_constants):  # type: ignore[override]
-        return {}
+    def calculate_algebraic_values(
+        y,
+        u,
+        k,
+        y_map,
+        u_map,
+        k_map,
+        algebraic_map,
+    ) -> np.ndarray:  # type: ignore[override]
+        del y, u, k, y_map, u_map, k_map, algebraic_map
+        return np.zeros(0, dtype=float)
 
     @staticmethod
-    def rhs(t, y, StateMap, algebraic_values_dict, control_elements, system_constants):  # type: ignore[override]
+    def rhs(
+        t,
+        y,
+        u,
+        k,
+        algebraic,
+        y_map,
+        u_map,
+        k_map,
+        algebraic_map,
+    ) -> np.ndarray:  # type: ignore[override]
+        del t, u, k, algebraic, y_map, u_map, k_map, algebraic_map
         return np.zeros_like(y)
 
 

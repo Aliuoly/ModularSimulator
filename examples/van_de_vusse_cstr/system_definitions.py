@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar, Dict, Type
+from typing import ClassVar, Dict, Mapping
 
 from numba import njit
 from numba.typed.typeddict import Dict as NDict
@@ -93,11 +93,11 @@ class VanDeVusseSystem(System):
     @staticmethod
     def _calculate_algebraic_values(
         y: NDArray,
-        y_map: Type[Enum],
+        y_map: Mapping[str, slice],
         u: NDArray,
-        u_map: Type[Enum],
+        u_map: Mapping[str, slice],
         k: NDArray,
-        k_map: Type[Enum],
+        k_map: Mapping[str, slice],
     ) -> NDArray:
         del y, y_map, u, u_map, k, k_map
         return np.zeros(0, dtype=np.float64)
@@ -106,37 +106,37 @@ class VanDeVusseSystem(System):
     def rhs(
         t: float,
         y: NDArray,
-        y_map: Type[Enum],
+        y_map: Mapping[str, slice],
         u: NDArray,
-        u_map: Type[Enum],
+        u_map: Mapping[str, slice],
         k: NDArray,
-        k_map: Type[Enum],
+        k_map: Mapping[str, slice],
         algebraic: NDArray,
-        algebraic_map: Type[Enum],
+        algebraic_map: Mapping[str, slice],
     ) -> NDArray:
         del t, algebraic, algebraic_map
 
-        Ca = float(y[y_map.Ca.value])  # type: ignore[arg-type]
-        Cb = float(y[y_map.Cb.value])  # type: ignore[arg-type]
-        T = float(y[y_map.T.value])  # type: ignore[arg-type]
-        Tk = float(y[y_map.Tk.value])  # type: ignore[arg-type]
+        Ca = float(y[y_map["Ca"]])  # type: ignore[arg-type]
+        Cb = float(y[y_map["Cb"]])  # type: ignore[arg-type]
+        T = float(y[y_map["T"]])  # type: ignore[arg-type]
+        Tk = float(y[y_map["Tk"]])  # type: ignore[arg-type]
 
-        F = float(k[k_map.F.value])  # type: ignore[arg-type]
-        Ca0 = float(k[k_map.Ca0.value])  # type: ignore[arg-type]
-        T0 = float(k[k_map.T0.value])  # type: ignore[arg-type]
-        k10 = float(k[k_map.k10.value])  # type: ignore[arg-type]
-        E1 = float(k[k_map.E1.value])  # type: ignore[arg-type]
-        dHr1 = float(k[k_map.dHr1.value])  # type: ignore[arg-type]
-        rho = float(k[k_map.rho.value])  # type: ignore[arg-type]
-        Cp = float(k[k_map.Cp.value])  # type: ignore[arg-type]
-        kw = float(k[k_map.kw.value])  # type: ignore[arg-type]
-        AR = float(k[k_map.AR.value])  # type: ignore[arg-type]
-        VR = float(k[k_map.VR.value])  # type: ignore[arg-type]
-        mK = float(k[k_map.mK.value])  # type: ignore[arg-type]
-        CpK = float(k[k_map.CpK.value])  # type: ignore[arg-type]
-        Fj = float(k[k_map.Fj.value])  # type: ignore[arg-type]
+        F = float(k[k_map["F"]])  # type: ignore[arg-type]
+        Ca0 = float(k[k_map["Ca0"]])  # type: ignore[arg-type]
+        T0 = float(k[k_map["T0"]])  # type: ignore[arg-type]
+        k10 = float(k[k_map["k10"]])  # type: ignore[arg-type]
+        E1 = float(k[k_map["E1"]])  # type: ignore[arg-type]
+        dHr1 = float(k[k_map["dHr1"]])  # type: ignore[arg-type]
+        rho = float(k[k_map["rho"]])  # type: ignore[arg-type]
+        Cp = float(k[k_map["Cp"]])  # type: ignore[arg-type]
+        kw = float(k[k_map["kw"]])  # type: ignore[arg-type]
+        AR = float(k[k_map["AR"]])  # type: ignore[arg-type]
+        VR = float(k[k_map["VR"]])  # type: ignore[arg-type]
+        mK = float(k[k_map["mK"]])  # type: ignore[arg-type]
+        CpK = float(k[k_map["CpK"]])  # type: ignore[arg-type]
+        Fj = float(k[k_map["Fj"]])  # type: ignore[arg-type]
 
-        Tj_in = float(u[u_map.Tj_in.value])  # type: ignore[arg-type]
+        Tj_in = float(u[u_map["Tj_in"]])  # type: ignore[arg-type]
 
         temperature_kelvin = max(1e-6, T + 273.15)
 
@@ -160,10 +160,10 @@ class VanDeVusseSystem(System):
         ) / jacket_capacity_term
 
         dy = np.zeros_like(y)
-        dy[y_map.Ca.value] = dCa  # type: ignore[arg-type]
-        dy[y_map.Cb.value] = dCb  # type: ignore[arg-type]
-        dy[y_map.T.value] = dT  # type: ignore[arg-type]
-        dy[y_map.Tk.value] = dTk  # type: ignore[arg-type]
+        dy[y_map["Ca"]] = dCa  # type: ignore[arg-type]
+        dy[y_map["Cb"]] = dCb  # type: ignore[arg-type]
+        dy[y_map["T"]] = dT  # type: ignore[arg-type]
+        dy[y_map["Tk"]] = dTk  # type: ignore[arg-type]
         return dy
 
 

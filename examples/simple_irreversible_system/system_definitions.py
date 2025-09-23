@@ -1,7 +1,7 @@
 import numpy as np
 from pydantic import ConfigDict, Field
 from enum import Enum
-from typing import Type, ClassVar
+from typing import ClassVar, Mapping
 from numba import njit
 from numba.typed.typeddict import Dict as NDict
 
@@ -56,10 +56,10 @@ class IrreversibleSystem(System):
         y: NDArray, 
         u: NDArray,
         k: NDArray,
-        y_map: Type[Enum], 
-        u_map: Type[Enum],
-        k_map: Type[Enum],
-        algebraic_map: Type[Enum]
+        y_map: Mapping[str, slice],
+        u_map: Mapping[str, slice],
+        k_map: Mapping[str, slice],
+        algebraic_map: Mapping[str, slice]
         ) -> NDArray:
         """
         Calculates the outlet flow (F_out) based on the current reactor volume.
@@ -67,10 +67,10 @@ class IrreversibleSystem(System):
         """
         result = np.zeros(len(algebraic_map))
         # Ensure volume doesn't go to zero to prevent division errors.
-        volume = max(1e-6, y[y_map.V.value]) #type: ignore
+        volume = max(1e-6, y[y_map["V"]]) #type: ignore[arg-type]
         
         # F_out = Cv * sqrt(V)
-        result[algebraic_map.F_out.value] = k[k_map.Cv.value] * (volume**0.5)  # type: ignore
+        result[algebraic_map["F_out"]] = k[k_map["Cv"]] * (volume**0.5)  # type: ignore[arg-type]
         return result
 
     @staticmethod
@@ -80,25 +80,25 @@ class IrreversibleSystem(System):
         u: NDArray,
         k: NDArray,
         algebraic: NDArray,
-        y_map: Type[Enum],
-        u_map: Type[Enum],
-        k_map: Type[Enum],
-        algebraic_map: Type[Enum], 
+        y_map: Mapping[str, slice],
+        u_map: Mapping[str, slice],
+        k_map: Mapping[str, slice],
+        algebraic_map: Mapping[str, slice],
         ) -> NDArray:
         """
         Calculates the derivatives for the differential states (dV/dt, dA/dt, dB/dt).
         This is the differential part of the DAE system.
         """
         # Unpack values from the inputs
-        F_out = algebraic[algebraic_map.F_out.value] #type: ignore
-        F_in = u[u_map.F_in.value] #type: ignore
-        kc = k[k_map.k.value] #type: ignore
-        CA_in = k[k_map.CA_in.value] #type: ignore
+        F_out = algebraic[algebraic_map["F_out"]] #type: ignore[arg-type]
+        F_in = u[u_map["F_in"]] #type: ignore[arg-type]
+        kc = k[k_map["k"]] #type: ignore[arg-type]
+        CA_in = k[k_map["CA_in"]] #type: ignore[arg-type]
 
         # Unpack current state values using the StateMap for clarity
-        volume = max(1e-6, y[y_map.V.value]) #type: ignore
-        molarity_A = y[y_map.A.value] #type: ignore
-        molarity_B = y[y_map.B.value] #type: ignore
+        volume = max(1e-6, y[y_map["V"]]) #type: ignore[arg-type]
+        molarity_A = y[y_map["A"]] #type: ignore[arg-type]
+        molarity_B = y[y_map["B"]] #type: ignore[arg-type]
         
         # Calculate reaction rate: r = k * [A] * V
         reaction_rate = molarity_A * volume * kc
@@ -108,9 +108,13 @@ class IrreversibleSystem(System):
         
         # Calculate the derivatives
         dV_dt = F_in - F_out
-        dy[y_map.V.value] = dV_dt #type: ignore
-        dy[y_map.A.value] = (1/volume) * (-reaction_rate + F_in * CA_in - F_out * molarity_A - molarity_A * dV_dt) #type: ignore 
-        dy[y_map.B.value] = (1/volume) * (2*reaction_rate - F_out * molarity_B - molarity_B * dV_dt) #type: ignore
+        dy[y_map["V"]] = dV_dt #type: ignore[arg-type]
+        dy[y_map["A"]] = (1/volume) * (
+            -reaction_rate + F_in * CA_in - F_out * molarity_A - molarity_A * dV_dt
+        ) # type: ignore[arg-type]
+        dy[y_map["B"]] = (1/volume) * (
+            2*reaction_rate - F_out * molarity_B - molarity_B * dV_dt
+        ) # type: ignore[arg-type]
 
         return dy
 

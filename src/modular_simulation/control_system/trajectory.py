@@ -174,11 +174,11 @@ class Trajectory:
             return self.y0
         return self._history_values[idx]
 
-    def history(self) -> dict[str, List]:
-        """Return historized setpoint samples as dictionary of Lists."""
+    def history(self) -> dict[str, np.ndarray]:
+        """Return historized setpoint samples as NumPy arrays."""
         return {
-            "time": self._history_times,
-            "value": self._history_values,
+            "time": np.asarray(self._history_times, dtype=float),
+            "value": np.asarray(self._history_values, dtype=float),
         }
     def writer(self, time_getter: Callable[[], float]) -> Callable[[Number], None]:
         """Return a callable that writes setpoints at the time provided by ``time_getter``."""

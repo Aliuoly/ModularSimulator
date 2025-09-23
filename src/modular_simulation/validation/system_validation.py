@@ -26,6 +26,7 @@ def validate_and_link(system: "System") -> None:
     _initialize_sensors_and_calculations(measurable, usable)
     _initialize_controllers(measurable, usable, controllable)
     _warn_uncontrolled_control_elements(measurable, controllable)
+    usable.update(0.0)
 
 def _check_duplicate_tags(
         usable: "UsableQuantities",

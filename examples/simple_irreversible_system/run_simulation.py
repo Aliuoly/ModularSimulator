@@ -1,12 +1,23 @@
 import matplotlib.pyplot as plt
-from system_definitions import (
-    IrreversibleStates,
-    IrreversibleControlElements,
-    IrreversibleAlgebraicStates,
-    IrreversibleConstants,
-    IrreversibleSystem,
-    IrreversibleFastSystem,
-)
+
+try:
+    from .system_definitions import (
+        IrreversibleStates,
+        IrreversibleControlElements,
+        IrreversibleAlgebraicStates,
+        IrreversibleConstants,
+        IrreversibleSystem,
+        IrreversibleFastSystem,
+    )
+except ImportError:  # pragma: no cover - support direct script execution
+    from system_definitions import (  # type: ignore
+        IrreversibleStates,
+        IrreversibleControlElements,
+        IrreversibleAlgebraicStates,
+        IrreversibleConstants,
+        IrreversibleSystem,
+        IrreversibleFastSystem,
+    )
 from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.plotting import plot_triplet_series
 from modular_simulation.system import create_system

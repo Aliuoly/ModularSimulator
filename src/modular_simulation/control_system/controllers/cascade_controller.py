@@ -84,11 +84,7 @@ class CascadeController(Controller):
         self._usables = usable_quantities
         # don't initialize the outerloop's mv_setter
         self.outer_loop._initialize(usable_quantities, control_elements, is_cascade_outerloop=True)
-        self.inner_loop._initialize(
-            usable_quantities,
-            control_elements,
-            is_cascade_outerloop=is_cascade_outerloop,
-        )
+
 
         self._cv_getter = self.outer_loop._cv_getter
         self._last_value = self.inner_loop._last_value
@@ -115,6 +111,7 @@ class CascadeController(Controller):
 
         writer = self.inner_loop.active_sp_trajectory().writer(_outer_loop_time)
         self.outer_loop._mv_setter = writer
+
 
     def update(self, t: float) -> TimeValueQualityTriplet:  # type: ignore[override]
         if self.mode is ControllerMode.cascade:

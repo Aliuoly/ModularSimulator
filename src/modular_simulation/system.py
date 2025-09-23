@@ -387,13 +387,7 @@ class FastSystem(System):
     This class overrides the standard simulation loop to call the `_fast` methods.
     """
 
-
-    def model_post_init(self, __context: Any) -> None:
-        super().model_post_init(__context)
-        self._construct_static_params()
-
-
-    def _construct_static_params(self) -> None:
+    def _construct_params(self) -> None:
         """
         overwrites System's method of the same name to support numba njit decoration
         """

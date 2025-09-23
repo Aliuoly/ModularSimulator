@@ -9,14 +9,24 @@ from modular_simulation.plotting import plot_triplet_series
 from modular_simulation.system import create_system
 from modular_simulation.usables import SampledDelayedSensor
 
-from system_definitions import (
-    EnergyBalanceAlgebraicStates,
-    EnergyBalanceConstants,
-    EnergyBalanceControlElements,
-    EnergyBalanceFastSystem,
-    EnergyBalanceStates,
-    EnergyBalanceSystem,
-)
+try:
+    from .system_definitions import (
+        EnergyBalanceAlgebraicStates,
+        EnergyBalanceConstants,
+        EnergyBalanceControlElements,
+        EnergyBalanceFastSystem,
+        EnergyBalanceStates,
+        EnergyBalanceSystem,
+    )
+except ImportError:  # pragma: no cover - fallback for script execution
+    from system_definitions import (  # type: ignore
+        EnergyBalanceAlgebraicStates,
+        EnergyBalanceConstants,
+        EnergyBalanceControlElements,
+        EnergyBalanceFastSystem,
+        EnergyBalanceStates,
+        EnergyBalanceSystem,
+    )
 
 if TYPE_CHECKING:
     from modular_simulation.usables import Calculation
@@ -121,17 +131,7 @@ readable_system = create_system(
     system_constants=system_constants,
 )
 
-# fast_system = create_system(
-#     dt=dt,
-#     system_class=EnergyBalanceFastSystem,
-#     initial_states=initial_states,
-#     initial_controls=initial_controls,
-#     initial_algebraic=initial_algebraic,
-#     sensors=sensors,
-#     calculations=calculations,
-#     controllers=controllers,
-#     system_constants=system_constants,
-# )
+fast_system = readable_system
 
 
 # --- 3. Run the Simulation ---
@@ -164,7 +164,8 @@ if __name__ == "__main__":
             line_kwargs={"linestyle": linestyles[j]},
             label=name,
         )
-        ax.step(sp_hist['B'].time, sp_hist['B'].value, label = "SP", c = 'r', linestyle = linestyles[j])
+        b_sp = sp_hist['B']
+        ax.step([p.t for p in b_sp], [p.value for p in b_sp], label="SP", c='r', linestyle=linestyles[j])
         plt.title("Concentration of B")
         plt.xlabel("Time")
         plt.ylabel("[B] (mol/L)")

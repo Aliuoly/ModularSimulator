@@ -31,7 +31,6 @@ class Calculation(BaseModel, ABC):
 
     _last_value: TimeValueQualityTriplet | None = PrivateAttr(default=None)
     _input_getters: Dict[str, Callable[[], TimeValueQualityTriplet]] | None = PrivateAttr(default=None)
-    _history: List[TimeValueQualityTriplet] = PrivateAttr(default_factory = list)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -111,8 +110,4 @@ class Calculation(BaseModel, ABC):
         )
         result.ok = self.ok
         self._last_value = result
-        self._history.append(result)
         return result
-
-    def history(self) -> List[TimeValueQualityTriplet]:
-        return self._history.copy()

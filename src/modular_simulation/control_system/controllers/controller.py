@@ -108,6 +108,9 @@ class Controller(BaseModel, ABC):
                     self._u0 = initial_val.value
                     found = True
                     break
+            if not found and hasattr(control_elements, self.mv_tag):
+                self._u0 = getattr(control_elements, self.mv_tag)
+                found = True
             if not found:
                 raise AttributeError(
                     f"outerloop controller for '{self.cv_tag}' could not be initialized. "

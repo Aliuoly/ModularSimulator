@@ -3,7 +3,7 @@ from numpy.typing import NDArray
 from typing import Callable
 from scipy.integrate import solve_ivp #type: ignore
 from numba.typed.typeddict import Dict as NDict
-from numba import types, njit
+from numba import types
 from modular_simulation.framework.system import System
 
 import logging

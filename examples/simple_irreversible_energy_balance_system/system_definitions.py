@@ -1,11 +1,8 @@
-from enum import Enum
-from typing import ClassVar, Mapping
-
+from typing import  Mapping
 from numba import njit
 from numba.typed.typeddict import Dict as NDict
 import numpy as np
 from numpy.typing import NDArray
-
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
 from modular_simulation.framework import FastSystem, System
 

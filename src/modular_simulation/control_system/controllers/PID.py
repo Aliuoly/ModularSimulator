@@ -76,18 +76,40 @@ class PIDController(Controller):
         error = spval - pv.value
         if self.inverted:
             error = -error
-        self._integral += error * dt
+        candidate_integral = self._integral + error * dt
         # first order approximation of the timec onstant -> filter factor
         # valid enough so whatever. 
         alpha = dt / (dt + self.derivative_filter_tc) 
         self._filtered_derivative = alpha * error + (1-alpha) * self._last_error
         
-        # PI control law
-        output = self.Kp * error \
-                   + (self.Kp / self.Ti) * self._integral\
-                   + (self.Kp * self.Td / dt) * self._filtered_derivative
-        logger.debug("%s controller (PID): Time %0.0f, cv %0.1e, sp %0.1e, error %0.1e, integral %0.1e, derivative %0.1e, output %0.1e", 
-                     self.cv_tag, t, pv.value, spval, error, self._integral, self._filtered_derivative, output)
-        # Ensure output is non-negative (e.g., flow rate can't be negative)
+        
+        proportional_term = self.Kp * error
+        integral_term = (self.Kp / self.Ti) * candidate_integral
+        derivative_term = (self.Kp * self.Td / dt) * self._filtered_derivative
+
+        unsaturated_output = proportional_term + integral_term + derivative_term
+        mv_unsat = unsaturated_output + self._u0
+        mv_sat = np.clip(mv_unsat, *self.mv_range)
+
+        tol = 1e-9
+        hit_upper_limit = (mv_unsat - mv_unsat) > tol
+        hit_lower_limit = (mv_unsat - mv_unsat) < tol
+
+        if hit_upper_limit or hit_lower_limit:
+            candidate_integral = self._integral
+        
+        self._integral = candidate_integral
+
+        logger.debug(
+            "%s controller (PID): Time %0.0f, cv %0.1e, sp %0.1e, P term %0.1e, I term %0.1e, D term %0.1e, output %0.1e",
+            self.cv_tag,
+            t,
+            pv.value,
+            spval,
+            error,
+            integral_term,
+            self._filtered_derivative,
+            mv_sat,
+        )
         self._last_error = error
-        return TimeValueQualityTriplet(t, output, ok = True)
+        return TimeValueQualityTriplet(t, mv_sat, ok = True)

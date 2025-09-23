@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 # 1. Set up the initial conditions and system components.
 # =======================================================
 
-initial_states = EnergyBalanceStates(V=100.0, A=1.0, B=0.0, T=350.0, T_J=300.0)
+initial_states = EnergyBalanceStates(V=100.0, A=1.0, B=0.0, T=300.0, T_J=300.0)
 initial_controls = EnergyBalanceControlElements(F_in=1.0, T_J_in=300)
 initial_algebraic = EnergyBalanceAlgebraicStates(F_out=1.0)
 
@@ -61,19 +61,30 @@ controllers = [
             cv_tag="T",
             mv_tag="T_J_in",
             sp_trajectory=Trajectory(0.5),
-            Kp=1.0e1,
+            Kp=1.0e-1,
             Ti=100.0,
-            mv_range=(200, 300),
+            mv_range=(200, 350),
             inverted=False,
         ),
-        outer_loop = PIDController(
-            cv_tag="B",
-            mv_tag="T",
-            sp_trajectory=Trajectory(0.02),
-            Kp=1.0e1,
-            Ti=100.0,
-            mv_range=(250.0, 350.0),
-            inverted=False,
+        outer_loop = CascadeController(
+            inner_loop = PIDController(
+                cv_tag="T",
+                mv_tag="T_J",
+                sp_trajectory=Trajectory(0.5),
+                Kp=1.0e-1,
+                Ti=100.0,
+                mv_range=(200, 350),
+                inverted=False,
+            ),
+            outer_loop = PIDController(
+                cv_tag="B",
+                mv_tag="T",
+                sp_trajectory=Trajectory(0.02),
+                Kp=1.0e-1,
+                Ti=100.0,
+                mv_range=(250.0, 350.0),
+                inverted=False,
+            )
         )
     )
     
@@ -133,15 +144,16 @@ if __name__ == "__main__":
     linestyles = ["-", "--"]
 
     for j, (name, system) in enumerate(systems.items()):
-        for _ in range(500):
+        for _ in range(1200):
             system.step()
 
         system.extend_controller_trajectory(cv_tag="B", value=0.005)
 
-        for _ in range(500):
+        for _ in range(1800):
             system.step()
 
         history = system.measured_history
+        sp_hist = system.setpoint_history
         sensor_hist = history["sensors"]
 
         ax = plt.subplot(4, 2, 1)
@@ -152,6 +164,7 @@ if __name__ == "__main__":
             line_kwargs={"linestyle": linestyles[j]},
             label=name,
         )
+        ax.step(sp_hist['B'].time, sp_hist['B'].value, label = "SP", c = 'r', linestyle = linestyles[j])
         plt.title("Concentration of B")
         plt.xlabel("Time")
         plt.ylabel("[B] (mol/L)")
@@ -165,6 +178,7 @@ if __name__ == "__main__":
             line_kwargs={"linestyle": linestyles[j]},
             label=name,
         )
+        
         plt.title("Inlet Flow Rate (F_in)")
         plt.xlabel("Time")
         plt.ylabel("Flow (L/s)")
@@ -204,6 +218,7 @@ if __name__ == "__main__":
             line_kwargs={"linestyle": linestyles[j]},
             label=name,
         )
+        ax.step(sp_hist['T'].time, sp_hist['T'].value, label = "SP", c = 'r', linestyle = linestyles[j])
         plt.title("Reactor Temperature (T)")
         plt.xlabel("Time")
         plt.ylabel("Temperature (K)")

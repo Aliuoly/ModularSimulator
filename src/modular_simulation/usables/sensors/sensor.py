@@ -2,7 +2,7 @@ from numpy.typing import NDArray
 import numpy as np
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
-from typing import TYPE_CHECKING, Any, List
+from typing import TYPE_CHECKING, Any
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
 
 if TYPE_CHECKING:
@@ -43,7 +43,6 @@ class Sensor(BaseModel, ABC):
     _last_value: TimeValueQualityTriplet | None = PrivateAttr(default = None)
     _measurement_owner: "BaseIndexedModel" = PrivateAttr()
     _initialized: bool = PrivateAttr(default = False)
-    _history: List["TimeValueQualityTriplet"] = PrivateAttr(default_factory = list)
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -104,7 +103,6 @@ class Sensor(BaseModel, ABC):
         ok = True if not self.faulty_aware else (not is_faulty)
         new_measurement = TimeValueQualityTriplet(t = t, value = final_value, ok = ok)
         self._last_value = new_measurement
-        self._history.append(new_measurement)
         return new_measurement
     
     @abstractmethod
@@ -151,5 +149,3 @@ class Sensor(BaseModel, ABC):
         
         return noisy_value, False
 
-    def measurement_history(self) -> List[TimeValueQualityTriplet]:
-        return self._history.copy()

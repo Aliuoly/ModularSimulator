@@ -14,6 +14,8 @@ class UsableQuantities(BaseModel):
     calculations: List[Calculation]
 
     _usable_results: Dict[str, TimeValueQualityTriplet] = PrivateAttr(default_factory=dict)
+    _sensor_history: Dict[str, List[TimeValueQualityTriplet]] = PrivateAttr(default_factory=dict)
+    _calculation_history: Dict[str, List[TimeValueQualityTriplet]] = PrivateAttr(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
@@ -25,9 +27,22 @@ class UsableQuantities(BaseModel):
         """
 
         for sensor in self.sensors:
-            self._usable_results[sensor.measurement_tag] = sensor.measure(t)
+            result = sensor.measure(t)
+            tag = sensor.measurement_tag
+            self._usable_results[tag] = result
+            self._sensor_history.setdefault(tag, []).append(result)
         for calculation in self.calculations:
-            self._usable_results[calculation.output_tag] = calculation.calculate(t)
-        
+            result = calculation.calculate(t)
+            tag = calculation.output_tag
+            self._usable_results[tag] = result
+            self._calculation_history.setdefault(tag, []).append(result)
+
         return self._usable_results
+
+    @property
+    def history(self) -> Dict[str, Dict[str, List[TimeValueQualityTriplet]]]:
+        return {
+            "sensors": {tag: list(entries) for tag, entries in self._sensor_history.items()},
+            "calculations": {tag: list(entries) for tag, entries in self._calculation_history.items()},
+        }
 

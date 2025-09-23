@@ -1,7 +1,10 @@
 import pytest
 
+from types import SimpleNamespace
+
 pytest.importorskip("numpy")
 
+from modular_simulation.quantities import UsableQuantities
 from modular_simulation.usables.sensors.sensor import Sensor
 
 
@@ -18,17 +21,19 @@ class InstantSensor(Sensor):
 def test_sensor_measurement_history_tracks_samples():
     sensor = InstantSensor(measurement_tag="X")
 
-    state = {"value": 0.0}
-    sensor._measurement_function = lambda: state["value"]
+    measurement_owner = SimpleNamespace(X=0.0)
+    sensor._measurement_owner = measurement_owner
     sensor._initialized = True
+
+    usable = UsableQuantities(sensors=[sensor], calculations=[])
 
     samples = []
     for i in range(5):
-        state["value"] = float(i)
-        measurement = sensor.measure(float(i))
+        measurement_owner.X = float(i)
+        measurement = usable.update(float(i))["X"]
         samples.append(measurement.value)
 
-    history = sensor.measurement_history()
+    history = usable.history["sensors"]["X"]
     assert [h.t for h in history] == [float(i) for i in range(5)]
     assert [h.value for h in history] == samples
     assert [h.ok for h in history] == [True] * 5

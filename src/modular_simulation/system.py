@@ -12,7 +12,7 @@ from functools import cached_property
 from operator import attrgetter
 import numpy as np
 from numba.typed.typeddict import Dict as NDict
-from numba import types
+from numba import types, njit
 from modular_simulation.measurables.base_classes import BaseIndexedModel
 from modular_simulation.control_system.controllers.cascade_controller import CascadeController
 if TYPE_CHECKING:
@@ -99,8 +99,7 @@ class System(BaseModel, ABC):
 
     _history: Dict[str, List[ArrayLike]] = PrivateAttr(default_factory = dict)
     _t: float = PrivateAttr(default = 0.)
-    _rhs_static_maps: Tuple[Type[Enum], Type[Enum], Type[Enum], Type[Enum]] = PrivateAttr()
-    _constants: NDArray = PrivateAttr()
+    _params: Dict[str, Any] = PrivateAttr() # NDict for numba implementation, Type[Enum] for otherwise
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
 
@@ -111,7 +110,7 @@ class System(BaseModel, ABC):
         global StaticMapEnum
         super().model_post_init(__context)
         validate_and_link(self)
-        self._construct_static_params()
+        self._construct_params()
 
         if self.record_history:
             # Build history dict and accessors exactly once
@@ -126,14 +125,16 @@ class System(BaseModel, ABC):
                     self._history_slots.append((lambda o=mq_obj, g=getter: g(o), lst)) #type:ignore[misc]
             self._history['time'] = []
 
-    def _construct_static_params(self) -> None:
-        maps: List[Any] = [0] * 4
-        maps[StaticMapEnum.STATE_MAP]     = self.measurable_quantities.states._index_map
-        maps[StaticMapEnum.CONTROL_MAP]   = self.measurable_quantities.control_elements._index_map
-        maps[StaticMapEnum.CONSTANT_MAP]  = self.measurable_quantities.constants._index_map
-        maps[StaticMapEnum.ALGEBRAIC_MAP] = self.measurable_quantities.algebraic_states._index_map
-        self._constants = self.measurable_quantities.constants.to_array()
-        self._rhs_static_maps = tuple(maps)
+    def _construct_params(self) -> None:
+        self._params = {
+            'y_map': self.measurable_quantities.states._index_map,
+            'u_map': self.measurable_quantities.control_elements._index_map,
+            'k_map': self.measurable_quantities.constants._index_map,
+            'algebraic_map': self.measurable_quantities.algebraic_states._index_map,
+            'k': self.measurable_quantities.constants.to_array(),
+            'algebraic_values_function': self.calculate_algebraic_values,
+            'rhs_function': self.rhs,
+        }
 
     def _update_history(self) -> None:
         if not self.record_history:
@@ -163,14 +164,13 @@ class System(BaseModel, ABC):
     @staticmethod
     @abstractmethod
     def calculate_algebraic_values(
-            y: NDArray, 
+            y: NDArray,
             u: NDArray,
             k: NDArray,
             y_map: Type[Enum], 
             u_map: Type[Enum],
             k_map: Type[Enum],
             algebraic_map: Type[Enum],
-            *args
             ) -> NDArray:
         """
         Calculates derived quantities based on the provided state array, controls, and constants.
@@ -269,23 +269,24 @@ class System(BaseModel, ABC):
         states with the final, successful result.
         """
         global StaticMapEnum
+
+        y_map = self._params['y_map']
+        u_map = self._params['u_map']
+        k_map = self._params['k_map']
+        algebraic_map = self._params['algebraic_map']
+        k = self._params['k']
+        algebraic_values_function = self.calculate_algebraic_values
+        rhs_function = self.rhs
         
-        partial_args = (
-            self._constants,
-            *self._rhs_static_maps,
-            self.calculate_algebraic_values,
-            self.rhs
-            )
         for _ in range(nsteps):
             y0, u0 = self._pre_integration_step()
-            complete_args = (u0, *partial_args)
             final_y = y0
             if self.measurable_quantities.states:
                 result = solve_ivp(
                     fun = self._rhs_wrapper,
                     t_span = (self._t, self._t + self.dt),
                     y0 = y0,
-                    args = complete_args,
+                    args = (u0, k, y_map, u_map, k_map, algebraic_map, algebraic_values_function, rhs_function),
                     **self.solver_options
                 )
                 final_y = result.y[:, -1]
@@ -293,9 +294,8 @@ class System(BaseModel, ABC):
 
             # After the final SUCCESSFUL step, update the actual algebraic_states object.
             if self.measurable_quantities.algebraic_states:
-                final_algebraic_values = self.calculate_algebraic_values(
-                    final_y,
-                    *complete_args[:-2] # omit the two callables used for solve_ivp
+                final_algebraic_values = algebraic_values_function(
+                    final_y,u0, k, y_map, u_map, k_map, algebraic_map
                 )
                 self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
             
@@ -387,53 +387,160 @@ class FastSystem(System):
     This class overrides the standard simulation loop to call the `_fast` methods.
     """
 
-    # replaces System's privateAttr of the same name for numba njit support
-    _rhs_static_maps: Tuple[NDict, NDict, NDict, NDict, NDArray] = PrivateAttr()
     
-    def _construct_static_params(self):
+    def _construct_static_params(self) -> None:
         """
         overwrites System's method of the same name to support numba njit decoration
         """
+        # convert the Enum's to typed dictionaries for numba
+        
+        y_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
+        index_map = self.measurable_quantities.states._index_map.__members__
+        for member in index_map:
+            y_map[member] = index_map[member].value
+
+        u_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
+        index_map = self.measurable_quantities.control_elements._index_map.__members__
+        for member in index_map:
+            u_map[member] = index_map[member].value
+        
+        k_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
+        index_map = self.measurable_quantities.constants._index_map.__members__
+        for member in index_map:
+            k_map[member] = index_map[member].value
+
+        algebraic_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
+        index_map = self.measurable_quantities.algebraic_states._index_map.__members__
+        for member in index_map:
+            algebraic_map[member] = index_map[member].value
+
+        self._params = {
+            'y_map': y_map,
+            'u_map': u_map,
+            'k_map': k_map,
+            'algebraic_map': algebraic_map,
+            'k': self.measurable_quantities.constants.to_array(),
+            'algebraic_values_function': self.calculate_algebraic_values_fast,
+            'rhs_function': self.rhs_fast,
+        }
         
     @staticmethod
     @abstractmethod
-    def _calculate_algebraic_values_fast(y: NDArray, control_elements_arr: NDArray, constants_arr: NDArray) -> NDArray:
-        """(Fast Path) Calculates algebraic values using only NumPy arrays."""
+    def calculate_algebraic_values_fast(
+            y: NDArray, 
+            u: NDArray,
+            k: NDArray,
+            y_map: NDict, 
+            u_map: NDict,
+            k_map: NDict,
+            algebraic_map: NDict,
+            ) -> NDArray:
         pass
 
     @staticmethod
     @abstractmethod
-    def rhs_fast(t: float, y: NDArray, algebraic_states_arr: NDArray, control_elements_arr: NDArray, constants_arr: NDArray) -> NDArray:
-        """(Fast Path) Calculates derivatives using only NumPy arrays."""
-        pass
-
-    def _rhs_wrapper( #type: ignore
-            self, 
+    def rhs_fast(
             t: float, 
             y: NDArray, 
-            control_elements_arr: NDArray, 
-            constants_arr: NDArray
-            ) -> NDArray: 
+            u: NDArray, 
+            k: NDArray,
+            algebraic: NDArray,
+            u_map: NDict,
+            y_map: NDict,
+            k_map: NDict,
+            algebraic_map: NDict,
+            ) -> NDArray:
+        pass
+    
+    @staticmethod
+    @njit
+    def _rhs_wrapper(
+            t: float, 
+            y: NDArray, 
+            u: NDArray,
+            k: NDArray,
+            y_map: NDict,
+            u_map: NDict,
+            k_map: NDict,
+            algebraic_map: NDict,
+            algebraic_values_function: Callable,
+            rhs_function: Callable,
+            ) -> NDArray:
         """
-        Overrides the base wrapper to execute the performant path.
-
-        This method converts Python objects (dicts, Pydantic models) into simple
-        NumPy arrays before calling the user-defined `rhs_fast` function.
+        A concrete wrapper called by the solver. It recalculates algebraic states
+        before calling the user-defined `rhs` for the derivatives. This ensures
+        correctness even when the solver rejects and retries steps.
         """
-        algebraic_states_arr = self.__class__._calculate_algebraic_values_fast(
-            y,
-            control_elements_arr,
-            constants_arr,
+        algebraic_array = algebraic_values_function(
+            y = y,
+            u = u,
+            k = k,
+            y_map = y_map,
+            u_map = u_map,
+            k_map = k_map,
+            algebraic_map = algebraic_map
         )
-        return self.__class__.rhs_fast(
-            t,
-            y,
-            algebraic_states_arr,
-            control_elements_arr,
-            constants_arr,
-        )
+        return rhs_function(
+            t, 
+            y = y,
+            u = u,
+            k = k,
+            algebraic = algebraic_array, 
+            y_map = y_map,
+            u_map = u_map,
+            k_map = k_map,
+            algebraic_map = algebraic_map
+            )
+    def step(self, nsteps: int = 1) -> None:
+        """
+        The main public method to advance the simulation by one time step.
 
+        Performs one integration step by calling the ODE solver.
 
+        It configures and runs `solve_ivp`, then updates the system's algebraic
+        states with the final, successful result.
+        """
+        global StaticMapEnum
+
+        y_map = self._params['y_map']
+        u_map = self._params['u_map']
+        k_map = self._params['k_map']
+        algebraic_map = self._params['algebraic_map']
+        k = self._params['k']
+        algebraic_values_function = self.calculate_algebraic_values_fast
+        rhs_function = self.rhs_fast
+        
+        for _ in range(nsteps):
+            y0, u0 = self._pre_integration_step()
+            final_y = y0
+            if self.measurable_quantities.states:
+                result = solve_ivp(
+                    fun = self._rhs_wrapper,
+                    t_span = (self._t, self._t + self.dt),
+                    y0 = y0,
+                    args = (u0, k, y_map, u_map, k_map, algebraic_map, algebraic_values_function, rhs_function),
+                    **self.solver_options
+                )
+                final_y = result.y[:, -1]
+                self.measurable_quantities.states.update_from_array(final_y)
+
+            # After the final SUCCESSFUL step, update the actual algebraic_states object.
+            if self.measurable_quantities.algebraic_states:
+                final_algebraic_values = algebraic_values_function(
+                    final_y,u0, k, y_map, u_map, k_map, algebraic_map
+                )
+                self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
+            
+            self._t += self.dt
+            self._update_history()
+        return 
+
+    def rhs(**kwargs):
+        raise NotImplementedError
+    
+    def calculate_algebraic_values(**kwargs):
+        raise NotImplementedError
+    
 
 
 def create_system(

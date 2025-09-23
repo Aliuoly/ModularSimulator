@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from .system_definitions import (
+from system_definitions import (
     IrreversibleStates,
     IrreversibleControlElements,
     IrreversibleAlgebraicStates,
@@ -106,7 +106,7 @@ fast_system = create_system(
 )
 
 # --- 3. Run the Simulation ---
-systems = {"readable": readable_system, "fast": fast_system}
+systems = {"fast": fast_system}
 if __name__ == "__main__":
 
     logging.basicConfig(

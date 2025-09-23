@@ -2,12 +2,12 @@ import cProfile
 import pstats
 import io
 
-from run_simulation import readable_system, fast_system, plot
+from run_simulation import systems, plot
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-N_STEPS = 3000
+N_STEPS = 10000
 DT = 60
 sp_segments = 10
 np.random.seed(0)
@@ -28,7 +28,6 @@ def run_simulation(system, iterations: int, dt: float):
         system.extend_controller_trajectory(cv_tag = 'B', value = sp_trajs[i])
 
 
-systems = {"readable": readable_system}
 print("--- Starting Profiling Session ---")
 print(f"Running {N_STEPS} steps with dt={DT} for the energy balance system.")
 
@@ -41,8 +40,8 @@ for name, system in systems.items():
     profiler.disable()
     s = io.StringIO()
     sortby = pstats.SortKey.CUMULATIVE
-    ps = pstats.Stats(profiler, stream=s).sort_stats(sortby)
-    ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(
+    ps = pstats.Stats(profiler, stream=s)
+    ps.sort_stats(sortby).print_stats(
         "modular_simulation|simple_irreversible_energy_balance_system"
     )
     print(s.getvalue())

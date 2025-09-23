@@ -122,7 +122,17 @@ readable_system = create_system(
     system_constants=system_constants,
 )
 
-fast_system = readable_system
+fast_system = create_system(
+    dt=dt,
+    system_class=EnergyBalanceFastSystem,
+    initial_states=initial_states,
+    initial_controls=initial_controls,
+    initial_algebraic=initial_algebraic,
+    sensors=sensors,
+    calculations=calculations,
+    controllers=controllers,
+    system_constants=system_constants,
+)
 
 def plot(system):
     history = system.measured_history
@@ -245,7 +255,7 @@ def plot(system):
     plt.show()
 
 # --- 3. Run the Simulation ---
-systems = {"readable": readable_system}
+systems = {"readable": readable_system, 'fast': fast_system}
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")

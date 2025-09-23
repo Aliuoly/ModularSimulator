@@ -187,7 +187,6 @@ class EnergyBalanceFastSystem(FastSystem):
         algebraic_map: NDict,
         algebraic_size: int,
     ) -> NDArray:
-        del u
         result = np.zeros(algebraic_size)
         volume_slice = y_map["V"]
         volume = y[volume_slice][0]
@@ -212,7 +211,6 @@ class EnergyBalanceFastSystem(FastSystem):
         k_map: NDict,
         algebraic_map: NDict,
     ) -> NDArray:
-        del t
 
         volume_slice = y_map["V"]
         volume = y[volume_slice][0]

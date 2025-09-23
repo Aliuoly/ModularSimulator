@@ -135,18 +135,24 @@ class IrreversibleFastSystem(FastSystem):
         y_map: NDict, 
         u_map: NDict,
         k_map: NDict,
-        algebraic_map: NDict
+        algebraic_map: NDict,
+        algebraic_size: int
         ) -> NDArray:
         """
         Calculates the outlet flow (F_out) based on the current reactor volume.
         This is the algebraic part of the DAE system.
         """
-        result = np.zeros(len(algebraic_map))
+        result = np.zeros(algebraic_size)
         # Ensure volume doesn't go to zero to prevent division errors.
-        volume = max(1e-6, y[y_map['V']])
-        
+        volume_slice = y_map['V']
+        volume = y[volume_slice][0]
+        if volume < 1e-6:
+            volume = 1e-6
+
         # F_out = Cv * sqrt(V)
-        result[algebraic_map["F_out"]] = k[k_map["Cv"]] * (volume**0.5) 
+        Cv = k[k_map["Cv"]][0]
+        result_slice = algebraic_map["F_out"]
+        result[result_slice] = Cv * (volume**0.5)
         return result
 
     @staticmethod
@@ -163,15 +169,18 @@ class IrreversibleFastSystem(FastSystem):
         algebraic_map: NDict, 
     ) -> NDArray:
         # Unpack values from the inputs
-        F_out = algebraic[algebraic_map["F_out"]] #type: ignore
-        F_in = u[u_map["F_in"]] #type: ignore
-        kc = k[k_map["k"]] #type: ignore
-        CA_in = k[k_map["CA_in"]] #type: ignore
+        F_out = algebraic[algebraic_map["F_out"]][0] #type: ignore
+        F_in = u[u_map["F_in"]][0] #type: ignore
+        kc = k[k_map["k"]][0] #type: ignore
+        CA_in = k[k_map["CA_in"]][0] #type: ignore
 
         # Unpack current state values using the StateMap for clarity
-        volume = max(1e-6, y[y_map["V"]]) #type: ignore
-        molarity_A = y[y_map["A"]] #type: ignore
-        molarity_B = y[y_map["B"]] #type: ignore
+        volume_slice = y_map["V"]
+        volume = y[volume_slice][0] #type: ignore
+        if volume < 1e-6:
+            volume = 1e-6
+        molarity_A = y[y_map["A"]][0] #type: ignore
+        molarity_B = y[y_map["B"]][0] #type: ignore
         
         # Calculate reaction rate: r = k * [A] * V
         reaction_rate = molarity_A * volume * kc

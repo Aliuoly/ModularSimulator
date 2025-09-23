@@ -1,10 +1,9 @@
 from abc import abstractmethod
 from numpy.typing import NDArray
-from typing import Callable, ClassVar, Dict, Any
+from typing import Callable
 from scipy.integrate import solve_ivp #type: ignore
 from numba.typed.typeddict import Dict as NDict
-from numba import types, njit
-from numba.core.errors import TypingError
+from numba import types
 from modular_simulation.framework.system import System
 
 import logging
@@ -20,104 +19,6 @@ class FastSystem(System):
 
     This class overrides the standard simulation loop to call the `_fast` methods.
     """
-
-    # ``auto_njit`` allows subclasses to opt out of the automatic compilation
-    # behaviour introduced by ``FastSystem``. A subclass can set this to
-    # ``False`` when hand-crafted ``*_fast`` implementations are desired.
-    auto_njit: ClassVar[bool] = True
-    njit_options: ClassVar[Dict[str, Any]] = {"cache": True}
-
-    def __init_subclass__(cls, auto_njit: bool | None = None, **kwargs: Any) -> None:
-        """Automatically compile readable implementations with ``numba``.
-
-        ``FastSystem`` subclasses can inherit the readable versions of
-        ``calculate_algebraic_values`` and ``rhs`` from an existing ``System``
-        subclass (e.g. ``class FooFastSystem(FastSystem, FooSystem)``).  When
-        ``auto_njit`` is enabled this hook compiles the inherited implementations
-        with :func:`numba.njit` and wires the compiled functions into the fast
-        execution path so users no longer have to duplicate logic manually.
-
-        Subclasses can disable the behaviour globally by setting
-        ``auto_njit = False`` or per-subclass via ``class FooFastSystem(...,
-        auto_njit=False)``.  If the automatic compilation fails (because the
-        readable implementation uses unsupported Python/NumPy features) a
-        descriptive ``TypeError`` is raised instructing the user to provide an
-        explicit ``*_fast`` override.
-        """
-
-        super().__init_subclass__(**kwargs)
-
-        if cls is FastSystem:
-            # The base class itself should not attempt to build the wrappers.
-            return
-
-        auto = cls.auto_njit if auto_njit is None else auto_njit
-        if not auto:
-            return
-
-        if "calculate_algebraic_values_fast" not in cls.__dict__:
-            readable = getattr(cls, "calculate_algebraic_values", None)
-            if readable is not None and readable is not System.calculate_algebraic_values:
-                cls.calculate_algebraic_values_fast = staticmethod(  # type: ignore[assignment]
-                    cls._build_algebraic_wrapper(readable)
-                )
-
-        if "rhs_fast" not in cls.__dict__:
-            readable_rhs = getattr(cls, "rhs", None)
-            if readable_rhs is not None and readable_rhs is not System.rhs:
-                cls.rhs_fast = staticmethod(  # type: ignore[assignment]
-                    cls._build_rhs_wrapper(readable_rhs)
-                )
-
-    @classmethod
-    def _build_algebraic_wrapper(cls, readable: Callable) -> Callable:
-        compiled = njit(**cls.njit_options)(readable)
-
-        def wrapper(
-            y: NDArray,
-            u: NDArray,
-            k: NDArray,
-            y_map: NDict,
-            u_map: NDict,
-            k_map: NDict,
-            algebraic_map: NDict,
-            algebraic_size: int,
-        ) -> NDArray:
-            try:
-                return compiled(y, u, k, y_map, u_map, k_map, algebraic_map)
-            except TypingError as exc:  # pragma: no cover - executed only on failure
-                raise TypeError(
-                    "Automatic numba compilation of 'calculate_algebraic_values' "
-                    "failed. Define 'calculate_algebraic_values_fast' manually "
-                    "or disable auto_njit for this FastSystem subclass."
-                ) from exc
-
-        return wrapper
-
-    @classmethod
-    def _build_rhs_wrapper(cls, readable: Callable) -> Callable:
-        compiled = njit(**cls.njit_options)(readable)
-
-        def wrapper(
-            t: float,
-            y: NDArray,
-            u: NDArray,
-            k: NDArray,
-            algebraic: NDArray,
-            u_map: NDict,
-            y_map: NDict,
-            k_map: NDict,
-            algebraic_map: NDict,
-        ) -> NDArray:
-            try:
-                return compiled(t, y, u, k, algebraic, y_map, u_map, k_map, algebraic_map)
-            except TypingError as exc:  # pragma: no cover - executed only on failure
-                raise TypeError(
-                    "Automatic numba compilation of 'rhs' failed. Define 'rhs_fast' "
-                    "manually or disable auto_njit for this FastSystem subclass."
-                ) from exc
-
-        return wrapper
 
     def _construct_params(self) -> None:
         """

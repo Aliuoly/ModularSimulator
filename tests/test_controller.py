@@ -1,315 +1,175 @@
 import pytest
 
-from enum import Enum
-from typing import ClassVar, Type
-
-from pydantic import ConfigDict, Field
 
 pytest.importorskip("numpy")
 
-from modular_simulation.control_system.controllers.cascade_controller import (
-    CascadeController,
-    ControllerMode,
-)
-from modular_simulation.control_system.controllers.controller import Controller
+from modular_simulation.control_system.controllers.controller import Controller, ControllerMode
 from modular_simulation.control_system.trajectory import Trajectory
 from modular_simulation.measurables import ControlElements, States
 from modular_simulation.quantities import MeasurableQuantities, UsableQuantities
-from modular_simulation.usables import Sensor, TimeValueQualityTriplet
-
-
-class DummyController(Controller):
-    """Minimal concrete controller for exercising base-class behaviour."""
-
-    def model_post_init(self, __context):  # type: ignore[override]
-        super().model_post_init(__context)
-        self._observed_setpoints: list[float] = []
-
-    def _control_algorithm(self, cv_value, sp_value, t):  # type: ignore[override]
-        if isinstance(sp_value, TimeValueQualityTriplet):
-            sp = float(sp_value.value)
-        else:
-            sp = float(sp_value)
-        self._observed_setpoints.append(sp)
-        return TimeValueQualityTriplet(t, 0.0, ok=True)
-
-
-class EchoController(Controller):
-    """Controller that echoes its setpoint as the control output."""
-
-    def model_post_init(self, __context):  # type: ignore[override]
-        super().model_post_init(__context)
-        self._observed_setpoints: list[float] = []
-
-    def _control_algorithm(self, cv_value, sp_value, t):  # type: ignore[override]
-        if isinstance(sp_value, TimeValueQualityTriplet):
-            sp = float(sp_value.value)
-        else:
-            sp = float(sp_value)
-        self._observed_setpoints.append(sp)
-        return TimeValueQualityTriplet(t, sp, ok=True)
-
-
-def _prepare_controller(ramp_rate: float | None) -> tuple[DummyController, dict[str, float]]:
-    traj = Trajectory(y0=0.0, t0=0.0)
-    controller = DummyController(
-        mv_tag="mv",
-        cv_tag="cv",
-        sp_trajectory=traj,
-        mv_range=(-10.0, 10.0),
-        ramp_rate=ramp_rate,
-    )
-    controller._mv_setter = lambda value: None
-    controller._last_value = TimeValueQualityTriplet(0.0, 0.0, ok=True)
-    state = {"t": 0.0, "value": 0.0}
-
-    def get_pv() -> TimeValueQualityTriplet:
-        return TimeValueQualityTriplet(state["t"], state["value"], ok=True)
-
-    controller._cv_getter = get_pv
-    return controller, state
-
-
-def _prepare_echo_controller() -> tuple[EchoController, dict[str, float], list[float]]:
-    traj = Trajectory(y0=0.0, t0=0.0)
-    controller = EchoController(
-        mv_tag="mv_echo",
-        cv_tag="cv_echo",
-        sp_trajectory=traj,
-        mv_range=(-10.0, 10.0),
-    )
-    controller._last_value = TimeValueQualityTriplet(0.0, 0.0, ok=True)
-    state = {"t": 0.0, "value": 0.0}
-
-    def get_pv() -> TimeValueQualityTriplet:
-        return TimeValueQualityTriplet(state["t"], state["value"], ok=True)
-
-    controller._cv_getter = get_pv
-    applied: list[float] = []
-    controller._mv_setter = lambda value: applied.append(value)
-    return controller, state, applied
-
-
-def _wire_cascade_for_testing(cascade: CascadeController) -> None:
-    """Link outer-loop commands to the inner loop without full system wiring."""
-
-    cascade._cv_getter = cascade.outer_loop._cv_getter
-    cascade._mv_setter = cascade.inner_loop._mv_setter
-    cascade._last_value = cascade.inner_loop._last_value
-
-    def assign_inner(value):
-        last = cascade.outer_loop._last_value
-        if last is None:
-            raise RuntimeError("Outer loop has not produced a value yet.")
-        cascade.inner_loop.update_trajectory(last.t, value)
-
-    cascade.outer_loop._mv_setter = assign_inner
-
-
-def _build_dummy_controller(mv_tag: str, cv_tag: str) -> DummyController:
-    controller = DummyController(
-        mv_tag=mv_tag,
-        cv_tag=cv_tag,
-        sp_trajectory=Trajectory(y0=0.0, t0=0.0),
-        mv_range=(-10.0, 10.0),
-    )
-    controller._mv_setter = lambda value: None
-    controller._cv_getter = lambda: TimeValueQualityTriplet(0.0, 0.0, ok=True)
-    controller._last_value = TimeValueQualityTriplet(0.0, 0.0, ok=True)
-    return controller
-
-
-def test_controller_ramp_rate_limits_setpoint_progression():
-    controller, state = _prepare_controller(ramp_rate=1.0)
-
-    state.update({"t": 0.0, "value": 0.0})
-    controller.update(0.0)
-    assert controller._observed_setpoints[-1] == pytest.approx(0.0)
-
-    controller.sp_trajectory.set_now(1.0, 5.0)
-    for t, expected in [(1.0, 1.0), (2.0, 2.0), (3.0, 3.0), (4.0, 4.0), (5.0, 5.0)]:
-        state.update({"t": t, "value": 0.0})
-        controller.update(t)
-        assert controller._observed_setpoints[-1] == pytest.approx(expected)
-
-    state.update({"t": 2.0, "value": 10.0})
-    controller.track_cv(2.0)
-    state.update({"t": 3.0, "value": 0.0})
-    controller.update(3.0)
-    assert controller._observed_setpoints[-1] == pytest.approx(10.0)
-
-
-def test_controller_without_ramp_tracks_raw_setpoint():
-    controller, state = _prepare_controller(ramp_rate=None)
-
-    state.update({"t": 0.0, "value": 0.0})
-    controller.update(0.0)
-
-    controller.sp_trajectory.set_now(1.0, 7.5)
-    state.update({"t": 1.0, "value": 0.0})
-    controller.update(1.0)
-    assert controller._observed_setpoints[-1] == pytest.approx(7.5)
-
-
-def test_cascade_requires_non_cascade_inner_loop():
-    inner, _ = _prepare_controller(ramp_rate=None)
-    outer, _, _ = _prepare_echo_controller()
-
-    cascade = CascadeController(inner_loop=inner, outer_loop=outer)
-
-    with pytest.raises(TypeError):
-        CascadeController(inner_loop=cascade, outer_loop=outer)  # type: ignore[arg-type]
-
-
-def test_cascade_updates_inner_setpoint_from_outer_output():
-    inner, inner_state = _prepare_controller(ramp_rate=None)
-    inner_actions: list[float] = []
-    inner._mv_setter = lambda value: inner_actions.append(value)
-    inner._last_value = TimeValueQualityTriplet(0.0, 0.0, ok=True)
-
-    outer, outer_state, outer_actions = _prepare_echo_controller()
-
-    cascade = CascadeController(inner_loop=inner, outer_loop=outer)
-    cascade.mode = ControllerMode.cascade
-    _wire_cascade_for_testing(cascade)
-
-    inner_state.update({"t": 1.0, "value": 0.0})
-    outer_state.update({"t": 1.0, "value": 0.0})
-    outer.sp_trajectory.set_now(0.0, 3.0)
-
-    result = cascade.update(1.0)
-
-    assert outer_actions == []
-    assert inner_actions != []
-    assert inner._observed_setpoints[-1] == pytest.approx(3.0)
-    assert result is inner._last_value
-    assert cascade.active_sp_trajectory() is outer.sp_trajectory
-
-
-def test_cascade_auto_mode_tracks_outer_measurement():
-    inner, inner_state = _prepare_controller(ramp_rate=None)
-    outer, outer_state, outer_actions = _prepare_echo_controller()
-
-    cascade = CascadeController(inner_loop=inner, outer_loop=outer)
-    cascade.mode = ControllerMode.auto
-    _wire_cascade_for_testing(cascade)
-
-    inner_state.update({"t": 2.0, "value": 0.0})
-    outer_state.update({"t": 2.0, "value": 5.0})
-
-    cascade.update(2.0)
-
-    assert outer.sp_trajectory.current_value(2.0) == pytest.approx(5.0)
-    assert outer_actions == []
-    assert cascade.active_sp_trajectory() is inner.sp_trajectory
-
-
-def test_cascade_update_trajectory_targets_active_source():
-    inner, _ = _prepare_controller(ramp_rate=None)
-    outer, _, _ = _prepare_echo_controller()
-
-    cascade = CascadeController(inner_loop=inner, outer_loop=outer)
-    _wire_cascade_for_testing(cascade)
-
-    cascade.mode = ControllerMode.cascade
-    cascade.update_trajectory(0.0, 7.0)
-    assert outer.sp_trajectory.current_value(0.0) == pytest.approx(7.0)
-
-    cascade.mode = ControllerMode.auto
-    cascade.update_trajectory(0.0, 1.5)
-    assert inner.sp_trajectory.current_value(0.0) == pytest.approx(1.5)
-
-
-def test_cascade_active_trajectory_delegates_to_outer_cascade():
-    inner_main = _build_dummy_controller(mv_tag="inner_mv", cv_tag="inner_cv")
-    bridge = _build_dummy_controller(mv_tag="bridge_mv", cv_tag="bridge_cv")
-    outer = _build_dummy_controller(mv_tag="outer_mv", cv_tag="outer_cv")
-
-    outer_cascade = CascadeController(inner_loop=bridge, outer_loop=outer)
-    cascade = CascadeController(inner_loop=inner_main, outer_loop=outer_cascade)
-
-    assert cascade.active_sp_trajectory() is outer.sp_trajectory
-
-    outer_cascade.mode = ControllerMode.auto
-    assert cascade.active_sp_trajectory() is bridge.sp_trajectory
-
-    cascade.mode = ControllerMode.auto
-    assert cascade.active_sp_trajectory() is inner_main.sp_trajectory
-
-
-class ImmediateSensor(Sensor):
-    """Sensor that always returns the underlying value without delay."""
-
-    def _should_update(self, t: float) -> bool:  # type: ignore[override]
-        return True
-
-    def _get_processed_value(self, raw_value, t):  # type: ignore[override]
-        return raw_value
-
-
-class MultiStateMap(Enum):
-    inner_cv = 0
-    bridge_cv = 1
-    outer_cv = 2
-
-
-class MultiStates(States):
-    model_config = ConfigDict(extra="forbid")
-    StateMap: ClassVar[Type[Enum]] = MultiStateMap
-    inner_cv: float = Field(0.0)
-    bridge_cv: float = Field(0.0)
-    outer_cv: float = Field(0.0)
-
-
-class MultiControlElements(ControlElements):
-    inner_mv: float = 0.0
-
-
-def test_multi_level_cascade_initialization_allows_nested_updates():
-    sensors = [
-        ImmediateSensor(measurement_tag="inner_cv"),
-        ImmediateSensor(measurement_tag="bridge_cv"),
-        ImmediateSensor(measurement_tag="outer_cv"),
-    ]
-
-    measurables = MeasurableQuantities(
-        states=MultiStates(),
-        control_elements=MultiControlElements(),
-    )
-    for sensor in sensors:
-        sensor._initialize(measurables)
-    usable = UsableQuantities(sensors=sensors, calculations=[])
-    usable.update(0.0)
-
-    inner = EchoController(
-        mv_tag="inner_mv",
-        cv_tag="inner_cv",
-        sp_trajectory=Trajectory(y0=0.0, t0=0.0),
-        mv_range=(-10.0, 10.0),
-    )
-    bridge = EchoController(
-        mv_tag="inner_mv",
-        cv_tag="bridge_cv",
-        sp_trajectory=Trajectory(y0=0.0, t0=0.0),
-        mv_range=(-10.0, 10.0),
-    )
-    outer = EchoController(
-        mv_tag="bridge_cv",
-        cv_tag="outer_cv",
-        sp_trajectory=Trajectory(y0=0.0, t0=0.0),
-        mv_range=(-10.0, 10.0),
+from modular_simulation.usables import Sensor
+from modular_simulation.validation.system_validation import _initialize_sensors_and_calculations
+
+
+class ErrorEchoController(Controller):
+    """
+    Minimal concrete controller for exercising base-class behaviour.
+    Returns the error defined as sp_value - cv_value as the control output.
+    """
+
+    def _control_algorithm(self, t, cv_value, sp_value):  
+        return sp_value - cv_value
+
+class DummyStates(States):
+    
+    mv2: float = 10.0
+    mv3: float = 100.0
+    cv1: float = -5.0
+    cv2: float = 5.0
+    cv3: float = 15.0
+
+class DummyControlElements(ControlElements):
+    mv1: float = -5.0
+
+class DummySensor(Sensor):
+    def _get_processed_value(self, t, raw_value):
+        return raw_value # do nothing
+    def _should_update(self, t):
+        return True # always update
+    
+    
+def prepare_normal_controller():
+    return ErrorEchoController(
+        mv_tag = 'mv',
+        cv_tag = 'cv',
+        sp_trajectory = Trajectory(1.0),
+        mv_range = (-100,100),
     )
 
-    outer_cascade = CascadeController(inner_loop=bridge, outer_loop=outer)
-    cascade = CascadeController(inner_loop=inner, outer_loop=outer_cascade)
+def prepare_cascade_controller_1():
+    return ErrorEchoController(
+        mv_tag = 'mv1',
+        cv_tag = 'cv1',
+        sp_trajectory = Trajectory(1.0),
+        mv_range = (-50,50),
+        cascade_controller = ErrorEchoController(
+            mv_tag = 'mv2',
+            cv_tag = 'cv2',
+            sp_trajectory = Trajectory(2.0),
+            mv_range = (-50,50)
+        )
+    )
 
-    cascade._initialize(usable, measurables.control_elements)
+def prepare_cascade_controller_2():
+    return ErrorEchoController(
+        mv_tag = 'mv1',
+        cv_tag = 'cv1',
+        sp_trajectory = Trajectory(1.0),
+        mv_range = (-50,50),
+        mode = ControllerMode.TRACKING,
+        cascade_controller = ErrorEchoController(
+            mv_tag = 'mv2',
+            cv_tag = 'cv2',
+            sp_trajectory = Trajectory(10.0),
+            mv_range = (-50,50),
+            cascade_controller = ErrorEchoController(
+                mv_tag = 'mv3',
+                cv_tag = 'cv3',
+                sp_trajectory = Trajectory(100.0),
+                mv_range = (-50,50)
+            )
+        )
+    )
 
-    outer.sp_trajectory.set_now(0.0, 2.5)
-    result = cascade.update(0.0)
+def prepare_usable():
+    return UsableQuantities(
+        sensors = [
+            DummySensor(measurement_tag = 'mv1'),
+            DummySensor(measurement_tag = 'mv2'),
+            DummySensor(measurement_tag = 'mv3'),
+            DummySensor(measurement_tag = 'cv1'),
+            DummySensor(measurement_tag = 'cv2'),
+            DummySensor(measurement_tag = 'cv3'),
+        ]
+    )
 
-    assert result.value == pytest.approx(2.5)
-    assert measurables.control_elements.inner_mv == pytest.approx(2.5)
-    assert inner._observed_setpoints[-1] == pytest.approx(2.5)
-    assert bridge._observed_setpoints[-1] == pytest.approx(2.5)
-    assert outer._observed_setpoints[-1] == pytest.approx(2.5)
+def prepare_measurable():
+    return MeasurableQuantities(
+        states = DummyStates(),
+        control_elements = DummyControlElements(),
+    )
+
+def test_normal_controller():
+
+    usable = prepare_usable()
+    measurable = prepare_measurable()
+    controller = prepare_normal_controller()
+    # simulate initialization logic during system creation
+    controller._initialize(usable, measurable.control_elements)
+
+    output = controller.update(t = 0)
+    assert output.t == 0.0
+
+def test_cascade_controller_1():
+    usable = prepare_usable()
+    measurable = prepare_measurable()
+    controller = prepare_cascade_controller_1()
+
+    _initialize_sensors_and_calculations(
+        measurable, usable
+    )
+    controller._initialize(usable, measurable.control_elements)
+    first_output = controller.update(t = 0).value
+
+    # expected behavior:
+    # currently the inner loop is in TRACKING mode
+    # thus, the output at t = 0 (old trajectory)
+    # and the output at t = 1 (new trajecty from .set_now)
+    # should be the same, since the setpoint should internally get
+    # set to the CV value and ignore any other setpoint source. 
+    controller.sp_trajectory.set_now(t = 1, value = 10)
+
+    # even though we just set it to 10, the controller should NOT 
+    # see 10, but see the cv value instead
+    assert controller.sp_trajectory(t = 1) == 10
+    assert controller.sp_trajectory(t = 1) != controller._sp_getter(1).value
+    assert controller._sp_getter(1).value == controller._cv_getter().value
+    # and as such, the output from t = 1 and t = 0 should be identical (since same sp - the cv value itself)
+    second_output = controller.update(t = 1).value
+    assert first_output == second_output
+
+    # now let's change to AUTO mode
+    # expected behavior:
+    # when the sp_trajectory's return changes, the output should change as well. 
+    # if it doesn't change, the output should not change either 
+    #   (ONLY because of our dummy controller implementation. A PID e.g., would not do this due to time dynamics)
+    controller._change_control_mode(mode = 'AUTO')
+    third_output = controller.update(t = 2).value
+    # since we JUST changed the mode, the sp should be tracking until someone sets it, hence:
+    assert second_output == third_output
+    fourth_output = controller.update(t = 3).value
+    # since sp did not change between t = 2 and t = 3, output should be the same:
+    assert third_output == fourth_output
+    # now we change the setpoint and assert consistency of _sp_getter:
+    controller.sp_trajectory.set_now(t = 4, value = 10)
+    assert controller.sp_trajectory(t = 4) == controller._sp_getter(4)
+    # and now check that control output has changed:
+    fifth_output = controller.update(t = 5)
+    assert fourth_output != fifth_output
+
+    # moving on to CASCADE mode
+    # since inner loop was on AUTO, cascade controller should be in TRACKING mode:
+    assert controller.cascade_controller.mode == ControllerMode.TRACKING
+    # and the sp should be equal to the cv
+    assert controller.cascade_controller._sp_getter(5) == controller.cascade_controller._cv_getter()
+    # now we change mode to CASCADE and verify that the cascade controller is not in AUTO mode
+    # and the inner loop is in CASCADE mode:
+    controller._change_control_mode(mode = 'CASCADE')
+    assert controller.cascade_controller.mode == ControllerMode.AUTO
+    assert controller.mode == ControllerMode.CASCADE
+    # and we once again verify that the sp_getter of the inner loop correctly 
+    # grabs the output of the cascade controller
+    assert controller._sp_getter(6).value == controller.cascade_controller.update(t = 6).value
+    
+
+test_cascade_controller_1()

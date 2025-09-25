@@ -102,7 +102,7 @@ class Sensor(BaseModel, ABC):
             raw_value = measurement_function()
 
         # 3. Apply subclass-specific processing (e.g., time delay) to the true value
-        processed_value = self._get_processed_value(raw_value, t)
+        processed_value = self._get_processed_value(t = t, raw_value = raw_value)
 
         # 4. Apply noise and faults to the processed value
         final_value, is_faulty = self._apply_noise_and_faults(processed_value)
@@ -125,7 +125,7 @@ class Sensor(BaseModel, ABC):
         pass
 
     @abstractmethod
-    def _get_processed_value(self, raw_value: float | NDArray, t: float) -> float | NDArray:
+    def _get_processed_value(self, t: float, raw_value: float | NDArray) -> float | NDArray:
         """
         Takes the true, raw value and applies subclass-specific logic,
         such as time delays, filtering, etc.

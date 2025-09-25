@@ -1,5 +1,5 @@
 from typing import Dict, List
-from pydantic import  PrivateAttr, BaseModel, ConfigDict
+from pydantic import  PrivateAttr, BaseModel, ConfigDict, Field
 from modular_simulation.usables import Calculation, Sensor, TimeValueQualityTriplet
 
 class UsableQuantities(BaseModel):
@@ -11,7 +11,7 @@ class UsableQuantities(BaseModel):
         - results: Dict[str, Any]
     """
     sensors: List[Sensor]
-    calculations: List[Calculation]
+    calculations: List[Calculation] = Field(default_factory = list)
 
     _usable_results: Dict[str, TimeValueQualityTriplet] = PrivateAttr(default_factory=dict)
 
@@ -24,11 +24,12 @@ class UsableQuantities(BaseModel):
         but a dictionary of results is still returned for tracking. 
         """
 
-        for sensor in self.sensors:
-            self._usable_results[sensor.measurement_tag] = sensor.measure(t)
-        for calculation in self.calculations:
-            self._usable_results[calculation.output_tag] = calculation.calculate(t)
-        
+        self._usable_results.update(
+            {sensor.measurement_tag: sensor.measure(t) for sensor in self.sensors}
+        )
+        self._usable_results.update(
+            {calculation.output_tag: calculation.calculate(t) for calculation in self.calculations}
+        )
         return self._usable_results
     
     @property

@@ -2,11 +2,10 @@ from typing import List, Dict
 from dataclasses import dataclass, field
 from modular_simulation.usables import TimeValueQualityTriplet
 from modular_simulation.control_system.controllers.controller import Controller
-from modular_simulation.control_system.controllers.cascade_controller import CascadeController
 @dataclass(slots = True)
 class ControllableQuantities:
     """Container for the controllers acting on the system's control elements."""
-    controllers: List[Controller | CascadeController]
+    controllers: List[Controller]
 
     _control_outputs: Dict[str, TimeValueQualityTriplet] = field(init = False, default_factory = dict)
     
@@ -14,7 +13,8 @@ class ControllableQuantities:
         """updates the controllers available. Controllers are linked to the instance of ControlElement
         internally, so the results are reflected in the simulation automatically without having
         to return anything here. However, it is still returned for tracking purposes."""
-        for controller in self.controllers:
-            self._control_outputs[controller.mv_tag] = controller.update(t)
-
+        self._control_outputs.update(
+            {controller.mv_tag: controller.update(t) for controller in self.controllers}
+        )
+        
         return self._control_outputs

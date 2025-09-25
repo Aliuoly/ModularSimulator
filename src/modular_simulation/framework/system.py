@@ -5,25 +5,22 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from numpy.typing import NDArray, ArrayLike
 from typing import Any, Dict, List, Mapping, TYPE_CHECKING, Tuple, Callable
-from enum import IntEnum
 from scipy.integrate import solve_ivp #type: ignore
 from modular_simulation.validation import validate_and_link
 from functools import cached_property
 from operator import attrgetter
+from numba import jit
+from numba.typed.typeddict import Dict as NDict
+from numba import types
+import warnings
+from modular_simulation.control_system.controllers.controller import ControllerMode
 from modular_simulation.measurables.base_classes import BaseIndexedModel
 if TYPE_CHECKING:
     from modular_simulation.usables import TimeValueQualityTriplet
     from modular_simulation.control_system import Controller, Trajectory
 import logging
+from tqdm import tqdm
 logger = logging.getLogger(__name__)
-
-class StaticMapEnum(IntEnum):
-    STATE_MAP = 0
-    CONTROL_MAP = 1
-    CONSTANT_MAP = 2
-    ALGEBRAIC_MAP = 3
-
-
 
 class System(BaseModel, ABC):
     """
@@ -53,7 +50,7 @@ class System(BaseModel, ABC):
         _history (List[Dict]): A log of the system's state at each time step.
     """
     dt: float = Field(
-        default = 1.0,
+        default = ...,
         description = (
             "How often the system's sensors, calculations, and controllers update. "
             "The solver takes adaptive 'internal steps' regardless of this value to update the system's states. "
@@ -77,14 +74,24 @@ class System(BaseModel, ABC):
             "Defines the controllers that manipulate the system's `ControlElements`."
         )
     )
-    system_constants: Dict[str, Any] = Field(
-        default_factory = dict,
-        description = "A dictionary of constant parameters for the system.",
-    )
     solver_options: Dict[str, Any] = Field(
         default_factory = lambda : {'method': 'LSODA'},
         description = (
             "arguments to scipy.integrate.solve_ivp call done by the system when taking steps."
+        )
+    )
+    use_numba: bool = Field(
+        default = True,
+        description = (
+            "Whether or not to attempt to compile the rhs and algebraic value function with numba. "
+            "This should work out of the box and improve speed for large systems."
+        )
+    )
+    numba_options: Dict[str, Any] = Field(
+        default_factory = lambda : {'nopython': True, 'cache': True},
+        description = (
+            "arguments for numba JIT compilation of rhs and calculate_algebraic_values methods. "
+            "Ignored if use_numba is False"
         )
     )
     record_history: bool = Field(
@@ -92,6 +99,12 @@ class System(BaseModel, ABC):
         description = (
             "Whether or not to historize the underlying measurable_quantities of the system. "
             "The usable_quantities, which are measured or calculation, are always historized regardless. "
+        )
+    )
+    show_progress: bool = Field(
+        default = True,
+        description = (
+            "Whether or not to show simulation progress when simulating multiple steps at once."
         )
     )
 
@@ -105,10 +118,13 @@ class System(BaseModel, ABC):
     _history_slots: List[Tuple[Callable[[Any], Any], List]] = PrivateAttr(default_factory=list)
 
     def model_post_init(self, __context: Any) -> None:
-        global StaticMapEnum
         super().model_post_init(__context)
         validate_and_link(self)
-        self._construct_params()
+
+        if self.use_numba:
+            self._construct_fast_params()
+        else:
+            self._construct_params()
 
         if self.record_history:
             # Build history dict and accessors exactly once
@@ -122,12 +138,53 @@ class System(BaseModel, ABC):
                     # capture the object reference and append list ref
                     self._history_slots.append((lambda o=mq_obj, g=getter: g(o), lst)) #type:ignore[misc]
             self._history['time'] = []
+    
+    def _construct_fast_params(self) -> None:
+        """
+        overwrites System's method of the same name to support numba njit decoration
+        """
+        # convert the Enum's to typed dictionaries for numba
+        
+        y_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
+        index_map = self.measurable_quantities.states._index_dict
+        for member in index_map:
+            y_map[member] = index_map[member]
+
+        u_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
+        index_map = self.measurable_quantities.control_elements._index_dict
+        for member in index_map:
+            u_map[member] = index_map[member]
+        
+        k_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
+        index_map = self.measurable_quantities.constants._index_dict
+        for member in index_map:
+            k_map[member] = index_map[member]
+
+        algebraic_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
+        index_map = self.measurable_quantities.algebraic_states._index_dict
+        for member in index_map:
+            algebraic_map[member] = index_map[member]
+
+        algebraic_size = self.measurable_quantities.algebraic_states.get_total_size()
+
+        self._params = {
+            'y_map': y_map,
+            'u_map': u_map,
+            'k_map': k_map,
+            'algebraic_map': algebraic_map,
+            'algebraic_size': algebraic_size,
+            'k': self.measurable_quantities.constants.to_array(),
+            'algebraic_values_function': jit(**self.numba_options)(self.calculate_algebraic_values),
+            'rhs_function': jit(**self.numba_options)(self.rhs),
+        }
 
     def _construct_params(self) -> None:
+        algebraic_size = self.measurable_quantities.algebraic_states.get_total_size()
         self._params = {
             'y_map': self.measurable_quantities.states.index_map_dict(),
             'u_map': self.measurable_quantities.control_elements.index_map_dict(),
             'k_map': self.measurable_quantities.constants.index_map_dict(),
+            'algebraic_size': algebraic_size,
             'algebraic_map': self.measurable_quantities.algebraic_states.index_map_dict(),
             'k': self.measurable_quantities.constants.to_array(),
             'algebraic_values_function': self.calculate_algebraic_values,
@@ -158,7 +215,7 @@ class System(BaseModel, ABC):
             self.measurable_quantities.states.to_array(),
             self.measurable_quantities.control_elements.to_array(),
         )
-
+    
     @staticmethod
     @abstractmethod
     def calculate_algebraic_values(
@@ -169,6 +226,7 @@ class System(BaseModel, ABC):
             u_map: Mapping[str, slice],
             k_map: Mapping[str, slice],
             algebraic_map: Mapping[str, slice],
+            algebraic_size: int,
             ) -> NDArray:
         """
         Calculates derived quantities based on the provided state array, controls, and constants.
@@ -232,6 +290,7 @@ class System(BaseModel, ABC):
             algebraic_map: Mapping[str, slice],
             algebraic_values_function: Callable,
             rhs_function: Callable,
+            algebraic_size: int,
             ) -> NDArray:
         """
         A concrete wrapper called by the solver. It recalculates algebraic states
@@ -245,7 +304,8 @@ class System(BaseModel, ABC):
             y_map = y_map,
             u_map = u_map,
             k_map = k_map,
-            algebraic_map = algebraic_map
+            algebraic_map = algebraic_map,
+            algebraic_size = algebraic_size
         )
         return rhs_function(
             t, 
@@ -268,11 +328,16 @@ class System(BaseModel, ABC):
         It configures and runs `solve_ivp`, then updates the system's algebraic
         states with the final, successful result.
         """
-        global StaticMapEnum
-
+        show_progress = False
+        if nsteps > 1:
+            if logger.level == logging.INFO:
+                # dont show progress bar if we are in debug mode. 
+                show_progress = self.show_progress
+            
         if not isinstance(nsteps, int):
             if isinstance(nsteps, float) and nsteps.is_integer():
                 nsteps = int(nsteps)
+                
             else:
                 raise TypeError("nsteps must be an integer number of steps")
 
@@ -281,9 +346,12 @@ class System(BaseModel, ABC):
         k_map = self._params['k_map']
         algebraic_map = self._params['algebraic_map']
         k = self._params['k']
-        algebraic_values_function = self.calculate_algebraic_values
-        rhs_function = self.rhs
+        algebraic_values_function = self._params["algebraic_values_function"]
+        rhs_function = self._params["rhs_function"]
+        algebraic_size = self._params["algebraic_size"]
         
+        if show_progress:
+            pbar = tqdm(total = nsteps*self.dt)
         for _ in range(nsteps):
             y0, u0 = self._pre_integration_step()
             final_y = y0
@@ -292,7 +360,7 @@ class System(BaseModel, ABC):
                     fun = self._rhs_wrapper,
                     t_span = (self._t, self._t + self.dt),
                     y0 = y0,
-                    args = (u0, k, y_map, u_map, k_map, algebraic_map, algebraic_values_function, rhs_function),
+                    args = (u0, k, y_map, u_map, k_map, algebraic_map, algebraic_values_function, rhs_function, algebraic_size),
                     **self.solver_options
                 )
                 final_y = result.y[:, -1]
@@ -301,12 +369,14 @@ class System(BaseModel, ABC):
             # After the final SUCCESSFUL step, update the actual algebraic_states object.
             if self.measurable_quantities.algebraic_states:
                 final_algebraic_values = algebraic_values_function(
-                    final_y,u0, k, y_map, u_map, k_map, algebraic_map
+                    final_y,u0, k, y_map, u_map, k_map, algebraic_map, algebraic_size
                 )
                 self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
             
             self._t += self.dt
             self._update_history()
+            if show_progress:
+                pbar.update(self.dt)
         return 
     
     def extend_controller_trajectory(self, cv_tag: str, value: float | None = None) -> "Trajectory":
@@ -325,26 +395,35 @@ class System(BaseModel, ABC):
             )
 
         controller = self.controller_dictionary[cv_tag]
-        active_trajectory = controller.active_sp_trajectory()
-
+        if controller.mode != ControllerMode.AUTO:
+            warnings.warn(
+                f"Tried to change trajectory of '{controller.cv_tag}' controller but failed - controller must be in AUTO mode, but is {controller.mode.name}. "
+            )
+        active_trajectory = controller.sp_trajectory
         if value is None:
-            value = active_trajectory.current_value(self._t)
+            value = active_trajectory(self._t)
 
         old_value = active_trajectory(self._t)
-        controller.update_trajectory(self._t, value)
-        new_value = controller.active_sp_trajectory()(self._t)
+        active_trajectory.set_now(self._t, value)
+        new_value = active_trajectory(self._t)
         logger.info("Setpoint trajectory for '%(tag)s' controller changed at time %(time)0.0f " \
                         "from %(old)0.1e to %(new)0.1e",
                         {'tag': cv_tag, 'time': self._t, 'old': old_value, 'new': new_value})
-        return controller.active_sp_trajectory()
+        return active_trajectory
         
     @cached_property
     def controller_dictionary(self) -> Dict[str, "Controller"]:
-        return {c.cv_tag: c for c in self.controllable_quantities.controllers}
+        return_dict = {}
+        for controller in self.controllable_quantities.controllers:
+            return_dict.update({controller.cv_tag : controller})
+            while controller.cascade_controller is not None:
+                controller = controller.cascade_controller
+                return_dict.update({controller.cv_tag : controller})
+        return return_dict
 
     @cached_property
     def cv_tag_list(self) -> List[str]:
-        return [c.cv_tag for c in self.controllable_quantities.controllers]
+        return list(self.controller_dictionary.keys())
 
     @property
     def measured_history(self) -> Dict[str, Any]:

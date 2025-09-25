@@ -3,10 +3,14 @@ from numba.experimental import jitclass
 from numba import types, typed, jit
 import numba
 from timeit import timeit
-from enum import Enum
+from enum import Enum, IntEnum
 import numpy as np
 from collections import namedtuple
 
+class DummyIntEnum(IntEnum):
+    A = 1
+
+print(DummyIntEnum.A.name)
 class DummyEnum(Enum):
     A = slice(0,2)
     B = slice(2,3)

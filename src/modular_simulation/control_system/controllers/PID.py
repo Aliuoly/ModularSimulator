@@ -1,11 +1,9 @@
 from pydantic import Field, PrivateAttr
 import numpy as np
-from numpy.typing import NDArray
 from modular_simulation.control_system import Controller
 from modular_simulation.usables import TimeValueQualityTriplet
 import logging
 logger = logging.getLogger(__name__)
-
 class PIDController(Controller):
 
     """
@@ -43,6 +41,7 @@ class PIDController(Controller):
         description = "Time constant of the derivative filter used to smooth out derivative action"
     )
 
+    # additional PID only private attributes
     _last_t: float = PrivateAttr(default=0.0)
     _last_error: float = PrivateAttr(default=0.0)
     _integral: float = PrivateAttr(default=0.0)
@@ -50,30 +49,16 @@ class PIDController(Controller):
 
     def _control_algorithm(
             self,
-            pv: TimeValueQualityTriplet,
-            sp: TimeValueQualityTriplet | float | NDArray, 
-            t: float
+            t: float,
+            cv: float,
+            sp: float,
             ) -> TimeValueQualityTriplet:
-        
-        if isinstance(sp, TimeValueQualityTriplet):
-            spok = sp.ok
-            spval = sp.value
-        else:
-            spok = True
-            spval = sp
-        if not pv.ok or not spok:
-            # skip if bad quality
-            self._last_t = t
-            self._last_value.ok = False
-            return self._last_value
-        
-        
+        """
+        PID control algorithm for SISO systems. As such, only handles scalar cv and sp."""
         dt = t - self._last_t
-        if dt == 0:
-            return self._last_value
         self._last_t = t
         
-        error = spval - pv.value
+        error = sp - cv
         if self.inverted:
             error = -error
         self._integral += error * dt
@@ -82,12 +67,38 @@ class PIDController(Controller):
         alpha = dt / (dt + self.derivative_filter_tc) 
         self._filtered_derivative = alpha * error + (1-alpha) * self._last_error
         
-        # PI control law
-        output = self.Kp * error \
-                   + (self.Kp / self.Ti) * self._integral\
-                   + (self.Kp * self.Td / dt) * self._filtered_derivative
-        logger.debug("%s controller (PID): Time %0.0f, cv %0.1e, sp %0.1e, error %0.1e, integral %0.1e, derivative %0.1e, output %0.1e", 
-                     self.cv_tag, t, pv.value, spval, error, self._integral, self._filtered_derivative, output)
+        # PID control law
+        p_term = self.Kp * error
+        i_term = self.Kp / self.Ti * self._integral
+        d_term = self.Kp * self.Td / dt * self._filtered_derivative
+        output = p_term + i_term + d_term
+        # account for initial 'zero integral' output
+        overflow, underflow = output + self._u0 - self.mv_range[1], output + self._u0 - self.mv_range[0]
+        saturated = "No"
+        if overflow > 0:
+            # we are overflowing the range, reduce integral and output to match upper range
+            output -= overflow
+            # out = p_term + d_term + i_term
+            # limited_out = p_term + d_term + limited_i_term
+            # out - limited_out = overflow = i_term - limited_i_term
+            # limited_i_term = i_term - overflow
+            # Kp/Ti*limited_integral = Kp/Ti*intergral - overflow
+            # limited_integral = integral - overflow * Ti/Kp
+            self._integral += -overflow * self.Ti / self.Kp # since overflow > 0, this decreases integral.
+            saturated = "Overflow"
+        if underflow < 0:
+            # we are underflowing the range, increase integral and output to match lower range
+            output -= underflow
+            self._integral += -underflow * self.Ti / self.Kp #since underflow < 0, this increases integral. 
+            saturated = "Underflow"
+        # check if saturated - if so, limit the integral term
+        logger.debug(
+            # scientific notation takes up 4 spaces by itself, and due to sign of the number another 1 space is possible
+            # and from the decimal point another space is taken. thus, need at least 6 + decimal place many spaces
+            # so leave 5 spaces free. e.g., %6.1e is ok, since max space = 6, use 1 for decimal, 4 for scientific notation, 1 for sign
+            "%-12.12s PID | sat=%-10.10s t=%8.1f cv=%8.2f sp=%8.2f err=%10.2e P=%10.2e I=%10.2e D=%10.2e out=%8.2f",
+            self.cv_tag, saturated, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, output + self._u0,
+        )
         # Ensure output is non-negative (e.g., flow rate can't be negative)
         self._last_error = error
-        return TimeValueQualityTriplet(t, output, ok = True)
+        return output

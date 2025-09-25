@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 # --- Simulation Parameters ---
 # Use a high number of steps to get meaningful profile data
-N_STEPS = 3000  # A good number for profiling
+N_STEPS = 30000  # A good number for profiling
 sp_segments = 10
 np.random.seed(0)
 sp_trajs = []
@@ -24,7 +24,7 @@ else:
 def run_simulation(system, iterations: int):
     for i in tqdm(range(iterations)):
         system.step()
-        system.extend_controller_trajectory(cv_tag = 'B', value = sp_trajs[i])
+        system.extend_controller_trajectory(cv_tag = 'Cb', value = sp_trajs[i])
 
 systems = make_systems()
 print("--- Starting Profiling Session ---")

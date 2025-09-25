@@ -8,7 +8,7 @@ from enum import Enum
 from pydantic import ConfigDict, Field
 from typing import ClassVar, Type
 
-from modular_simulation.control_system.controllers.cascade_controller import (
+from modular_simulation.control_system.controllers.cascade_controller3 import (
     CascadeController,
     ControllerMode,
 )

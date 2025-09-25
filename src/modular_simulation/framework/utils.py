@@ -22,6 +22,8 @@ def create_system(
         calculations: List["Calculation"],
         controllers: List["Controller"],
         *,
+        use_numba: bool = False,
+        numba_options: Dict[str, Any] = {'nopython': True, 'cache': True},
         solver_options: Dict[str, Any] = {'method': 'LSODA'},
         record_history: bool = True,
         ) -> System:
@@ -77,6 +79,8 @@ def create_system(
         controllable_quantities=controllables,
         solver_options=solver_options,
         record_history=record_history,
+        use_numba=use_numba,
+        numba_options = numba_options,
     )
     
     return system

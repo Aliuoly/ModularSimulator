@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 import math
-from typing import Union, Callable, Tuple, TYPE_CHECKING, Dict, List
+from typing import Callable, Tuple, TYPE_CHECKING, List, Optional
 from numpy.typing import NDArray
 import numpy as np
+from enum import IntEnum
 from pydantic import BaseModel, PrivateAttr, Field, ConfigDict
 from modular_simulation.control_system.trajectory import Trajectory
 from modular_simulation.measurables import ControlElements
@@ -12,7 +13,18 @@ if TYPE_CHECKING:
     from modular_simulation.usables.sensors.sensor import Sensor
     from modular_simulation.usables.calculations import Calculation
 import logging
+import warnings
 logger = logging.getLogger(__name__)
+
+def do_nothing_mv_setter(value):
+    pass
+
+
+
+class ControllerMode(IntEnum):
+    TRACKING = -1
+    AUTO    = 1
+    CASCADE = 2
 
 class Controller(BaseModel, ABC):
 
@@ -40,14 +52,30 @@ class Controller(BaseModel, ABC):
             "towards the target at no more than this rate during each update."
         ),
     )
-    _cv_getter: Callable[[], TimeValueQualityTriplet] | None = PrivateAttr(default=None)
-    _mv_setter: Callable[[float|NDArray], None] | None = PrivateAttr(default = None)
-    _usables: Union["UsableQuantities", None] = PrivateAttr(default = None)
-    _last_value: TimeValueQualityTriplet | None = PrivateAttr(default = None)
+    cascade_controller: Optional["Controller"] = Field(
+        default = None,
+        description = (
+            "If provided, and when controller mode is CASCADE, the setpoint source "
+            "of this controller will be provided by the provided cascade controller. "
+        )
+    )
+    mode: ControllerMode = Field(
+        # default to CASCADE so highest loop gets used. 
+        # Highest loop with no cascade controller will automatically change to AUTO.
+        default = ControllerMode.CASCADE, 
+        description = (
+            "Controller's mode - if AUTO, setpoint comes from the sp_trajectory provided. "
+            "If CASCADE, setpoint comes from the cascade controller, if provided. "
+            "If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
+        )
+    )
+    _is_final_control_element: bool = PrivateAttr(default = True)
+    _sp_getter: Callable[[float], TimeValueQualityTriplet]|None = PrivateAttr(default= None)
+    _cv_getter: Callable[[], TimeValueQualityTriplet]|None = PrivateAttr(default= None)
+    _mv_setter: Callable[[float|NDArray], None]|None = PrivateAttr(default = None)
+    _last_output: TimeValueQualityTriplet = PrivateAttr(default = None)
     _u0: float | NDArray = PrivateAttr(default = 0.)
-    _last_sp_command: float | None = PrivateAttr(default=None)
-    _last_sp_time: float | None = PrivateAttr(default=None)
-    _sp_history: Dict[str, List] = PrivateAttr(default_factory = lambda : {'time': [], 'value': []})
+    _sp_history: List[TimeValueQualityTriplet] = PrivateAttr(default_factory = list)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
     
     def _initialize_cv_getter(
@@ -81,168 +109,238 @@ class Controller(BaseModel, ABC):
                 f"{self.cv_tag} controller could not be initialized. The tag '{self.cv_tag}' is not measured. "
                 f"Available measurements are: {', '.join([s.measurement_tag for s in sensors])}."
             )
+    def _initialize_non_final_control_element_mv_setter(
+        self,
+        usable_quantities : "UsableQuantities"
+        ) -> None:
+        found = False
+        
+        for sensor in usable_quantities.sensors:
+            if sensor.measurement_tag == self.mv_tag:
+                # set the '0 point' value with whatever the measurement is
+                self._u0 = sensor._last_value.value
+                self._mv_setter = do_nothing_mv_setter
+                found = True
+                break
+        for calculation in usable_quantities.calculations:
+            if calculation.output_tag == self.mv_tag:
+                # set the '0 point' value with whatever the measurement is
+                self._u0 = calculation._last_value.value
+                self._mv_setter = do_nothing_mv_setter
+                found = True
+                break
+        if not found:
+            raise AttributeError(
+                f"{self.cv_tag} controller's could not be initialized. "
+                f"The specified manipulated variable tag '{self.mv_tag}' is not defined as a measurement or calculation."
+                f"Available measurements are: {', '.join([sensor.measurement_tag for sensor in usable_quantities.sensors])}."
+                f"Available calculations are {', '.join([calc.output_tag for calc in usable_quantities.calculations])}"
+            )
+        
+        self._last_output = TimeValueQualityTriplet(t = 0, value = self._u0, ok = True)
+        
     def _initialize_mv_setter(
         self,
         control_elements: "ControlElements",
-        usable_quantities: "UsableQuantities",
-        is_cascade_outerloop: bool = False,
         ) -> None:
-        
-        found = False
-        if not is_cascade_outerloop:
-            for control_element_name in control_elements.__class__.model_fields:
-                if control_element_name == self.mv_tag:
-                    # set the '0 point' value with whatever the measurement is
-                    self._u0 = getattr(control_elements, control_element_name)
-                    self._mv_setter = lambda value : setattr(control_elements, self.mv_tag, value)
-                    found = True
-                    break
-            if not found:
-                raise AttributeError(
-                    f"{self.cv_tag} controller's could not be initialized. "
-                    f"The specified manipulated variable tag '{self.mv_tag}' is not defined as a control element."
-                    f"Available control elements are: {', '.join([ce for ce in control_elements.__class__.model_fields])}."
-                )
-        else:
-            for tag, initial_val in usable_quantities.usable_results.items():
-                if tag == self.mv_tag:
-                    self._u0 = initial_val.value
-                    found = True
-                    break
-            if not found and hasattr(control_elements, self.mv_tag):
-                self._u0 = getattr(control_elements, self.mv_tag)
-                found = True
-            if not found:
-                raise AttributeError(
-                    f"outerloop controller for '{self.cv_tag}' could not be initialized. "
-                    f"The specified manipulated variable tag '{self.mv_tag}' is not defined as a usable quantity."
-                    f"Available usable quantities are: {', '.join([uq for uq in usable_quantities.usable_results])}."
-                )
 
-        self._last_value = TimeValueQualityTriplet(t = 0, value = self._u0, ok = True)
+        found = False
+        for control_element_name in control_elements.__class__.model_fields:
+            if control_element_name == self.mv_tag:
+                # set the '0 point' value with whatever the measurement is
+                self._u0 = getattr(control_elements, control_element_name)
+                self._mv_setter = lambda value : setattr(control_elements, self.mv_tag, value)
+                found = True
+                break
+        if not found:
+            raise AttributeError(
+                f"{self.cv_tag} controller's could not be initialized. "
+                f"The specified manipulated variable tag '{self.mv_tag}' is not defined as a control element."
+                f"Available control elements are: {', '.join([ce for ce in control_elements.__class__.model_fields])}."
+            )
         
+        self._last_output = TimeValueQualityTriplet(t = 0, value = self._u0, ok = True)
+    
+    def _change_control_mode(self, mode: ControllerMode | str) -> None:
+        if isinstance(mode, str):
+            mode = mode.lower().strip()
+            if mode == "auto":
+                mode = ControllerMode.AUTO
+            elif mode == "cascade":
+                mode = ControllerMode.CASCADE
+            elif mode == "tracking":
+                mode = ControllerMode.TRACKING
+            else:
+                raise ValueError(
+                    f"Unrecognized controller mode '{mode}'. Please pick from 'auto' or 'cascade'"
+                )
+        logger.debug(f"'{self.cv_tag}' controller mode is changed from {self.mode.name} --> {mode.name}")
+        if mode == ControllerMode.CASCADE:
+            if self.cascade_controller is None:
+                warnings.warn(
+                    f"Attemped to change '{self.cv_tag}' controller mode to CASCADE; however, "
+                    "no cascade controller was provided. Falling back to AUTO mode. "
+                )
+                self._change_control_mode(ControllerMode.AUTO)
+            else:
+                # if has cascade controller, the setpoint of this "inner loop" controller
+                # will be provided by the .update method of the cascade controller. 
+                self._sp_getter = self.cascade_controller.update
+                self.mode = ControllerMode.CASCADE
+                # since inner loop now cascades to cascade controller,
+                # the mode for cascade should switch to AUTO
+                # the if logic is for initialization time where the cascade controller
+                # Might already be defaulted to CASCADE - in which case, keep it CASCADE. 
+                if self.cascade_controller.mode != ControllerMode.CASCADE:
+                    self.cascade_controller._change_control_mode(ControllerMode.AUTO)
+        elif mode == ControllerMode.AUTO: 
+            self._sp_getter = self.sp_trajectory
+            self.mode = ControllerMode.AUTO
+        elif mode == ControllerMode.TRACKING:
+            self._sp_getter = lambda t: self._cv_getter() #type:ignore # lambda t just to make the signiture match
+            self.mode = ControllerMode.TRACKING
+        
+        
+            
+        # if no cascade controller, the setpoint of this controller
+        # will be provided by the sp_trajectory
     def _initialize(
         self,
         usable_quantities: "UsableQuantities",
         control_elements: ControlElements,
-        is_cascade_outerloop: bool = False,
+        is_final_control_element: bool = True,
         ) -> None:
-        """
-        establish the link between sensor corresponding to the CV and 
-            between controlelement of the system
-        """
-        self._usables = usable_quantities
+
+        logger.debug(f"Initializing '{self.cv_tag}' controller.")
+        
+        # A. check if is final control element and initialize mv setter if is
+        if not is_final_control_element:
+            self._is_final_control_element = False
+            self._initialize_non_final_control_element_mv_setter(usable_quantities)
+        else:
+            self._initialize_mv_setter(control_elements)
+        
+        # B. initialize cv_getter
         self._initialize_cv_getter(usable_quantities.sensors, usable_quantities.calculations)
-        self._initialize_mv_setter(control_elements, usable_quantities, is_cascade_outerloop)
 
-    def update(self, t: float) -> Union[float, NDArray[np.float64]]:
-        # 1. get pv
-        cv = self._get_cv_value()
-        # 2. get sp
-        raw_sp = self.sp_trajectory(t)
-        sp = self._apply_setpoint_ramp(raw_sp, t)
-        self._sp_history['time'].append(t)
-        self._sp_history['value'].append(raw_sp)
-        # 3. compute control output
-        control_output = self._control_algorithm(cv, sp, t)
+        # C. do control mode validation for initialization (i.e., change from cascade to appropriate one if CASCADE not applicable.)
+        self._change_control_mode(self.mode)
 
-        control_output.value = np.clip(control_output.value + self._u0, *self.mv_range)
-        self._last_value = control_output
-        if self._mv_setter is not None:
-            if control_output.ok:
-                self._mv_setter(control_output.value)
-            else:
-                logger.info("%s controller update skipped due to bad quality. Controller output (%s): %s",
-                            self.cv_tag, self.mv_tag, control_output)
-        else:
-            raise RuntimeError(
-                f"{self.cv_tag} controller not yet initialized. "
-                "Make sure system was initialized with the create_system function."
+        # D. check if has cascade controller and initialize it if so
+        if self.cascade_controller is not None:
+            logger.debug(f"'{self.cv_tag}' controller is configured to cascade to '{self.cascade_controller.cv_tag}' controller.")
+            # if the inner loop is NOT in CASCADE, then force the outer loop to be in TRACKING mode. 
+            if self.mode == ControllerMode.AUTO or self.mode == ControllerMode.TRACKING:
+                self.cascade_controller._change_control_mode(ControllerMode.TRACKING)
+                logger.debug(f"'{self.cv_tag}' controller not in CASCADE mode -> cascade controller forced to TRACKING. ")
+            
+            self.cascade_controller._initialize(
+                usable_quantities, 
+                control_elements, 
+                is_final_control_element=False,
                 )
-        return self._last_value
-    
-    @property
-    def sp_history(self):
-        return {self.cv_tag: self._sp_history.copy()}
+            
+        
 
-    def update_trajectory(
-            self,
-            t: float,
-            value: float
-            ) -> None:
-        self.sp_trajectory.set_now(t, value)
+    def update(self, t: float) -> TimeValueQualityTriplet:
 
-    def track_cv(
-            self,
-            t: float
-            ) -> None:
-        pv = self._get_cv_value()
-        self.sp_trajectory.set_now(t, pv.value)
-        self._last_sp_command = float(pv.value)
-        self._last_sp_time = t
-
-    def track_pv(
-            self,
-            t: float
-            ) -> None:
-        """Alias for :meth:`track_cv` retained for backward compatibility."""
-        self.track_cv(t)
-
-    def active_sp_trajectory(self) -> Trajectory:
-        """Return the trajectory currently providing setpoints for the controller."""
-
-        return self.sp_trajectory
-
-    def _apply_setpoint_ramp(self, target: float, t: float) -> float:
-        """Return the ramp-limited setpoint value for time ``t``."""
-        rate = self.ramp_rate
-        if rate is None or rate <= 0.0:
-            self._last_sp_command = float(target)
-            self._last_sp_time = t
-            return float(target)
-
-        last_value = self._last_sp_command
-        last_time = self._last_sp_time
-
-        if last_value is None or last_time is None:
-            self._last_sp_command = float(target)
-            self._last_sp_time = t
-            return float(target)
-
-        dt = t - last_time
-        if dt <= 0.0:
-            return last_value
-
-        max_delta = rate * dt
-        delta = float(target) - last_value
-        if abs(delta) <= max_delta:
-            new_value = float(target)
+        # 0. check dt -> if 0, skip all and return _last_output
+        if t - self._last_output.t < 1e-12:
+            return self._last_output
+        # 1. get controlled variable (aka pv). Is always a Triplet
+        cv = self._cv_getter()
+        # IF TRACKING - set sp = pv and return last control output exactly. 
+        # and append to history since that gets skipped. 
+        # also handle the case more cascade levels are present
+        # in which case, they all get skipped as well since the
+        # .update method never gets called (since it is used as the _sp_getter only when lower loop is CASCADE)
+        if self.mode == ControllerMode.TRACKING:
+            self.sp_trajectory.set_now(t = t, value = cv.value)
+            self._sp_history.append(cv)
+            if self.cascade_controller is not None:
+                self.cascade_controller.update(t)
+            return self._last_output
+        
+        if cv is None:
+            raise RuntimeError(
+                f"Controller '{self.cv_tag}' not initialized. "
+            )
+        # 2. get set point. If is a from a cascade controller, is a Triplet
+        #       if is not from a cascade controller, is a float or NDArray from sp_trajectory(t)
+        sp = self._sp_getter(t)
+        
+        if isinstance(sp, TimeValueQualityTriplet):
+            # this means we are in cascade control mode
+            # so we go ahead and update trajectory with cascade setpoint
+            sp_val = sp.value
+            proceed = sp.ok and cv.ok
+            self._sp_history.append(sp)
+            self.sp_trajectory.set_now(t = t, value = sp_val)
         else:
-            new_value = last_value + math.copysign(max_delta, delta)
+            sp_val = sp
+            proceed = cv.ok
+            #setpoint from sp_trajectory quality is always good (user sets it)
+            self._sp_history.append(TimeValueQualityTriplet(t, sp_val, True)) 
+        
+        # if setpoint or cv quality is bad, skip controller update and return last value
+        if not proceed:
+            return self._last_output
 
-        self._last_sp_command = new_value
-        self._last_sp_time = t
-        return new_value
+        # compute control output
+        control_output = self._control_algorithm(t = t, cv = cv.value, sp = sp_val)
+        control_output = np.clip(control_output + self._u0, *self.mv_range)
+        ramp_output = self._apply_mv_ramp(
+            t0 = self._last_output.t, mv0 = self._last_output.value, mv_target = control_output, t_now = t
+            )
+        if self._is_final_control_element:
+            self._mv_setter(ramp_output)
+
+        # do misc things like set _last_output, make sp track PV (if TRACKING mode), update sp_trajectory with cascade sp (if CASCADE mode)
+        self._last_output = TimeValueQualityTriplet(t = t, value = ramp_output, ok = True) # TODO: figure out what to do with quality for MV - seems to always be OK.
+
+        return self._last_output
+
+    def _apply_mv_ramp(
+            self, 
+            t0: float, 
+            mv0: float | NDArray,
+            mv_target: float | NDArray, 
+            t_now: float
+            ) -> float | NDArray:
+        """Return the ramp-limited mv value for time ``t``."""
+        if self.ramp_rate is None:
+            return mv_target
+
+        dt = t_now - t0
+        if dt <= 0.0:
+            return mv0
+
+        max_delta = self.ramp_rate * dt
+        delta = mv_target - mv0
+        if np.absolute(delta) <= max_delta:
+            return mv_target
+        else:
+            return mv0 + math.copysign(max_delta, delta)
 
     @abstractmethod
     def _control_algorithm(
             self,
-            cv_value: TimeValueQualityTriplet,
-            sp_value: TimeValueQualityTriplet | float | NDArray,
-            t: float
-            ) -> TimeValueQualityTriplet:
+            t: float,
+            cv_value: float | NDArray,
+            sp_value: float | NDArray,
+            ) -> float | NDArray:
         """The actual control algorithm. To be implemented by subclasses."""
         pass
-
-    def _get_cv_value(self) -> TimeValueQualityTriplet:
-        if self._cv_getter is None:
-            raise RuntimeError(
-                "No PV sensor linked to controller. Something went wrong during system initialization."
-                )
-        cv = self._cv_getter()
-        if cv is None:
-            raise ValueError("PV sensor has not yet taken a measurement. \
-                    Make sure this sensor actually saves the _last_value attribute correctly. \
-                    This would not occur unless you overloaded the public facing 'measure' method \
-                    of the Sensor class.")
-        return cv
+    
+    @property
+    def sp_history(self):
+        # expected behavior:
+        # loop 1 <- loop 2 <- loop 3 cascade scheme
+        # loop 1 has cascade controller ->
+        #   result gets update
+        controller = self
+        return_dict = {controller.cv_tag: (controller._sp_history)}
+        while controller.cascade_controller is not None:
+            controller = controller.cascade_controller
+            return_dict.update({controller.cv_tag: controller._sp_history})
+        return return_dict

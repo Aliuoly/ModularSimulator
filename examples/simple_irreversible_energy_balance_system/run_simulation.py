@@ -4,7 +4,7 @@ from typing import List, TYPE_CHECKING
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from modular_simulation.control_system import PIDController, Trajectory, CascadeController
+from modular_simulation.control_system import PIDController, Trajectory
 from modular_simulation.plotting import plot_triplet_series
 from modular_simulation.framework import create_system
 from modular_simulation.usables import SampledDelayedSensor
@@ -15,7 +15,6 @@ try:
         EnergyBalanceAlgebraicStates,
         EnergyBalanceConstants,
         EnergyBalanceControlElements,
-        EnergyBalanceFastSystem,
         EnergyBalanceStates,
         EnergyBalanceSystem,
     )
@@ -24,7 +23,6 @@ except ImportError:  # pragma: no cover - support direct script execution
         EnergyBalanceAlgebraicStates,
         EnergyBalanceConstants,
         EnergyBalanceControlElements,
-        EnergyBalanceFastSystem,
         EnergyBalanceStates,
         EnergyBalanceSystem,
     )
@@ -36,128 +34,136 @@ if TYPE_CHECKING:
 # 1. Set up the initial conditions and system components.
 # =======================================================
 
-initial_states = EnergyBalanceStates(V=100.0, A=1.0, B=0.0, T=300.0, T_J=300.0)
-initial_controls = EnergyBalanceControlElements(F_in=1.0, T_J_in=300)
-initial_algebraic = EnergyBalanceAlgebraicStates(F_out=1.0)
+def make_systems():
+    initial_states = EnergyBalanceStates(V=100.0, A=1.0, B=0.0, T=300.0, T_J=300.0)
+    initial_controls = EnergyBalanceControlElements(F_in=1.0, T_J_in=300)
+    initial_algebraic = EnergyBalanceAlgebraicStates(F_out=1.0)
 
-sensors = [
-    SampledDelayedSensor(measurement_tag="F_out"),
-    SampledDelayedSensor(measurement_tag="F_in", coefficient_of_variance=0.05),
-    SampledDelayedSensor(
-        measurement_tag="B",
-        coefficient_of_variance=0.05,
-        sampling_period=900.0,
-        deadtime=900.0,
-    ),
-    SampledDelayedSensor(measurement_tag="V"),
-    SampledDelayedSensor(measurement_tag="T"),
-    SampledDelayedSensor(measurement_tag="T_J"),
-    SampledDelayedSensor(measurement_tag="T_J_in"),
-    SampledDelayedSensor(measurement_tag="jacket_flow"),
-]
+    sensors = [
+        SampledDelayedSensor(measurement_tag="F_out"),
+        SampledDelayedSensor(measurement_tag="F_in", coefficient_of_variance=0.05),
+        SampledDelayedSensor(
+            measurement_tag="B",
+            coefficient_of_variance=0.05,
+            sampling_period=900.0,
+            deadtime=900.0,
+        ),
+        SampledDelayedSensor(measurement_tag="V"),
+        SampledDelayedSensor(measurement_tag="T"),
+        SampledDelayedSensor(measurement_tag="T_J"),
+        SampledDelayedSensor(measurement_tag="T_J_in"),
+        SampledDelayedSensor(measurement_tag="jacket_flow"),
+    ]
 
-calculations: List["Calculation"] = []
+    calculations: List["Calculation"] = []
 
-controllers = [
-    PIDController(
-        cv_tag="V",
-        mv_tag="F_in",
-        sp_trajectory=Trajectory(1.0e3),
-        Kp=1.0e-2,
-        Ti=100.0,
-        mv_range=(0.0, 1.0e6),
-    ),
-    CascadeController( # control B by controlling T (inner loop), which is controlled by F_J_in (inner loop)
-        inner_loop = PIDController(
-            cv_tag="T_J",
+    controllers = [
+        PIDController(
+            mv_tag="F_in",
+            cv_tag="V",
+            sp_trajectory=Trajectory(1.0e3),
+            Kp=1.0e-2,
+            Ti=100.0,
+            mv_range=(0.0, 1.0e6),
+            ),
+        PIDController(
             mv_tag="T_J_in",
+            cv_tag="T_J",
             sp_trajectory=Trajectory(300),
             Kp=1.0e-1,
             Ti=50.0,
             mv_range=(200, 350),
-            inverted=False,
-        ),
-        outer_loop = CascadeController(
-            inner_loop = PIDController(
-                cv_tag="T",
+            cascade_controller = PIDController(
                 mv_tag="T_J",
+                cv_tag="T",
                 sp_trajectory=Trajectory(300),
                 Kp=1.0e-1,
                 Ti=100.0,
                 mv_range=(200, 350),
-                inverted=False,
+                cascade_controller = PIDController(
+                    mv_tag="T",
+                    cv_tag="B",
+                    sp_trajectory=Trajectory().\
+                        hold(duration = 15e3, value = 0.02).\
+                            hold(15e3, 0.05).\
+                                hold(15e3, 0.1).\
+                                    hold(15e3, 0.01),
+                    Kp=2.0e-1,
+                    Ti=5.0,
+                    mv_range=(250.0, 350.0),
+                ),
             ),
-            outer_loop = PIDController(
-                cv_tag="B",
-                mv_tag="T",
-                sp_trajectory=Trajectory().hold(duration = 15e3, value = 0.02).hold(15e3, 0.05).hold(15e3, 0.1).hold(15e3, 0.01),
-                Kp=2.0e-1,
-                Ti=5.0,
-                mv_range=(250.0, 350.0),
-                inverted=False,
-            )
-        )
+        ),
+    ]
+
+    system_constants = EnergyBalanceConstants(
+        k0=1.5e9,
+        activation_energy=72500.0,
+        gas_constant=8.314,
+        Cv=2.0,
+        CA_in=2.0,
+        T_in=300.0,
+        reaction_enthalpy=825000.0,
+        rho_cp=4000.0,
+        overall_heat_transfer_coefficient=500000.0,
+        heat_transfer_area=10.0,
+        jacket_volume=500000.0,
+        jacket_rho_cp=3200.0,
+        jacket_flow = 500.0,
     )
 
-]
 
-system_constants = EnergyBalanceConstants(
-    k0=1.5e9,
-    activation_energy=72500.0,
-    gas_constant=8.314,
-    Cv=2.0,
-    CA_in=2.0,
-    T_in=300.0,
-    reaction_enthalpy=825000.0,
-    rho_cp=4000.0,
-    overall_heat_transfer_coefficient=500000.0,
-    heat_transfer_area=10.0,
-    jacket_volume=500000.0,
-    jacket_rho_cp=3200.0,
-    jacket_flow = 500.0,
-)
+    # --- 2. Assemble and Initialize the System ---
+    dt = 30.0
+    system = create_system(
+        dt=dt,
+        system_class=EnergyBalanceSystem,
+        initial_states=initial_states,
+        initial_controls=initial_controls,
+        initial_algebraic=initial_algebraic,
+        sensors=sensors,
+        calculations=calculations,
+        controllers=controllers,
+        system_constants=system_constants,
+        use_numba=False
+    )
 
-
-# --- 2. Assemble and Initialize the System ---
-dt = 30.0
-readable_system = create_system(
-    dt=dt,
-    system_class=EnergyBalanceSystem,
-    initial_states=initial_states,
-    initial_controls=initial_controls,
-    initial_algebraic=initial_algebraic,
-    sensors=sensors,
-    calculations=calculations,
-    controllers=controllers,
-    system_constants=system_constants,
-)
-
-fast_system = create_system(
-    dt=dt,
-    system_class=EnergyBalanceFastSystem,
-    initial_states=initial_states,
-    initial_controls=initial_controls,
-    initial_algebraic=initial_algebraic,
-    sensors=sensors,
-    calculations=calculations,
-    controllers=controllers,
-    system_constants=system_constants,
-)
+    numba_system = create_system(
+        dt=dt,
+        system_class=EnergyBalanceSystem,
+        initial_states=initial_states,
+        initial_controls=initial_controls,
+        initial_algebraic=initial_algebraic,
+        sensors=sensors,
+        calculations=calculations,
+        controllers=controllers,
+        system_constants=system_constants,
+        use_numba=True
+    )
+    return {'normal': system , 'numba': numba_system}
 
 def plot(system):
     history = system.measured_history
     sensor_hist = history["sensors"]
     sp_hist = system.setpoint_history
-
+    plt.figure(figsize=(14, 10))
     ax = plt.subplot(4, 2, 1)
+    pv_kwargs = {'linestyle': '-'}
+    sp_kwargs = {'linestyle': '--', "alpha": 0.5}
     plot_triplet_series(
         ax,
         sensor_hist["B"],
         style="step",
-        line_kwargs={"linestyle": linestyles[j]},
+        line_kwargs=pv_kwargs,
         label=name,
     )
-    ax.step(sp_hist['B']['time'], sp_hist['B']['value'], color = 'red', label = 'SP')
+    plot_triplet_series(
+        ax,
+        sp_hist["B"],
+        style="step",
+        line_kwargs=sp_kwargs,
+        label=f"{name} sp",
+    )
     plt.title("Concentration of B")
     plt.xlabel("Time")
     plt.ylabel("[B] (mol/L)")
@@ -168,7 +174,7 @@ def plot(system):
         ax,
         sensor_hist["F_in"],
         style="step",
-        line_kwargs={"linestyle": linestyles[j]},
+        line_kwargs=pv_kwargs,
         label=name,
     )
     plt.title("Inlet Flow Rate (F_in)")
@@ -181,7 +187,7 @@ def plot(system):
         ax,
         sensor_hist["V"],
         style="step",
-        line_kwargs={"linestyle": linestyles[j]},
+        line_kwargs=pv_kwargs,
         label=name,
     )
     plt.title("Reactor Volume (V)")
@@ -194,7 +200,7 @@ def plot(system):
         ax,
         sensor_hist["F_out"],
         style="step",
-        line_kwargs={"linestyle": linestyles[j]},
+        line_kwargs=pv_kwargs,
         label=name,
     )
     plt.title("Outlet Flow Rate (F_out)")
@@ -207,10 +213,16 @@ def plot(system):
         ax,
         sensor_hist["T"],
         style="step",
-        line_kwargs={"linestyle": linestyles[j]},
+        line_kwargs=pv_kwargs,
         label=name,
     )
-    ax.step(sp_hist['T']['time'], sp_hist['T']['value'], color = 'red', label = 'SP')
+    plot_triplet_series(
+        ax,
+        sp_hist["T"],
+        style="step",
+        line_kwargs=sp_kwargs,
+        label=f"{name} sp",
+    )
     plt.title("Reactor Temperature (T)")
     plt.xlabel("Time")
     plt.ylabel("Temperature (K)")
@@ -221,11 +233,16 @@ def plot(system):
         ax,
         sensor_hist["T_J"],
         style="step",
-        line_kwargs={"linestyle": linestyles[j]},
+        line_kwargs=pv_kwargs,
         label=name,
     )
-    
-    ax.step(sp_hist['T_J']['time'], sp_hist['T_J']['value'], color = 'red', label = 'SP')
+    plot_triplet_series(
+        ax,
+        sp_hist["T_J"],
+        style="step",
+        line_kwargs=sp_kwargs, 
+        label=f"{name} sp",
+    )
     plt.title("Jacket Temperature (T_J)")
     plt.xlabel("Time")
     plt.ylabel("Temperature (K)")
@@ -236,7 +253,7 @@ def plot(system):
         ax,
         sensor_hist["T_J_in"],
         style="step",
-        line_kwargs={"linestyle": linestyles[j]},
+        line_kwargs=pv_kwargs,
         label=name,
     )
     plt.title("Jacket Inlet Temp (T_J_in)")
@@ -249,7 +266,7 @@ def plot(system):
         ax,
         sensor_hist["jacket_flow"],
         style="step",
-        line_kwargs={"linestyle": linestyles[j]},
+        line_kwargs=pv_kwargs,
         label=name,
     )
     plt.title("Jacket Inlet Flow (F_J_in)")
@@ -262,20 +279,19 @@ def plot(system):
         plt.legend()
 
     plt.tight_layout()
-    plt.show()
+    
 
-# --- 3. Run the Simulation ---
-systems = {"readable": readable_system, 'fast': fast_system}
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     mpl.set_loglevel("warning")
-    plt.figure(figsize=(14, 10))
-    linestyles = ["-", "--"]
+    # --- 3. Run the Simulation ---
+    systems = make_systems()
 
     for j, (name, system) in enumerate(systems.items()):
-
         system.step(nsteps = 2000)
-
-    plot(system)
+        plot(system)
+    
+    plt.show()
 

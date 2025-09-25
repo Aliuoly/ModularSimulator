@@ -82,8 +82,6 @@ def plot_triplet_series(
     *,
     label: str | None = None,
     style: str = "line",
-    step_where: str = "post",
-    connect_gaps: bool = False,
     line_kwargs: Mapping[str, Any] | None = None,
     bad_kwargs: Mapping[str, Any] | None = None,
 ) -> List[Any]:
@@ -127,37 +125,12 @@ def plot_triplet_series(
         raise ValueError(f"Unsupported style '{style}'. Expected 'line' or 'step'.")
 
     line_opts = dict(line_kwargs or {})
+    line_opts.update({"label": label})
+    plot_func(times, values, **line_opts)
 
-    good_mask = ok.astype(bool)
-    if np.any(good_mask):
-        if connect_gaps:
-            segment_times = times[good_mask]
-            segment_values = values[good_mask]
-            if segment_times.size:
-                opts = dict(line_opts)
-                if label is not None:
-                    opts.setdefault("label", label)
-                if style == "step":
-                    opts.setdefault("where", step_where)
-                artists.extend(plot_func(segment_times, segment_values, **opts))
-        else:
-            for idx, segment in enumerate(_iter_true_segments(good_mask)):
-                segment_times = times[segment]
-                segment_values = values[segment]
-                if segment_times.size == 0:
-                    continue
-                opts = dict(line_opts)
-                if idx == 0 and label is not None:
-                    opts.setdefault("label", label)
-                elif idx > 0:
-                    opts.setdefault("label", None)
-                if style == "step":
-                    opts.setdefault("where", step_where)
-                artists.extend(plot_func(segment_times, segment_values, **opts))
-
-    bad_indices = np.flatnonzero(~good_mask)
+    bad_indices = np.flatnonzero(~ok.astype(bool))
     if bad_indices.size:
-        bad_opts = {"marker": "x", "color": "red", "label": None, "zorder": 3}
+        bad_opts = {"marker": "x", "color": "black", "label": None, "zorder": 3}
         if bad_kwargs:
             bad_opts.update(bad_kwargs)
         scatter = ax.scatter(times[bad_indices], values[bad_indices], **bad_opts)

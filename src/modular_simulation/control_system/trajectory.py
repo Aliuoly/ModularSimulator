@@ -253,6 +253,8 @@ class Trajectory:
             last_seg = self.segments[-1]
             prev_start = last_seg.t0
             prev_value = last_seg.eval(min(t, last_seg.t1()), self._start_vals[-1])
+            # remove segments of 0 duration at the end where we are about to append to 
+
         else:
             prev_start = self.t0
             prev_value = self.y0
@@ -264,7 +266,8 @@ class Trajectory:
             del self.segments[:drop]
             del self._start_vals[:drop]
             self._rebuild_breaks()
-
+        
+        
         self._append(Hold(t0 = t, duration = 0, value = value), start_value=prev_value)
         self._record_history_entry(t, value)
         self._last_set_time = t

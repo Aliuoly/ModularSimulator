@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 from typing import TYPE_CHECKING, Any, List
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
+from modular_simulation.validation import ConfigurationError
 
 if TYPE_CHECKING:
     from modular_simulation.quantities import MeasurableQuantities
@@ -68,7 +69,7 @@ class Sensor(BaseModel, ABC):
         if found_owner is None:
             raise ConfigurationError(
                 f"Tag '{self.measurement_tag}' not found in any field of measurable_quantities. "
-                f"Available measurable quantities are: {', '.join(measurable_quantities.available_tags)}"
+                f"Available measurable quantities are: {', '.join(measurable_quantities.tag_list)}"
                 )
         
         # Store raw pieces

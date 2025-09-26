@@ -55,6 +55,7 @@ def create_system(
     usables = UsableQuantities(
         sensors=copied_sensors,
         calculations=copied_calculations,
+        measurable_quantities=measurables,
     )
     
     # Re-create controllers to ensure their internal states are fresh

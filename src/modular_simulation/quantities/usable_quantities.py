@@ -1,14 +1,16 @@
 from typing import Dict, List, Any, TYPE_CHECKING
 from pydantic import  PrivateAttr, BaseModel, ConfigDict, Field, model_validator
+from modular_simulation.validation import ConfigurationError
 import warnings
 import logging
-from modular_simulation.usables.sensors.sensor import Sensor
-from modular_simulation.usables.calculations import Calculation
-from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
-from modular_simulation.quantities.utils import ConfigurationError
 if TYPE_CHECKING:
+    from modular_simulation.usables.sensors.sensor import Sensor
+    from modular_simulation.usables.calculations import Calculation
+    from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
     from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
+
 logger = logging.getLogger(__name__)
+
 
 class UsableQuantities(BaseModel):
     """
@@ -21,10 +23,10 @@ class UsableQuantities(BaseModel):
     sensors: List["Sensor"] = Field(
         default_factory = list,
     )
-    calculations: List[Calculation] = Field(
+    calculations: List["Calculation"] = Field(
         default_factory = list,
     )
-    measurable_quantities: MeasurableQuantities = Field(
+    measurable_quantities: "MeasurableQuantities" = Field(
         ...
     )
 
@@ -47,6 +49,8 @@ class UsableQuantities(BaseModel):
         # 1. check for duplicate tags in sensor definitions
         #    and that each tag exists in measurable quantities
         available_measurement_tags = self.measurable_quantities.tag_list
+        defined_measurement_tags = [s.measurement_tag for s in self.sensors]
+        defined_calculation_tags = [c.output_tag for c in self.calculations]
         seen_measurement_tags = []
         seen_calculation_tags = []
         unavailable_measurement_tags = []
@@ -82,14 +86,14 @@ class UsableQuantities(BaseModel):
             if tag in seen_calculation_tags:
                 duplicate_calculation_tags_in_calculations.append(tag)
             meas_input_tags = calculation.measured_input_tags
-            missing_tags = [meas_tag for meas_tag in meas_input_tags if meas_tag not in meas_input_tags]
+            missing_tags = [meas_tag for meas_tag in meas_input_tags if meas_tag not in defined_measurement_tags]
             if len(missing_tags) > 0:
                 error_message += f"""
                     The following measurement tag(s) required by the '{calculation.output_tag}' calculation 
                     is not available: {', '.join(missing_tags)}. 
                 """
             calc_input_tags = calculation.calculated_input_tags
-            missing_tags = [calc_tag for calc_tag in calc_input_tags if calc_tag not in calc_input_tags]
+            missing_tags = [calc_tag for calc_tag in calc_input_tags if calc_tag not in defined_calculation_tags]
             if len(missing_tags) > 0:
                 error_message += f"""
                     The following calculation tag(s) required by the '{calculation.output_tag}' calculation 
@@ -110,8 +114,8 @@ class UsableQuantities(BaseModel):
         if len(error_message) > 0:
             error_message +=  f"""
                 Defined measurable tags are: {', '.join(available_measurement_tags)}. \n
-                Defined measured tags are  : {', '.join(s.measurement_tag for s in self.sensors)}. \n
-                Defined calculated tags are: {', '.join(c.output_tag for c in self.calculations)}.
+                Defined measured tags are  : {', '.join(defined_measurement_tags)}. \n
+                Defined calculated tags are: {', '.join(defined_calculation_tags)}.
                 """
             raise ConfigurationError(error_message)
         

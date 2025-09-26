@@ -146,26 +146,26 @@ class System(BaseModel, ABC):
         # convert the Enum's to typed dictionaries for numba
         
         y_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
-        index_map = self.measurable_quantities.states._index_dict
+        index_map = self.measurable_quantities.states._index_map
         for member in index_map:
             y_map[member] = index_map[member]
 
         u_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
-        index_map = self.measurable_quantities.control_elements._index_dict
+        index_map = self.measurable_quantities.control_elements._index_map
         for member in index_map:
             u_map[member] = index_map[member]
         
         k_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
-        index_map = self.measurable_quantities.constants._index_dict
+        index_map = self.measurable_quantities.constants._index_map
         for member in index_map:
             k_map[member] = index_map[member]
 
         algebraic_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
-        index_map = self.measurable_quantities.algebraic_states._index_dict
+        index_map = self.measurable_quantities.algebraic_states._index_map
         for member in index_map:
             algebraic_map[member] = index_map[member]
 
-        algebraic_size = self.measurable_quantities.algebraic_states.get_total_size()
+        algebraic_size = self.measurable_quantities.algebraic_states._array_size
 
         self._params = {
             'y_map': y_map,
@@ -179,13 +179,13 @@ class System(BaseModel, ABC):
         }
 
     def _construct_params(self) -> None:
-        algebraic_size = self.measurable_quantities.algebraic_states.get_total_size()
+        algebraic_size = self.measurable_quantities.algebraic_states._array_size
         self._params = {
-            'y_map': self.measurable_quantities.states.index_map_dict(),
-            'u_map': self.measurable_quantities.control_elements.index_map_dict(),
-            'k_map': self.measurable_quantities.constants.index_map_dict(),
+            'y_map': self.measurable_quantities.states._index_map,
+            'u_map': self.measurable_quantities.control_elements._index_map,
+            'k_map': self.measurable_quantities.constants._index_map,
             'algebraic_size': algebraic_size,
-            'algebraic_map': self.measurable_quantities.algebraic_states.index_map_dict(),
+            'algebraic_map': self.measurable_quantities.algebraic_states._index_map,
             'k': self.measurable_quantities.constants.to_array(),
             'algebraic_values_function': self.calculate_algebraic_values,
             'rhs_function': self.rhs,

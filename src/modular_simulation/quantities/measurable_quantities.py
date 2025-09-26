@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from modular_simulation.quantities.utils import ConfigurationError
+from modular_simulation.validation import ConfigurationError
 from modular_simulation.measurables.base_classes import AlgebraicStates, States, ControlElements, Constants
 from functools import cached_property
 from typing import Iterable

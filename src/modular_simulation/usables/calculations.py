@@ -3,7 +3,7 @@ from typing import Callable, Dict, List, TYPE_CHECKING
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
-from modular_simulation.quantities.utils import ConfigurationError
+from modular_simulation.validation import ConfigurationError
 if TYPE_CHECKING:
     from modular_simulation.quantities.usable_quantities import UsableQuantities
     

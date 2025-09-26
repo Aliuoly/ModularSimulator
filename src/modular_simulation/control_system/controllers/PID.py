@@ -1,7 +1,7 @@
 from pydantic import Field, PrivateAttr
 import numpy as np
 from modular_simulation.control_system.controllers.controller import Controller
-from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
+from numpy.typing import NDArray
 import logging
 logger = logging.getLogger(__name__)
 class PIDController(Controller):
@@ -43,16 +43,16 @@ class PIDController(Controller):
 
     # additional PID only private attributes
     _last_t: float = PrivateAttr(default=0.0)
-    _last_error: float = PrivateAttr(default=0.0)
-    _integral: float = PrivateAttr(default=0.0)
-    _filtered_derivative: float = PrivateAttr(default = 0.0)
+    _last_error: float|NDArray = PrivateAttr(default=0.0)
+    _integral: float|NDArray = PrivateAttr(default=0.0)
+    _filtered_derivative: float|NDArray = PrivateAttr(default = 0.0)
 
     def _control_algorithm(
             self,
             t: float,
-            cv: float,
-            sp: float,
-            ) -> TimeValueQualityTriplet:
+            cv: float | NDArray[np.float64],
+            sp: float | NDArray[np.float64],
+            ) -> float | NDArray[np.float64]:
         """
         PID control algorithm for SISO systems. As such, only handles scalar cv and sp."""
         dt = t - self._last_t

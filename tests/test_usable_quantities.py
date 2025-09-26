@@ -1,5 +1,5 @@
 import pytest
-from modular_simulation.quantities.utils import ConfigurationError
+from modular_simulation.validation import ConfigurationError
 from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
 from modular_simulation.quantities.usable_quantities import UsableQuantities
 from dummy_test_definitions import DummyControlElements, DummySensor, DummyStates, AddAllCalculation
@@ -8,6 +8,8 @@ def _make_proper_sensors():
     proper_sensors = [
         DummySensor(measurement_tag = "mv1"),
         DummySensor(measurement_tag = "cv1"),
+        DummySensor(measurement_tag = "mv2"),
+        DummySensor(measurement_tag = "cv2"),
     ]
     return proper_sensors
 
@@ -52,14 +54,12 @@ def test_usable_validation():
 
     with pytest.raises(ConfigurationError):
         usable = _make_usable(proper_sensors, improper_calculations)
-    
     with pytest.raises(ConfigurationError):
         usable = _make_usable(improper_sensors, proper_calculations)
 
     with pytest.raises(ConfigurationError):
         usable = _make_usable(improper_sensors, improper_calculations)
 
-    # this one should raise exception
     usable = _make_usable(proper_sensors, proper_calculations)
 
 if __name__ == '__main__':

@@ -6,8 +6,8 @@ import numpy as np
 from enum import IntEnum
 from pydantic import BaseModel, PrivateAttr, Field, ConfigDict
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
+from modular_simulation.control_system.trajectory import Trajectory
 if TYPE_CHECKING:
-    from modular_simulation.control_system.trajectory import Trajectory
     from modular_simulation.quantities.usable_quantities import UsableQuantities
     from modular_simulation.measurables import ControlElements
     from modular_simulation.usables.sensors.sensor import Sensor
@@ -37,7 +37,7 @@ class Controller(BaseModel, ABC):
         description = "The tag of the UsableQuantities corresponding to the" \
                         "measured or calculated controlled variable (CV) for this controller"
     )
-    sp_trajectory: "Trajectory" = Field(
+    sp_trajectory: Trajectory = Field(
         ..., 
         description="A Trajectory instance defining the setpoint (SP) over time.")
     mv_range: Tuple[float, float] = Field(
@@ -73,15 +73,15 @@ class Controller(BaseModel, ABC):
     _sp_getter: Callable[[float], TimeValueQualityTriplet]|None = PrivateAttr(default= None)
     _cv_getter: Callable[[], TimeValueQualityTriplet]|None = PrivateAttr(default= None)
     _mv_setter: Callable[[float|NDArray], None]|None = PrivateAttr(default = None)
-    _last_output: TimeValueQualityTriplet = PrivateAttr(default = None)
+    _last_output: TimeValueQualityTriplet | None = PrivateAttr(default = None)
     _u0: float | NDArray = PrivateAttr(default = 0.)
     _sp_history: List[TimeValueQualityTriplet] = PrivateAttr(default_factory = list)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
     
     def _initialize_cv_getter(
         self,
-        sensors: "Sensor",
-        calculations: "Calculation",
+        sensors: List["Sensor"],
+        calculations: List["Calculation"],
         ) -> None:
 
         found = False

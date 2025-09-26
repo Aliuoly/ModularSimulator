@@ -1,84 +1,84 @@
-# Simulation of a CSTR using a Modular Framework
+# Simple Irreversible Reaction CSTR
 
-This project presents a dynamic simulation of a Continuous Stirred-Tank Reactor (CSTR) where a simple, irreversible reaction takes place. It is designed as a clear example of how to model and simulate a chemical process using the `modular_simulation` Python package.
+This example models an isothermal CSTR performing the irreversible reaction
+A → 2B.  It demonstrates how to express a small DAE system inside the
+framework and close the loop with a single feedback controller.
 
-The core philosophy of the `modular_simulation` package is to separate the distinct components of a system—its physical state, control elements, sensors, and governing equations—into clean, interchangeable modules. This approach enhances readability, maintainability, and simplifies the process of building complex simulations.
+## System definition
 
-## The CSTR Mathematical Model
+* **Differential states (`States`)** – reactor volume `V`, concentrations of A
+  `C_A` and B `C_B`.  These are advanced by the solver through the `rhs`
+  implementation in `IrreversibleSystem`.【F:examples/simple_irreversible_system/system_definitions.py†L10-L78】
+* **Control elements (`ControlElements`)** – a single manipulated variable,
+  the inlet flow rate `F_in`.【F:examples/simple_irreversible_system/system_definitions.py†L15-L17】
+* **Algebraic states (`AlgebraicStates`)** – the outlet flow `F_out`, computed
+  at every solver call from the current volume using the valve correlation
+  `F_out = Cv √V`.  The algebraic value is fed back into the RHS when
+  calculating the mass balances.【F:examples/simple_irreversible_system/system_definitions.py†L19-L51】
+* **Constants** – kinetic and hydraulic parameters `k`, `Cv` and feed
+  concentration `CA_in`.  They are provided through the `Constants` Pydantic
+  model when the system is created.【F:examples/simple_irreversible_system/system_definitions.py†L21-L25】
 
-The simulation models a liquid-phase, irreversible reaction within a CSTR:
+The algebraic and differential equations are implemented in
+`IrreversibleSystem`.  No additional calculations are required for this
+example.
 
-$$A \rightarrow 2B$$
+### Governing equations
 
-The reaction rate is first-order with respect to the concentration of reactant A. The system is described by a set of Differential-Algebraic Equations (DAEs), which are solved simultaneously.
+The discharge flow is enforced algebraically from the current volume,
 
-### Governing Equations
+$$
+F_{\text{out}} = C_v \sqrt{V}.
+$$
 
-1.  **Volume Balance (Differential Equation):** The change in reactor volume over time is the difference between the inlet and outlet flow rates.
-    $$\frac{dV}{dt} = F_{in} - F_{out}$$
+With the reaction rate $r = k V C_A$, the differential states evolve according
+to
 
-2.  **Outlet Flow (Algebraic Equation):** The outlet flow is modeled as gravity-driven, where the flow rate is proportional to the square root of the liquid volume. This algebraic relationship links the outlet flow directly to the current state of the system.
-    $$F_{out} = C_v \sqrt{V}$$
-    Here, $C\_v$ is the valve coefficient.
+\begin{align*}
+\frac{\mathrm{d}V}{\mathrm{d}t} &= F_{\text{in}} - F_{\text{out}}, \\
+\frac{\mathrm{d}C_A}{\mathrm{d}t} &= \frac{1}{V} \left(-r + F_{\text{in}} C_{A,\text{in}} - F_{\text{out}} C_A - C_A \frac{\mathrm{d}V}{\mathrm{d}t}\right), \\
+\frac{\mathrm{d}C_B}{\mathrm{d}t} &= \frac{1}{V} \left(2 r - F_{\text{out}} C_B - C_B \frac{\mathrm{d}V}{\mathrm{d}t}\right).
+\end{align*}
 
-3.  **Mole Balances (Differential Equations):** The change in concentration for each component is derived from the general mole balance equation. These equations account for material entering and leaving the reactor, the consumption or generation from the reaction, and the effect of the changing volume. The reaction rate is defined as $r = k[A]V$.
+These expressions match the implementation in `system_definitions.py` and form
+the coupled mass balances advanced by the integrator.
 
-      * **For reactant A:**
-        $$\frac{d[A]}{dt} = \frac{1}{V} \left( F_{in}[A]_{in} - F_{out}[A] - r - [A]\frac{dV}{dt} \right)$$
+## Instrumentation
 
-      * **For product B:**
-        $$\frac{d[B]}{dt} = \frac{1}{V} \left( -F_{out}[B] + 2r - [B]\frac{dV}{dt} \right)$$
+The simulation uses `SampledDelayedSensor` instances with different settings to
+illustrate realistic measurements:
 
-## Implementation with `modular_simulation`
+* `F_out` – instantaneous sample of the algebraic discharge flow.
+* `F_in` – noisy flow measurement with a 5% coefficient of variance.
+* `B` – lab analyser-style sample with a 900 s sampling period and dead time.
+* `V` – volume sensor with 1% probability of returning a flagged faulty value.
 
-The power of the `modular_simulation` package is in how cleanly the mathematical model translates into code. Each conceptual part of the system has a corresponding class.
+All sensors produce `TimeValueQualityTriplet` outputs that are historized by
+the framework.【F:examples/simple_irreversible_system/run_simulation.py†L33-L60】
 
-### 1\. Defining the System's quantities
+No calculated signals are defined in this example.
 
-First, we define the data structures for all measurable variables using Pydantic models. This provides strong typing and validation.
+## Control strategy
 
-  * `IrreversibleStates`: Holds the differential state variables (`V`, `A`, `B`).
-  * `IrreversibleControlElements`: Holds the variables that can be externally manipulated (`F_in`).
-  * `IrreversibleAlgebraicStates`: Holds variables that are calculated from other states (`F_out`).
+A single `PIDController` manipulates `F_in` to track the concentration of B.
+The controller uses a constant setpoint trajectory and enforces bounds on the
+manipulated flow.【F:examples/simple_irreversible_system/run_simulation.py†L62-L76】
 
-These are then collected into a single `MeasurableQuantities` object that represents the complete state of the system at any given time.
+## Simulation settings
 
-### 2\. Defining the System Dynamics
+* **Update period (`dt`)** – 30 s between measurement/controller updates.
+* **Integrator** – defaults to LSODA through the `solver_options` on the
+  `System` base class.【F:examples/simple_irreversible_system/run_simulation.py†L86-L109】【F:src/modular_simulation/framework/system.py†L70-L88】
+* **Variants** – the script creates both a normal Python implementation and a
+  Numba-accelerated version to compare performance.【F:examples/simple_irreversible_system/run_simulation.py†L86-L110】
 
-The governing equations are implemented in a class that inherits from `System`. This class provides the core mathematical logic to the simulation engine.
+## Running the example
 
-  * `_calculate_algebraic_values()`: This method implements the algebraic equation(s). In this case, it calculates `F_out` from the current volume `V`.
-  * `rhs()`: This method implements the "right-hand side" of the differential equations, calculating the derivatives (`dV/dt`, `d[A]/dt`, `d[B]/dt`).
+From the repository root run:
 
-### 3\. Defining Instrumentation and Control
+```bash
+python examples/simple_irreversible_system/run_simulation.py
+```
 
-Sensors and controllers are defined as separate classes, promoting reusability.
-
-  * **Sensors** (e.g., `VolumeSensor`, `BConcentrationSensor`) define how to "measure" a value from the `MeasurableQuantities` object.
-  * **Controllers** (e.g., `PIDController`) take measurements from sensors and calculate an output to manipulate a control element.
-
-These are assembled into `UsableQuantities` (the collection of sensors) and `ControllableQuantities` (the collection of controllers).
-
-### 4\. Assembling the Final Simulation
-
-The final simulation object is created by passing all the modular components—quantities, controllers, constants, and solver options—to the constructor of our `IrreversibleSystem` class. This object then handles the entire simulation loop, including the control logic and numerical integration.
-
-## Performance Considerations
-
-This project also includes a `fast_version` which demonstrates the flexibility of the framework. By inheriting from `FastSystem` instead of `System`, the core mathematical functions (`rhs` and `_calculate_algebraic_values`) can be replaced with versions optimized with Numba for high performance. This swap is achieved without altering the structure of the controllers, sensors, or the main simulation loop, showcasing the modularity of the design.
-
-## How to Run the Project
-
-1.  **Run a simulation:**
-
-      * To see the readable version in action: `python readable_version/system_simulation.py`
-      * To see the fast version in action: `python fast_version/system_simulation.py`
-
-2.  **Analyze the profiler results:**
-
-    ```
-    python readable_version/analyze_performance.py
-    python fast_version/analyze_performance.py
-    ```
-
-    This utility script loads the `.prof` files and prints a summary of where the program spends its time.
+The script simulates 10,000 controller updates, applies a setpoint change
+half-way through, and plots the resulting measurements and controller outputs.

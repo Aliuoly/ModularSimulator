@@ -1,7 +1,7 @@
 from pydantic import Field, PrivateAttr
 import numpy as np
-from modular_simulation.control_system import Controller
-from modular_simulation.usables import TimeValueQualityTriplet
+from modular_simulation.control_system.controllers.controller import Controller
+from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
 import logging
 logger = logging.getLogger(__name__)
 class PIDController(Controller):

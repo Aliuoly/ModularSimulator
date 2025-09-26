@@ -5,11 +5,11 @@ from numpy.typing import NDArray
 import numpy as np
 from enum import IntEnum
 from pydantic import BaseModel, PrivateAttr, Field, ConfigDict
-from modular_simulation.control_system.trajectory import Trajectory
-from modular_simulation.measurables import ControlElements
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
 if TYPE_CHECKING:
-    from modular_simulation.quantities import UsableQuantities
+    from modular_simulation.control_system.trajectory import Trajectory
+    from modular_simulation.quantities.usable_quantities import UsableQuantities
+    from modular_simulation.measurables import ControlElements
     from modular_simulation.usables.sensors.sensor import Sensor
     from modular_simulation.usables.calculations import Calculation
 import logging
@@ -207,7 +207,7 @@ class Controller(BaseModel, ABC):
     def _initialize(
         self,
         usable_quantities: "UsableQuantities",
-        control_elements: ControlElements,
+        control_elements: "ControlElements",
         is_final_control_element: bool = True,
         ) -> None:
 

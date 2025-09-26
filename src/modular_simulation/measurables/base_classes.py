@@ -1,8 +1,8 @@
 from pydantic import BaseModel, PrivateAttr, ConfigDict
-from typing import Dict, Type
+from typing import Dict, Iterable
 import numpy as np
 from numpy.typing import NDArray
-from enum import Enum
+from functools import cached_property
 
 class BaseIndexedModel(BaseModel):
     """
@@ -12,13 +12,12 @@ class BaseIndexedModel(BaseModel):
     and can be updating from numpy arrays via the same indexing. 
     """
 
-    _index_map: Type[Enum] = PrivateAttr()
-    _index_dict: Dict[str, slice] = PrivateAttr()
+    _index_map: Dict[str, slice] = PrivateAttr()
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
     
     def model_post_init(self, context):
         # generate _index_map based on the defined fields
-        enum_members = {}
+        index_dict = {}
         slice_start = 0
         for field_name in self.__class__.model_fields:
             try:
@@ -29,36 +28,38 @@ class BaseIndexedModel(BaseModel):
                     f"coercion exception: {ex}"
                 )
             slice_end = slice_start + value.size
-            enum_members[field_name] = slice(slice_start, slice_end)
+            index_dict[field_name] = slice(slice_start, slice_end)
             slice_start = slice_end
-        self._index_map = Enum("index_map", enum_members)
-        self._index_dict = {
-            name: member.value for name, member in self._index_map.__members__.items()  # type: ignore[attr-defined]
-        }
+        self._index_map = index_dict
 
+        # get array size
+        array_size = 0
+        for slice_of_field in self._index_map.values():
+            array_size = max(array_size, slice_of_field.stop)
+        self._array_size = array_size
 
-    def get_total_size(self) -> int:
-        """Calculates the total size of the flat NumPy array representation."""
-        max_val = 0
-        for member in self._index_map:
-            max_val = max(max_val, member.value.stop)
-        return max_val
+    @cached_property
+    def tag_list(self) -> Iterable[str]:
+        return self._index_map.keys()
 
     def to_array(self) -> NDArray[np.float64]:
-        """Converts the Pydantic model instance to a flat NumPy array."""
-        array = np.zeros(self.get_total_size(), dtype=np.float64)
-        for member in self._index_map: 
-            array[member.value] = getattr(self, member.name)
+        # the following combination, from testing, gave the best times
+        # use np.zeros(...) to remake array each time
+        #   instead of np.empty(...) and alike
+        #   using a preallocated array and updating it
+        #   was no faster and flowed things down due to
+        #   requirement of additional checking logics. 
+        # use dictionary for array indexing instead of 
+        #   an enum. 
+        array = np.zeros(self._array_size, dtype=np.float64)
+        for attr_name, slice in self._index_map.items(): 
+            array[slice] = getattr(self, attr_name)
         return array
-    
+
     def update_from_array(self, array: NDArray[np.float64]) -> None:
         """updates the class in place using the provided array."""
-        for member in self._index_map:
-            setattr(self, member.name, array[member.value])
-    
-    def index_map_dict(self) -> Dict[str, slice]:
-        """Returns a dictionary mapping field names to their array slices."""
-        return self._index_dict
+        for field_name, field_index in self._index_map.items():
+            setattr(self, field_name, array[field_index])
 
 class ControlElements(BaseIndexedModel):
     """

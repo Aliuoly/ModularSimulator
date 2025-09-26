@@ -1,6 +1,10 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from modular_simulation.quantities.utils import ConfigurationError
 from modular_simulation.measurables.base_classes import AlgebraicStates, States, ControlElements, Constants
 from functools import cached_property
+from typing import Iterable
+
+
 
 class MeasurableQuantities(BaseModel):
     constants: Constants = Field(
@@ -35,9 +39,30 @@ class MeasurableQuantities(BaseModel):
 
     model_config = ConfigDict(extra = 'forbid')
 
+    @model_validator(mode = 'after')
+    def validate_tag_list(self):
+        """ensures no tag shows up in multiple places."""
+        duplicate_tag_list = []
+        seen_tag_list = []
+        for tag in self.tag_list:
+            if tag in seen_tag_list:
+                duplicate_tag_list.append(tag)
+            seen_tag_list.append(tag)
+        if len(duplicate_tag_list) > 0:
+            raise ConfigurationError(
+                "The following duplicate tag(s) were detected in the measurable quantity definition: "
+                f"{', '.join(duplicate_tag_list)}"
+            )
+        if len(seen_tag_list) == 0:
+            raise ConfigurationError(
+                "No measurable quantities defined. Aborting."
+            )
+        return self
+
     @cached_property
-    def available_tags(self) -> list[str]:
-        tags = []
-        for category in [self.states, self.control_elements, self.algebraic_states, self.constants]:
-            tags.extend(category.__class__.model_fields.keys())
-        return tags
+    def tag_list(self) -> Iterable[str]:
+        return_list = list(self.states.tag_list)
+        return_list.extend(list(self.algebraic_states.tag_list))
+        return_list.extend(list(self.control_elements.tag_list))
+        return_list.extend(list(self.constants.tag_list))
+        return return_list

@@ -3,8 +3,8 @@ from modular_simulation.usables.sensors.sensor import Sensor, TimeValueQualityTr
 from modular_simulation.usables.sensors.sampled_delayed_sensor import SampledDelayedSensor
 
 __all__ = [
-    "Calculation",
     "Sensor",
+    "Calculation",
     "SampledDelayedSensor",
     "TimeValueQualityTriplet"
 ]

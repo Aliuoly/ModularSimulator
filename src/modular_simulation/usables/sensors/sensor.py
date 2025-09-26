@@ -63,13 +63,10 @@ class Sensor(BaseModel, ABC):
         for category in search_order:
             owner = getattr(measurable_quantities, category)
             if owner is not None and hasattr(owner, self.measurement_tag):
-                if found_owner is not None:
-                    raise AttributeError(
-                        f"Tag '{self.measurement_tag}' is ambiguous and found in multiple fields of measurable_quantities."
-                        )
                 found_owner = owner
+                break
         if found_owner is None:
-            raise AttributeError(
+            raise ConfigurationError(
                 f"Tag '{self.measurement_tag}' not found in any field of measurable_quantities. "
                 f"Available measurable quantities are: {', '.join(measurable_quantities.available_tags)}"
                 )

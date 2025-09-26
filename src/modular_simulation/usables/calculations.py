@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, TYPE_CHECKING
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-
-from modular_simulation.usables.sensors.sensor import Sensor
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
+from modular_simulation.quantities.utils import ConfigurationError
+if TYPE_CHECKING:
+    from modular_simulation.quantities.usable_quantities import UsableQuantities
     
 
 
@@ -16,15 +17,15 @@ class Calculation(BaseModel, ABC):
         description = "tag of the calculation's output. Must be unique."
     )
     measured_input_tags: List[str] = Field(
-        ...,
+        default_factory = list,
         description = "list of tags corresponding to measurements that are inputs to this calculation."
     )
     calculated_input_tags: List[str] = Field(
-        ...,
+        default_factory = list,
         description = "list of tags corresponding to calculations that are inputs to this calculation."
     )
     constants: Dict[str, float] = Field(
-        ...,
+        default_factory = dict,
         description = (
             "dictionary of constants that are used in this calculation. Do not get this confused with "
             "system constants defined in measurable_quantities - those are true system constants, while "
@@ -40,45 +41,31 @@ class Calculation(BaseModel, ABC):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    @property
-    def initialized(self) -> bool: return (self._input_getters is None)
-
     def _initialize(
             self,
-            sensors: List["Sensor"],
-            calculations: List["Calculation"],
+            usable_quantities: "UsableQuantities"
             ) -> None:
         """
         generates the input getting functions and save them as a dictionary of callables.
         Called once during system instantiation. Refers to the Singleton instance of
-        sensors that are defined also at system instantiation.
+        sensors that are defined also at system instantiation. 
+        By now, usable quantities class has already validated tags do exist, so we just look for it. 
         """
+        sensors = usable_quantities.sensors
+        calculations = usable_quantities.calculations
         self._input_getters = {}
         # 1. look in sensors for measured tags
         for tag in self.measured_input_tags:
-            found = False
             for sensor in sensors:
                 if sensor.measurement_tag == tag:
                     self._input_getters[tag] = lambda sensor=sensor: sensor._last_value #type: ignore
-                    found = True
-            if not found:
-                raise AttributeError(
-                    f"no measurement tagged '{tag}' is defined. "
-                    f"Available measurements are: {', '.join([s.measurement_tag for s in sensors])}"
-                    )
+
             
         # 2. look in calculations for calculated tags
         for tag in self.calculated_input_tags:
-            found = False
             for calculation in calculations:
                 if calculation.output_tag == tag:
                     self._input_getters[tag] = lambda calculation=calculation: calculation._last_value #type: ignore
-                    found = True
-            if not found:
-                raise AttributeError(
-                    f"no calculation tagged '{tag}' is defined. "
-                    f"Available calculations are: {', '.join([c.output_tag for c in calculations])}"
-                    )
     
     def _update_input_triplets(self) -> None:
         triplet_dict = self._last_input_triplet_dict
@@ -86,7 +73,7 @@ class Calculation(BaseModel, ABC):
             for tag_name, tag_getter in self._input_getters.items():
                 triplet_dict[tag_name] = tag_getter()
         else:
-            raise RuntimeError(
+            raise ConfigurationError(
                 "Calculation is not initialized. Make sure you used the create_system function to define your system. "
             )
     

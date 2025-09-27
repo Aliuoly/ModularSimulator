@@ -6,14 +6,13 @@ from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from numpy.typing import NDArray, ArrayLike
 from typing import Any, Dict, List, Mapping, TYPE_CHECKING, Tuple, Callable
 from scipy.integrate import solve_ivp #type: ignore
-from modular_simulation.validation import validate_and_link
 from functools import cached_property
 from operator import attrgetter
 from numba import jit
 from numba.typed.typeddict import Dict as NDict
 from numba import types
 import warnings
-from modular_simulation.control_system.controllers.controller import ControllerMode
+from modular_simulation.control_system.controller import ControllerMode
 from modular_simulation.measurables.base_classes import BaseIndexedModel
 if TYPE_CHECKING:
     from modular_simulation.usables import TimeValueQualityTriplet
@@ -117,9 +116,7 @@ class System(BaseModel, ABC):
     # add private attrs
     _history_slots: List[Tuple[Callable[[Any], Any], List]] = PrivateAttr(default_factory=list)
 
-    def model_post_init(self, __context: Any) -> None:
-        super().model_post_init(__context)
-        validate_and_link(self)
+    def model_post_init(self, context: Any) -> None:
 
         if self.use_numba:
             self._construct_fast_params()

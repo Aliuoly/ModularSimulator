@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("numpy")
 
-from modular_simulation.usables.sensors.sensor import Sensor
+from modular_simulation.usables.sensor import Sensor
 
 
 class InstantSensor(Sensor):

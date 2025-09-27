@@ -3,12 +3,12 @@ import pytest
 
 pytest.importorskip("numpy")
 
-from modular_simulation.control_system.controllers.controller import Controller, ControllerMode
+from modular_simulation.control_system.controller import Controller, ControllerMode
 from modular_simulation.control_system.trajectory import Trajectory
 from modular_simulation.measurables import ControlElements, States
-from modular_simulation.quantities import MeasurableQuantities, UsableQuantities
+from modular_simulation.quantities import MeasurableQuantities, UsableQuantities, ControllableQuantities
 from modular_simulation.usables import Sensor
-from modular_simulation.validation.system_validation import _initialize_sensors_and_calculations
+from modular_simulation.validation.exceptions import ControllerConfigurationError
 
 
 class ErrorEchoController(Controller):
@@ -17,8 +17,8 @@ class ErrorEchoController(Controller):
     Returns the error defined as sp_value - cv_value as the control output.
     """
 
-    def _control_algorithm(self, t, cv_value, sp_value):  
-        return sp_value - cv_value
+    def _control_algorithm(self, t, cv, sp):  
+        return sp - cv
 
 class DummyStates(States):
     
@@ -40,13 +40,35 @@ class DummySensor(Sensor):
     
 def prepare_normal_controller():
     return ErrorEchoController(
-        mv_tag = 'mv',
-        cv_tag = 'cv',
+        mv_tag = 'mv1',
+        cv_tag = 'cv1',
         sp_trajectory = Trajectory(1.0),
         mv_range = (-100,100),
     )
 
-def prepare_cascade_controller_1():
+def prepare_improper_normal_controller():
+    return ErrorEchoController(
+        mv_tag = 'mv6',
+        cv_tag = 'cv6',
+        sp_trajectory = Trajectory(0),
+        mv_range = (-100,100)
+    )
+
+def prepare_improper_cascade_controller_1():
+    return ErrorEchoController(
+        mv_tag = 'mv4',
+        cv_tag = 'cv4',
+        sp_trajectory = Trajectory(1.0),
+        mv_range = (-50,50),
+        cascade_controller = ErrorEchoController(
+            mv_tag = 'mv5',
+            cv_tag = 'cv5',
+            sp_trajectory = Trajectory(2.0),
+            mv_range = (-50,50)
+        )
+    )
+
+def prepare_proper_cascade_controller_1():
     return ErrorEchoController(
         mv_tag = 'mv1',
         cv_tag = 'cv1',
@@ -81,8 +103,13 @@ def prepare_cascade_controller_2():
         )
     )
 
-def prepare_usable():
-    return UsableQuantities(
+
+def prepare_quantities():
+    measurable = MeasurableQuantities(
+        states = DummyStates(),
+        control_elements = DummyControlElements(),
+    )
+    usable = UsableQuantities(
         sensors = [
             DummySensor(measurement_tag = 'mv1'),
             DummySensor(measurement_tag = 'mv2'),
@@ -90,36 +117,91 @@ def prepare_usable():
             DummySensor(measurement_tag = 'cv1'),
             DummySensor(measurement_tag = 'cv2'),
             DummySensor(measurement_tag = 'cv3'),
-        ]
+        ],
+        measurable_quantities = measurable
     )
+    return measurable, usable
 
-def prepare_measurable():
-    return MeasurableQuantities(
-        states = DummyStates(),
-        control_elements = DummyControlElements(),
-    )
+def test_normal_controller_instantiation():
 
-def test_normal_controller():
-
-    usable = prepare_usable()
-    measurable = prepare_measurable()
+    measurable, usable = prepare_quantities()
     controller = prepare_normal_controller()
-    # simulate initialization logic during system creation
-    controller._initialize(usable, measurable.control_elements)
+    controllable = ControllableQuantities(
+        controllers = [controller],
+        control_elements = measurable.control_elements,
+        usable_quantities = usable
+    )
 
-    output = controller.update(t = 0)
-    assert output.t == 0.0
+def test_controllable_quantities_construction():
+
+    # case 1 - proper normal controller
+    measurable, usable = prepare_quantities()
+    controller = prepare_normal_controller()
+    controllable = ControllableQuantities(
+        controllers = [controller],
+        control_elements = measurable.control_elements,
+        usable_quantities = usable
+    )
+
+    # case 2 - improper normal controller
+    measurable, usable = prepare_quantities()
+    controller = prepare_improper_normal_controller()
+    with pytest.raises(ExceptionGroup) as ex_info:
+        controllable = ControllableQuantities(
+            controllers = [controller],
+            control_elements = measurable.control_elements,
+            usable_quantities = usable
+        )
+    controller_errors = [ex for ex in ex_info.value.exceptions if isinstance(ex, ControllerConfigurationError)]
+    assert len(controller_errors) > 0
+    
+    # case 3 - proper cascade controller
+    measurable, usable = prepare_quantities()
+    controller = prepare_proper_cascade_controller_1()
+    controllable = ControllableQuantities(
+        controllers = [controller],
+        control_elements = measurable.control_elements,
+        usable_quantities = usable
+    )
+
+    # case 4 - improper cascade controller
+    measurable, usable = prepare_quantities()
+    controller = prepare_improper_cascade_controller_1()
+    with pytest.raises(ExceptionGroup) as ex_info:
+        controllable = ControllableQuantities(
+            controllers = [controller],
+            control_elements = measurable.control_elements,
+            usable_quantities = usable
+        )
+    controller_errors = [ex for ex in ex_info.value.exceptions if isinstance(ex, ControllerConfigurationError)]
+    assert len(controller_errors) > 0
+
+
 
 def test_cascade_controller_1():
-    usable = prepare_usable()
-    measurable = prepare_measurable()
-    controller = prepare_cascade_controller_1()
+    measurable, usable = prepare_quantities()
+    controller = prepare_proper_cascade_controller_1()
 
-    _initialize_sensors_and_calculations(
-        measurable, usable
+    controllable = ControllableQuantities(
+        controllers = [controller],
+        control_elements = measurable.control_elements,
+        usable_quantities = usable
     )
-    controller._initialize(usable, measurable.control_elements)
-    first_output = controller.update(t = 0).value
+    controller = controllable.controllers[0]
+    first_output = controller.update(t = 0.1).value
+
+    # by default, things are in cascade
+    # except the most-outer loop in AUTO. lets check that
+    # only 1 layer of cascade here, hence:
+    assert controller.mode == ControllerMode.CASCADE
+    assert controller.cascade_controller.mode == ControllerMode.AUTO
+    assert controller._sp_getter == controller.cascade_controller.update
+
+    # now lets change inner loop to TRACKING
+    controller._change_control_mode(mode = ControllerMode.TRACKING)
+    assert controller.mode == ControllerMode.TRACKING
+    # this should automatically change the outerloop to tracking as well
+    assert controller.cascade_controller.mode == ControllerMode.TRACKING
 
     # expected behavior:
     # currently the inner loop is in TRACKING mode
@@ -139,14 +221,14 @@ def test_cascade_controller_1():
     assert first_output == second_output
 
     # now let's change to AUTO mode
-    # expected behavior:
-    # when the sp_trajectory's return changes, the output should change as well. 
-    # if it doesn't change, the output should not change either 
-    #   (ONLY because of our dummy controller implementation. A PID e.g., would not do this due to time dynamics)
     controller._change_control_mode(mode = 'AUTO')
+    assert controller.mode == ControllerMode.AUTO
+    assert controller.cascade_controller.mode == ControllerMode.TRACKING
+    # since just changed from tracking mode, the setpoint should be unchanged
+    # until something else changes it. Also, the sp_getter should
+    # now point towards the trajectory
+    assert controller._sp_getter(2) == controller.sp_trajectory(2)
     third_output = controller.update(t = 2).value
-    # since we JUST changed the mode, the sp should be tracking until someone sets it, hence:
-    assert second_output == third_output
     fourth_output = controller.update(t = 3).value
     # since sp did not change between t = 2 and t = 3, output should be the same:
     assert third_output == fourth_output
@@ -156,20 +238,8 @@ def test_cascade_controller_1():
     # and now check that control output has changed:
     fifth_output = controller.update(t = 5)
     assert fourth_output != fifth_output
-
-    # moving on to CASCADE mode
-    # since inner loop was on AUTO, cascade controller should be in TRACKING mode:
-    assert controller.cascade_controller.mode == ControllerMode.TRACKING
-    # and the sp should be equal to the cv
-    assert controller.cascade_controller._sp_getter(5) == controller.cascade_controller._cv_getter()
-    # now we change mode to CASCADE and verify that the cascade controller is not in AUTO mode
-    # and the inner loop is in CASCADE mode:
-    controller._change_control_mode(mode = 'CASCADE')
-    assert controller.cascade_controller.mode == ControllerMode.AUTO
-    assert controller.mode == ControllerMode.CASCADE
-    # and we once again verify that the sp_getter of the inner loop correctly 
-    # grabs the output of the cascade controller
-    assert controller._sp_getter(6).value == controller.cascade_controller.update(t = 6).value
     
 
-test_cascade_controller_1()
+if __name__ == '__main__':
+    test_controllable_quantities_construction()
+    test_cascade_controller_1()

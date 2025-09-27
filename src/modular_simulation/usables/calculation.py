@@ -3,7 +3,6 @@ from typing import Callable, Dict, List, TYPE_CHECKING
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
-from modular_simulation.validation import ConfigurationError
 if TYPE_CHECKING:
     from modular_simulation.quantities.usable_quantities import UsableQuantities
     
@@ -73,7 +72,7 @@ class Calculation(BaseModel, ABC):
             for tag_name, tag_getter in self._input_getters.items():
                 triplet_dict[tag_name] = tag_getter()
         else:
-            raise ConfigurationError(
+            raise RuntimeError(
                 "Calculation is not initialized. Make sure you used the create_system function to define your system. "
             )
     

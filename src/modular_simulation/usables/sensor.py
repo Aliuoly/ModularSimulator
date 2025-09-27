@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 from typing import TYPE_CHECKING, Any, List
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
-from modular_simulation.validation import ConfigurationError
 
 if TYPE_CHECKING:
     from modular_simulation.quantities import MeasurableQuantities
@@ -48,8 +47,7 @@ class Sensor(BaseModel, ABC):
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def model_post_init(self, __context: Any) -> None:
-        super().model_post_init(__context)
+    def model_post_init(self, context: Any) -> None:
         self._rng = np.random.default_rng(self.random_seed)
 
     def _initialize(self, measurable_quantities: "MeasurableQuantities") -> None:
@@ -57,6 +55,7 @@ class Sensor(BaseModel, ABC):
         Links the measurable quantities instance and
         finds the correct attribute to measure and creates a simple callable for it.
         This runs during system initialization.
+        Validation is already done so no error handling is placed here. 
         """
         search_order = list(measurable_quantities.__class__.model_fields.keys())
         found_owner = None
@@ -66,15 +65,8 @@ class Sensor(BaseModel, ABC):
             if owner is not None and hasattr(owner, self.measurement_tag):
                 found_owner = owner
                 break
-        if found_owner is None:
-            raise ConfigurationError(
-                f"Tag '{self.measurement_tag}' not found in any field of measurable_quantities. "
-                f"Available measurable quantities are: {', '.join(measurable_quantities.tag_list)}"
-                )
-        
         # Store raw pieces
-        self._measurement_owner = found_owner          # new PrivateAttr
-        self._initialized = True
+        self._measurement_owner = found_owner
 
     # --- Template Method ---
     def measure(self, t: float) -> TimeValueQualityTriplet:

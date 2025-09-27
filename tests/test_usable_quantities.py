@@ -1,5 +1,5 @@
 import pytest
-from modular_simulation.validation import ConfigurationError
+from modular_simulation.validation.exceptions import SensorConfigurationError, CalculationConfigurationError, MeasurableConfigurationError
 from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
 from modular_simulation.quantities.usable_quantities import UsableQuantities
 from dummy_test_definitions import DummyControlElements, DummySensor, DummyStates, AddAllCalculation
@@ -29,7 +29,7 @@ def _make_proper_calculations():
 def _make_improper_calculations():
     return [AddAllCalculation(
         output_tag = "improper_output",
-        measured_input_tags = ["mv4","cv4"]
+        measured_input_tags = ["mv5","cv5"]
     )]
 
 
@@ -52,13 +52,26 @@ def test_usable_validation():
     proper_calculations = _make_proper_calculations()
     improper_calculations = _make_improper_calculations()
 
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(ExceptionGroup) as ex_info:
         usable = _make_usable(proper_sensors, improper_calculations)
-    with pytest.raises(ConfigurationError):
-        usable = _make_usable(improper_sensors, proper_calculations)
+    calc_errors = [ex for ex in ex_info.value.exceptions if isinstance(ex, CalculationConfigurationError)]
+    other_errors = [ex for ex in ex_info.value.exceptions if ex not in calc_errors]
+    assert len(calc_errors) > 0
+    assert len(other_errors) == 0
 
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(ExceptionGroup) as ex_info:
+        usable = _make_usable(improper_sensors, proper_calculations)
+    meas_errors = [ex for ex in ex_info.value.exceptions if isinstance(ex, SensorConfigurationError)]
+    assert len(meas_errors) > 0 #here, due to improper measurement, even a proper_calculation might fail, so we don't assert no calc errors.
+    
+    with pytest.raises(ExceptionGroup) as ex_info:
         usable = _make_usable(improper_sensors, improper_calculations)
+    calc_errors = [ex for ex in ex_info.value.exceptions if isinstance(ex, CalculationConfigurationError)]
+    meas_errors = [ex for ex in ex_info.value.exceptions if isinstance(ex, SensorConfigurationError)]
+    other_errors = [ex for ex in ex_info.value.exceptions if ex not in (calc_errors + meas_errors)]
+    assert len(meas_errors) > 0
+    assert len(calc_errors) > 0
+    assert len(other_errors) == 0
 
     usable = _make_usable(proper_sensors, proper_calculations)
 

@@ -10,8 +10,8 @@ from modular_simulation.control_system.trajectory import Trajectory
 if TYPE_CHECKING:
     from modular_simulation.quantities.usable_quantities import UsableQuantities
     from modular_simulation.measurables import ControlElements
-    from modular_simulation.usables.sensors.sensor import Sensor
-    from modular_simulation.usables.calculations import Calculation
+    from modular_simulation.usables.sensor import Sensor
+    from modular_simulation.usables.calculation import Calculation
 import logging
 import warnings
 logger = logging.getLogger(__name__)
@@ -77,65 +77,38 @@ class Controller(BaseModel, ABC):
     _u0: float | NDArray = PrivateAttr(default = 0.)
     _sp_history: List[TimeValueQualityTriplet] = PrivateAttr(default_factory = list)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
-    
+
     def _initialize_cv_getter(
         self,
         sensors: List["Sensor"],
         calculations: List["Calculation"],
         ) -> None:
-
-        found = False
+        # validation already done during quantity initiation. No error checking here. 
         for sensor in sensors:
             if sensor.measurement_tag == self.cv_tag:
-                # fun bug for people if they ever see this
-                # originally, this line was 'self._cv_getter = lambda : sensor._last_value
-                # we then continue to loop over sensors to find if there are duplicates. 
-                # welp, turns out, the sensor object referenced in the lambda
-                # was not 'frozen' to the one we wanted. 
-                # instead, as we iterated over sensors and saved the object into 'sensor',
-                # the _cv_getter's referencing sensor was changing as well.
-                # Anyways, now I relegate the duplicate checking to the usables validation
-                # instead of here, and we break early to avoid this. 
                 self._cv_getter = lambda : sensor._last_value
-                found = True
                 break
         for calculation in calculations:
             if calculation.output_tag == self.cv_tag:
                 self._cv_getter = lambda : calculation._last_value
-                found = True
                 break
-        if not found:
-            raise AttributeError(
-                f"{self.cv_tag} controller could not be initialized. The tag '{self.cv_tag}' is not measured. "
-                f"Available measurements are: {', '.join([s.measurement_tag for s in sensors])}."
-            )
     def _initialize_non_final_control_element_mv_setter(
         self,
         usable_quantities : "UsableQuantities"
         ) -> None:
-        found = False
-        
+        # validation already done during quantity initiation. No error checking here. 
         for sensor in usable_quantities.sensors:
             if sensor.measurement_tag == self.mv_tag:
                 # set the '0 point' value with whatever the measurement is
                 self._u0 = sensor._last_value.value
                 self._mv_setter = do_nothing_mv_setter
-                found = True
                 break
         for calculation in usable_quantities.calculations:
             if calculation.output_tag == self.mv_tag:
                 # set the '0 point' value with whatever the measurement is
                 self._u0 = calculation._last_value.value
                 self._mv_setter = do_nothing_mv_setter
-                found = True
                 break
-        if not found:
-            raise AttributeError(
-                f"{self.cv_tag} controller's could not be initialized. "
-                f"The specified manipulated variable tag '{self.mv_tag}' is not defined as a measurement or calculation."
-                f"Available measurements are: {', '.join([sensor.measurement_tag for sensor in usable_quantities.sensors])}."
-                f"Available calculations are {', '.join([calc.output_tag for calc in usable_quantities.calculations])}"
-            )
         
         self._last_output = TimeValueQualityTriplet(t = 0, value = self._u0, ok = True)
         
@@ -143,25 +116,23 @@ class Controller(BaseModel, ABC):
         self,
         control_elements: "ControlElements",
         ) -> None:
-
-        found = False
+        # validation already done during quantity initiation. No error checking here. 
         for control_element_name in control_elements.__class__.model_fields:
             if control_element_name == self.mv_tag:
                 # set the '0 point' value with whatever the measurement is
                 self._u0 = getattr(control_elements, control_element_name)
                 self._mv_setter = lambda value : setattr(control_elements, self.mv_tag, value)
-                found = True
                 break
-        if not found:
-            raise AttributeError(
-                f"{self.cv_tag} controller's could not be initialized. "
-                f"The specified manipulated variable tag '{self.mv_tag}' is not defined as a control element."
-                f"Available control elements are: {', '.join([ce for ce in control_elements.__class__.model_fields])}."
-            )
         
         self._last_output = TimeValueQualityTriplet(t = 0, value = self._u0, ok = True)
     
-    def _change_control_mode(self, mode: ControllerMode | str) -> None:
+    def change_control_mode(self, mode: ControllerMode | str) -> None:
+        """public facing method for changing controller mode"""
+        self._change_control_mode(mode, initialization = False)
+
+    def _change_control_mode(self, mode: ControllerMode | str, initialization: bool = False) -> None:
+        """private method for changing controller mode, with optional argument initialization,
+                which stops logging the CASCADE fallback to AUTO for INFO level."""
         if isinstance(mode, str):
             mode = mode.lower().strip()
             if mode == "auto":
@@ -177,11 +148,17 @@ class Controller(BaseModel, ABC):
         logger.debug(f"'{self.cv_tag}' controller mode is changed from {self.mode.name} --> {mode.name}")
         if mode == ControllerMode.CASCADE:
             if self.cascade_controller is None:
-                warnings.warn(
-                    f"Attemped to change '{self.cv_tag}' controller mode to CASCADE; however, "
-                    "no cascade controller was provided. Falling back to AUTO mode. "
-                )
-                self._change_control_mode(ControllerMode.AUTO)
+                if not initialization:
+                    logger.info(
+                        f"Attemped to change '{self.cv_tag}' controller mode to CASCADE; however, "
+                        "no cascade controller was provided. Falling back to AUTO mode. "
+                    )
+                else:
+                    logger.debug(
+                        f"Attemped to change '{self.cv_tag}' controller mode to CASCADE; however, "
+                        "no cascade controller was provided. Falling back to AUTO mode. "
+                    )
+                self._change_control_mode(ControllerMode.AUTO, initialization)
             else:
                 # if has cascade controller, the setpoint of this "inner loop" controller
                 # will be provided by the .update method of the cascade controller. 
@@ -190,15 +167,23 @@ class Controller(BaseModel, ABC):
                 # since inner loop now cascades to cascade controller,
                 # the mode for cascade should switch to AUTO
                 # the if logic is for initialization time where the cascade controller
-                # Might already be defaulted to CASCADE - in which case, keep it CASCADE. 
+                # Might already be defaulted to CASCADE - in which case, keep it CASCADE.
+                # This ensures the cascade ladder goes all the way to the outer-most loop
+                # during initialization. 
                 if self.cascade_controller.mode != ControllerMode.CASCADE:
-                    self.cascade_controller._change_control_mode(ControllerMode.AUTO)
+                    self.cascade_controller._change_control_mode(ControllerMode.AUTO, initialization)
         elif mode == ControllerMode.AUTO: 
             self._sp_getter = self.sp_trajectory
             self.mode = ControllerMode.AUTO
+            # if has cascade controller, it must shed to TRACKING mode now
+            if self.cascade_controller is not None:
+                self.cascade_controller._change_control_mode(ControllerMode.TRACKING, initialization)
         elif mode == ControllerMode.TRACKING:
             self._sp_getter = lambda t: self._cv_getter() #type:ignore # lambda t just to make the signiture match
             self.mode = ControllerMode.TRACKING
+            # if has cascade controller, it must shed to TRACKING mode now
+            if self.cascade_controller is not None:
+                self.cascade_controller._change_control_mode(ControllerMode.TRACKING, initialization)
         
         
             
@@ -224,7 +209,7 @@ class Controller(BaseModel, ABC):
         self._initialize_cv_getter(usable_quantities.sensors, usable_quantities.calculations)
 
         # C. do control mode validation for initialization (i.e., change from cascade to appropriate one if CASCADE not applicable.)
-        self._change_control_mode(self.mode)
+        self._change_control_mode(self.mode, initialization=True)
 
         # D. check if has cascade controller and initialize it if so
         if self.cascade_controller is not None:
@@ -239,7 +224,6 @@ class Controller(BaseModel, ABC):
                 control_elements, 
                 is_final_control_element=False,
                 )
-            
         
 
     def update(self, t: float) -> TimeValueQualityTriplet:
@@ -326,8 +310,8 @@ class Controller(BaseModel, ABC):
     def _control_algorithm(
             self,
             t: float,
-            cv_value: float | NDArray,
-            sp_value: float | NDArray,
+            cv: float | NDArray,
+            sp: float | NDArray,
             ) -> float | NDArray:
         """The actual control algorithm. To be implemented by subclasses."""
         pass

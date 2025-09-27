@@ -1,5 +1,5 @@
 import numpy as np
-from modular_simulation.usables.sensors.sensor import Sensor, TimeValueQualityTriplet
+from modular_simulation.usables.sensor import Sensor, TimeValueQualityTriplet
 import collections
 from numpy.typing import NDArray
 from pydantic import Field, PrivateAttr

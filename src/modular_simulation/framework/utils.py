@@ -57,17 +57,11 @@ def create_system(
         calculations=copied_calculations,
         measurable_quantities=measurables,
     )
-    
-    # Re-create controllers to ensure their internal states are fresh
-    
 
-    # 2. Link them correctly during construction
-    # The UsableQuantities must be created before the ControllableQuantities
-    # because the controllers depend on the sensors being defined.
-    # The instance of usable_quantities here HAS to be the same 
-    # as the one defined above. 
     controllables = ControllableQuantities(
         controllers=copied_controllers,
+        control_elements=measurables.control_elements,
+        usable_quantities=usables
     )
 
     # link measurables to usables

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from modular_simulation.validation import ConfigurationError
+from modular_simulation.validation.exceptions import MeasurableConfigurationError
 from modular_simulation.measurables.base_classes import AlgebraicStates, States, ControlElements, Constants
 from functools import cached_property
 from typing import Iterable
@@ -49,12 +49,12 @@ class MeasurableQuantities(BaseModel):
                 duplicate_tag_list.append(tag)
             seen_tag_list.append(tag)
         if len(duplicate_tag_list) > 0:
-            raise ConfigurationError(
+            raise MeasurableConfigurationError(
                 "The following duplicate tag(s) were detected in the measurable quantity definition: "
                 f"{', '.join(duplicate_tag_list)}"
             )
         if len(seen_tag_list) == 0:
-            raise ConfigurationError(
+            raise MeasurableConfigurationError(
                 "No measurable quantities defined. Aborting."
             )
         return self

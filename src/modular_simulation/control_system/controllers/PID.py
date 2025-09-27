@@ -1,6 +1,6 @@
 from pydantic import Field, PrivateAttr
 import numpy as np
-from modular_simulation.control_system.controllers.controller import Controller
+from modular_simulation.control_system.controller import Controller
 from numpy.typing import NDArray
 import logging
 logger = logging.getLogger(__name__)

@@ -1,5 +1,5 @@
 
-from modular_simulation.control_system.controllers.controller import Controller
+from modular_simulation.control_system.controller import Controller
 from modular_simulation.measurables import ControlElements, States
 from modular_simulation.usables import Sensor, Calculation
 
@@ -10,8 +10,8 @@ class ErrorEchoController(Controller):
     Returns the error defined as sp_value - cv_value as the control output.
     """
 
-    def _control_algorithm(self, t, cv_value, sp_value):  
-        return sp_value - cv_value
+    def _control_algorithm(self, t, cv, sp):  
+        return sp - cv
 
 class DummyStates(States):
     

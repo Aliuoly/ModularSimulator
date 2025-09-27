@@ -1,5 +1,5 @@
 from pydantic import BaseModel, PrivateAttr, ConfigDict
-from typing import Dict, Iterable
+from typing import Dict, List
 import numpy as np
 from numpy.typing import NDArray
 from functools import cached_property
@@ -13,13 +13,13 @@ class BaseIndexedModel(BaseModel):
     """
 
     _index_map: Dict[str, slice] = PrivateAttr()
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra='allow')
     
     def model_post_init(self, context):
         # generate _index_map based on the defined fields
         index_dict = {}
         slice_start = 0
-        for field_name in self.__class__.model_fields:
+        for field_name in self.model_dump():
             try:
                 value = np.asarray(getattr(self, field_name))
             except Exception as ex:
@@ -39,8 +39,8 @@ class BaseIndexedModel(BaseModel):
         self._array_size = array_size
 
     @cached_property
-    def tag_list(self) -> Iterable[str]:
-        return self._index_map.keys()
+    def tag_list(self) -> List[str]:
+        return list(self._index_map.keys())
 
     def to_array(self) -> NDArray[np.float64]:
         # the following combination, from testing, gave the best times

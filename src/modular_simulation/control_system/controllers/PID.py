@@ -65,7 +65,7 @@ class PIDController(Controller):
         # first order approximation of the timec onstant -> filter factor
         # valid enough so whatever. 
         alpha = dt / (dt + self.derivative_filter_tc) 
-        self._filtered_derivative = alpha * error + (1-alpha) * self._last_error
+        self._filtered_derivative = alpha * (error - self._last_error) + (1-alpha) * self._filtered_derivative
         
         # PID control law
         p_term = self.Kp * error

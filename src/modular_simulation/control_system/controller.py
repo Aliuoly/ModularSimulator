@@ -117,7 +117,7 @@ class Controller(BaseModel, ABC):
         control_elements: "ControlElements",
         ) -> None:
         # validation already done during quantity initiation. No error checking here. 
-        for control_element_name in control_elements.__class__.model_fields:
+        for control_element_name in control_elements.model_dump():
             if control_element_name == self.mv_tag:
                 # set the '0 point' value with whatever the measurement is
                 self._u0 = getattr(control_elements, control_element_name)

@@ -42,7 +42,7 @@ class System(BaseModel, ABC):
             are used to generate measurements from the system's state.
         controllable_quantities (ControllableQuantities): Defines the controllers that
             manipulate the system's `ControlElements`.
-        system_constants (Dict[str, Any]): A dictionary of constant parameters for the system.
+        
         solver_options (Dict[str, Any]): A dictionary of options passed directly to
             SciPy's `solve_ivp` function.
         _t (float): The current simulation time.
@@ -126,9 +126,9 @@ class System(BaseModel, ABC):
         if self.record_history:
             # Build history dict and accessors exactly once
             mq = self.measurable_quantities
-            for mq_name in mq.__class__.model_fields.keys():
+            for mq_name in mq.model_dump():
                 mq_obj: BaseIndexedModel = getattr(mq, mq_name)
-                for tag in mq_obj.__class__.model_fields.keys():
+                for tag in mq_obj.model_dump():
                     lst = [] # type:ignore
                     self._history[tag] = lst
                     getter = attrgetter(tag)

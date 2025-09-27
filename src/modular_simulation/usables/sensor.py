@@ -57,7 +57,7 @@ class Sensor(BaseModel, ABC):
         This runs during system initialization.
         Validation is already done so no error handling is placed here. 
         """
-        search_order = list(measurable_quantities.__class__.model_fields.keys())
+        search_order = list(measurable_quantities.model_dump())
         found_owner = None
         
         for category in search_order:

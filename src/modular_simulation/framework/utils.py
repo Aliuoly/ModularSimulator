@@ -40,9 +40,9 @@ def create_system(
     copied_states = deepcopy(initial_states)
     copied_controls = deepcopy(initial_controls)
     copied_algebraic = deepcopy(initial_algebraic)
-    copied_sensors = deepcopy(sensors)
-    copied_calculations = deepcopy(calculations)
-    copied_controllers = deepcopy(controllers)
+    copied_sensors = [deepcopy(s) for s in sensors]
+    copied_calculations = [deepcopy(c) for c in calculations]
+    copied_controllers = [deepcopy(c) for c in controllers]
     copied_constants = deepcopy(system_constants)
 
     measurables = MeasurableQuantities(

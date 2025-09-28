@@ -13,7 +13,7 @@ class BaseIndexedModel(BaseModel):
     """
 
     _index_map: Dict[str, slice] = PrivateAttr()
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra='allow')
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
     
     def model_post_init(self, context):
         # generate _index_map based on the defined fields

@@ -1,6 +1,6 @@
-from typing import Dict, List, Any, TYPE_CHECKING, Iterable
+from typing import Dict, List, TYPE_CHECKING, Iterable
 from pydantic import  PrivateAttr, BaseModel, ConfigDict, Field, model_validator
-from modular_simulation.validation.exceptions import SensorConfigurationError, CalculationConfigurationError, MeasurableConfigurationError
+from modular_simulation.validation.exceptions import SensorConfigurationError, CalculationConfigurationError
 from functools import cached_property
 import warnings
 import logging

@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict
 from modular_simulation.usables import TimeValueQualityTriplet
 from modular_simulation.measurables import ControlElements
 from modular_simulation.control_system.controller import Controller

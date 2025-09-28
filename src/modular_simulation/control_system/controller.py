@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from modular_simulation.usables.sensor import Sensor
     from modular_simulation.usables.calculation import Calculation
 import logging
-import warnings
 logger = logging.getLogger(__name__)
 
 def do_nothing_mv_setter(value):

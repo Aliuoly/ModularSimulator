@@ -1,6 +1,6 @@
-from typing import List, TYPE_CHECKING, Mapping, Dict
+from typing import List, Mapping
 from numpy.typing import NDArray
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, PrivateAttr, ConfigDict
 from modular_simulation.framework.utils import create_system
 from modular_simulation.measurables import States, AlgebraicStates, Constants, ControlElements
 import numpy as np
@@ -86,13 +86,21 @@ class Plant(BaseModel):
                     alg += func(y, u, k, y_map, u_map, k_map, algebraic_map, algebraic_size)
                 return alg
 
+        class AllowExtraS(States):
+            model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
+        class AllowExtraAS(AlgebraicStates):
+            model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
+        class AllowExtraCE(ControlElements):
+            model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
+        class AllowExtraC(Constants):
+            model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
         self._composite_system = create_system(
             dt = self.dt,
             system_class = CompositeSystem,
-            initial_algebraic = AlgebraicStates(**algebraic_states),
-            initial_controls = ControlElements(**control_elements),
-            initial_states = States(**states),
-            system_constants = Constants(**constants), 
+            initial_algebraic = AllowExtraAS(**algebraic_states),
+            initial_controls = AllowExtraCE(**control_elements),
+            initial_states = AllowExtraS(**states),
+            system_constants = AllowExtraC(**constants), 
             sensors = sensors,
             calculations = calculations,
             controllers = controllers,

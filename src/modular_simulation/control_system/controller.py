@@ -69,10 +69,10 @@ class Controller(BaseModel, ABC):
         )
     )
     _is_final_control_element: bool = PrivateAttr(default = True)
-    _sp_getter: Callable[[float], TimeValueQualityTriplet]|None = PrivateAttr(default= None)
-    _cv_getter: Callable[[], TimeValueQualityTriplet]|None = PrivateAttr(default= None)
-    _mv_setter: Callable[[float|NDArray], None]|None = PrivateAttr(default = None)
-    _last_output: TimeValueQualityTriplet | None = PrivateAttr(default = None)
+    _sp_getter: Callable[[float], TimeValueQualityTriplet] = PrivateAttr()
+    _cv_getter: Callable[[], TimeValueQualityTriplet] = PrivateAttr()
+    _mv_setter: Callable[[float|NDArray], None] = PrivateAttr()
+    _last_output: TimeValueQualityTriplet = PrivateAttr()
     _u0: float | NDArray = PrivateAttr(default = 0.)
     _sp_history: List[TimeValueQualityTriplet] = PrivateAttr(default_factory = list)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
@@ -84,13 +84,14 @@ class Controller(BaseModel, ABC):
         ) -> None:
         # validation already done during quantity initiation. No error checking here. 
         for sensor in sensors:
-            if sensor.measurement_tag == self.cv_tag:
+            if sensor.alias_tag == self.cv_tag:
                 self._cv_getter = lambda : sensor._last_value
                 break
         for calculation in calculations:
-            if calculation.output_tag == self.cv_tag:
-                self._cv_getter = lambda : calculation._last_value
-                break
+            for tag in calculation.output_tags:
+                if tag == self.cv_tag:
+                    self._cv_getter = lambda : calculation._last_results[tag]
+                    break
     def _initialize_non_final_control_element_mv_setter(
         self,
         usable_quantities : "UsableQuantities"
@@ -103,11 +104,12 @@ class Controller(BaseModel, ABC):
                 self._mv_setter = do_nothing_mv_setter
                 break
         for calculation in usable_quantities.calculations:
-            if calculation.output_tag == self.mv_tag:
-                # set the '0 point' value with whatever the measurement is
-                self._u0 = calculation._last_value.value
-                self._mv_setter = do_nothing_mv_setter
-                break
+            for tag in calculation.output_tags:
+                if tag == self.mv_tag:
+                    # set the '0 point' value with whatever the measurement is
+                    self._u0 = calculation._last_results[tag].value
+                    self._mv_setter = do_nothing_mv_setter
+                    break
         
         self._last_output = TimeValueQualityTriplet(t = 0, value = self._u0, ok = True)
         

@@ -75,7 +75,7 @@ class PIDController(Controller):
         # account for initial 'zero integral' output
         overflow, underflow = output + self._u0 - self.mv_range[1], output + self._u0 - self.mv_range[0]
         saturated = "No"
-        if overflow > 0:
+        if overflow > 0 and self.Ti != np.inf:
             # we are overflowing the range, reduce integral and output to match upper range
             output -= overflow
             # out = p_term + d_term + i_term
@@ -86,7 +86,7 @@ class PIDController(Controller):
             # limited_integral = integral - overflow * Ti/Kp
             self._integral += -overflow * self.Ti / self.Kp # since overflow > 0, this decreases integral.
             saturated = "Overflow"
-        if underflow < 0:
+        if underflow < 0 and self.Ti != np.inf:
             # we are underflowing the range, increase integral and output to match lower range
             output -= underflow
             self._integral += -underflow * self.Ti / self.Kp #since underflow < 0, this increases integral. 

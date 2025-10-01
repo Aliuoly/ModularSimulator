@@ -23,3 +23,8 @@ class MeasurableConfigurationError(Exception):
       States, Constants, AlgebraicStates, and/or ControlElements, 
       or when the system has no measurables defined (in which case, there is no system)
     """
+
+class CalculationDefinitionError(Exception):
+    """
+    Raised when a subclass definition does not satisfy requirements. 
+    """

@@ -9,20 +9,8 @@ from modular_simulation.framework.system import System
 from modular_simulation.usables import Calculation
 
 
-class VanDeVusseStateMap(Enum):
-    """Mapping from state names to indices in the state array."""
-
-    Ca = 0
-    Cb = 1
-    T = 2
-    Tk = 3
-
-
 class VanDeVusseStates(States):
     """Differential state variables for the Van de Vusse CSTR."""
-
-    model_config = ConfigDict(extra="forbid")
-    StateMap: ClassVar = VanDeVusseStateMap
 
     Ca: float = Field(description="Concentration of A in the reactor [mol/L]")
     Cb: float = Field(description="Concentration of B in the reactor [mol/L]")
@@ -63,7 +51,8 @@ class VanDeVusseConstants(Constants):
 
 class HeatDutyCalculation(Calculation):
     """Calculate the instantaneous heat duty transferred between jacket and reactor."""
-
+    kw: float
+    area: float
     def _calculation_algorithm(
         self,
         t: float,
@@ -72,7 +61,7 @@ class HeatDutyCalculation(Calculation):
         Tk = inputs_dict["Tk"]
         T = inputs_dict["T"]
 
-        heat_duty = inputs_dict["kw"] * inputs_dict["area"] * (Tk - T)
+        heat_duty = self.kw * self.area * (Tk - T)
         return heat_duty
 
 

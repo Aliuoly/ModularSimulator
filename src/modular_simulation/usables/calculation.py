@@ -1,19 +1,30 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, TYPE_CHECKING
+from typing import Callable, Dict, List, TYPE_CHECKING, Any, Annotated
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+import numpy as np
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, BeforeValidator
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
 if TYPE_CHECKING:
     from modular_simulation.quantities.usable_quantities import UsableQuantities
     
+def ensure_list(value: Any) -> Any:  
 
-
-
+    if not isinstance(value, list):  
+        return [value]
+    else:
+        return value
+    
 class Calculation(BaseModel, ABC):
-
-    output_tag: str = Field(
+    #TODO: change it such that fields are defined for inputs rather than
+    #    relying on a list of inputs. 
+    """
+    constants are to be defined as subclass attributes so as to be accessible by attribute 
+    lookup in the _calculation_algorithm implementation. 
+    tags are expected to match exactly in the calculation algorithm and in the input tags list. 
+    """
+    output_tags: Annotated[List[str], BeforeValidator(ensure_list)] = Field(
         ...,
-        description = "tag of the calculation's output. Must be unique."
+        description = "tags of the calculation's output. Must be unique."
     )
     measured_input_tags: List[str] = Field(
         default_factory = list,
@@ -23,23 +34,23 @@ class Calculation(BaseModel, ABC):
         default_factory = list,
         description = "list of tags corresponding to calculations that are inputs to this calculation."
     )
-    constants: Dict[str, float] = Field(
-        default_factory = dict,
-        description = (
-            "dictionary of constants that are used in this calculation. Do not get this confused with "
-            "system constants defined in measurable_quantities - those are true system constants, while "
-            "these are 'known' system constants to be used in user calculations, which may or may not be system-accurate."
-        )
+    name: str | None = Field(
+        default = None,
+        description = "Name of the calculation - optional."
     )
 
-    _last_value: TimeValueQualityTriplet = PrivateAttr()
-    _input_getters: Dict[str, Callable[[], TimeValueQualityTriplet]] | None = PrivateAttr(default=None)
+    _last_results: Dict[str, TimeValueQualityTriplet] = PrivateAttr()
+    _input_getters: Dict[str, Callable[[], TimeValueQualityTriplet]] = PrivateAttr(default_factory=dict)
     _last_input_triplet_dict: Dict[str, TimeValueQualityTriplet] = PrivateAttr(default_factory=dict)
     _last_input_value_dict: Dict[str, float | NDArray] = PrivateAttr(default_factory=dict)
-    _history: List[TimeValueQualityTriplet] = PrivateAttr(default_factory = list)
+    _history: Dict[str, List[TimeValueQualityTriplet]] = PrivateAttr(default_factory = dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    def model_post_init(self, context:Any):
+        if self.name is None:
+            self.name = self.__class__.__name__
+    
     def _initialize(
             self,
             usable_quantities: "UsableQuantities"
@@ -56,22 +67,26 @@ class Calculation(BaseModel, ABC):
         # 1. look in sensors for measured tags
         for tag in self.measured_input_tags:
             for sensor in sensors:
-                if sensor.measurement_tag == tag:
+                if sensor.alias_tag == tag: # use the alias tag in case it is different from the raw measurement tag
                     self._input_getters[tag] = lambda sensor=sensor: sensor._last_value #type: ignore
 
-            
         # 2. look in calculations for calculated tags
         for tag in self.calculated_input_tags:
             for calculation in calculations:
-                if calculation.output_tag == tag:
-                    self._input_getters[tag] = lambda calculation=calculation: calculation._last_value #type: ignore
-    
+                for output_tag in calculation.output_tags:
+                    if output_tag == tag:
+                        self._input_getters[tag] = (
+                            lambda calculation=calculation, output_tag=output_tag: # type: ignore
+                                calculation._last_results[output_tag]              
+                        )
+        for tag in self.output_tags:
+            self._history[tag] = []
+            
     def _update_input_triplets(self) -> None:
         triplet_dict = self._last_input_triplet_dict
-        if self._input_getters is not None:
-            for tag_name, tag_getter in self._input_getters.items():
-                triplet_dict[tag_name] = tag_getter()
-        else:
+        for tag_name, tag_getter in self._input_getters.items():
+            triplet_dict[tag_name] = tag_getter()
+        if len(triplet_dict) == 0:
             raise RuntimeError(
                 "Calculation is not initialized. Make sure you used the create_system function to define your system. "
             )
@@ -81,8 +96,6 @@ class Calculation(BaseModel, ABC):
         value_dict = self._last_input_value_dict
         for tag_name, triplet in self._last_input_triplet_dict.items():
             value_dict[tag_name] = triplet.value
-        for constant_name, constant in self.constants.items():
-            value_dict[constant_name] = constant
         return self._last_input_value_dict
 
     @property
@@ -106,14 +119,20 @@ class Calculation(BaseModel, ABC):
         """public facing method to get the calculation result"""
         self._update_input_triplets()
         self._update_input_values()
-        result = self._calculation_algorithm(
+        results = self._calculation_algorithm(
             t=t,
             inputs_dict=self._last_input_value_dict,
         )
-        result_triplet = TimeValueQualityTriplet(t = t, value = result, ok = self.ok)
-        self._last_value = result_triplet
-        self._history.append(result_triplet)
-        return result_triplet
+        result_triplets = {}
+        
+        for i, result in enumerate(np.atleast_1d(results)):
+            tag = self.output_tags[i]
+            triplet = TimeValueQualityTriplet(t = t, value = result, ok = self.ok)
+            result_triplets[tag] = triplet
+            self._history[tag].append(triplet)
+        self._last_results = result_triplets
+        return result_triplets
 
-    def history(self) -> List[TimeValueQualityTriplet]:
+    @property
+    def history(self) -> Dict[str, List[TimeValueQualityTriplet]]:
         return self._history.copy()

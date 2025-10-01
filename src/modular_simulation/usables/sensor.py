@@ -15,7 +15,14 @@ class Sensor(BaseModel, ABC):
         ...,
         description = "tag of the state or control element to measure."
         )
-    
+    alias_tag: str|None = Field(
+        default = None,
+        description = (
+            "alias of the measurement to be used when the sensor returns results."
+            "e.g., if measurement_tag was 'cumm_MI' and alias tag was 'lab_MI', "
+            "then, a usable with tag 'lab_MI' will be available, while 'cumm_MI' would not be available."
+        )
+    )
     coefficient_of_variance: float = Field(
         default = 0.0,
         description = (
@@ -49,6 +56,8 @@ class Sensor(BaseModel, ABC):
 
     def model_post_init(self, context: Any) -> None:
         self._rng = np.random.default_rng(self.random_seed)
+        if self.alias_tag is None:
+            self.alias_tag = self.measurement_tag
 
     def _initialize(self, measurable_quantities: "MeasurableQuantities") -> None:
         """
@@ -150,5 +159,6 @@ class Sensor(BaseModel, ABC):
         
         return noisy_value, False
 
+    @property
     def measurement_history(self) -> List[TimeValueQualityTriplet]:
         return self._history.copy()

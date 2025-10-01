@@ -6,6 +6,7 @@ from modular_simulation.quantities import UsableQuantities
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 from pydantic import BaseModel, model_validator, Field, PrivateAttr
 from textwrap import dedent
+import warnings
 
 class ControllableQuantities(BaseModel):
     """Container for the controllers acting on the system's control elements."""
@@ -49,11 +50,9 @@ class ControllableQuantities(BaseModel):
                 check_and_append_inplace(controller.mv_tag, seen_mv_tags, duplicate_mv_tags)
 
         if len(duplicate_cv_tags) > 0:
-            exception_group.append(
-                ControllerConfigurationError(
-                    "The following controlled variables were subject to control by multiple controllers: "
-                    f"{', '.join(duplicate_cv_tags)}."
-                )
+            warnings.warn(
+                "The following controlled variables were subject to control by multiple controllers: "
+                f"{', '.join(duplicate_cv_tags)}. Verify that this is intentional. "
             )
 
         if len(duplicate_mv_tags) > 0:

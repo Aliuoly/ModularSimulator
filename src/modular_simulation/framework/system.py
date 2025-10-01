@@ -135,6 +135,20 @@ class System(BaseModel, ABC):
                     # capture the object reference and append list ref
                     self._history_slots.append((lambda o=mq_obj, g=getter: g(o), lst)) #type:ignore[misc]
             self._history['time'] = []
+
+        # pre-calculate the algebraic values once to refresh them with current states
+        # and control elements and constants
+        initial_algebraic_array = self._params["algebraic_values_function"](
+            y = self.measurable_quantities.states.to_array(),
+            u = self.measurable_quantities.control_elements.to_array(),
+            k = self._params["k"],
+            y_map = self._params["y_map"],
+            u_map = self._params["u_map"],
+            k_map = self._params["k_map"],
+            algebraic_map = self._params["algebraic_map"],
+            algebraic_size = self._params["algebraic_size"]
+        )
+        self.measurable_quantities.algebraic_states.update_from_array(initial_algebraic_array)
     
     def _construct_fast_params(self) -> None:
         """
@@ -327,8 +341,8 @@ class System(BaseModel, ABC):
         """
         show_progress = False
         if nsteps > 1:
-            if logger.level == logging.INFO:
-                # dont show progress bar if we are in debug mode. 
+            if logger.level == logging.NOTSET:
+                # dont show progress bar if we are logging.
                 show_progress = self.show_progress
             
         if not isinstance(nsteps, int):
@@ -434,10 +448,11 @@ class System(BaseModel, ABC):
         }
 
         for sensor in self.usable_quantities.sensors:
-            sensors_detail[sensor.measurement_tag] = sensor.measurement_history()
+            # use alias_tag for when it is different from measurement_tag
+            sensors_detail[sensor.alias_tag] = sensor.measurement_history
 
         for calculation in self.usable_quantities.calculations:
-            calculations_detail[calculation.output_tag] = calculation.history()
+            calculations_detail.update(calculation.history)
 
         return history
 

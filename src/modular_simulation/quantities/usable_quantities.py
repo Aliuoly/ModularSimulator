@@ -46,7 +46,7 @@ class UsableQuantities(BaseModel):
         available_measurement_tags = self.measurable_quantities.tag_list
         defined_calculation_tags = []
         for c in self.calculations:
-            defined_calculation_tags.extend(c.output_tags)
+            defined_calculation_tags.extend(c._output_tags)
         seen_measurement_tags = []
         seen_alias_tags = []
         seen_calculation_tags = []
@@ -95,12 +95,12 @@ class UsableQuantities(BaseModel):
         #       either measurements (through sensors) or calculations
         defined_alias_tags = [s.alias_tag for s in self.sensors]
         for calculation in self.calculations:
-            for tag in calculation.output_tags:
+            for tag in calculation._output_tags:
                 if tag in defined_alias_tags:
                     duplicate_calculation_tags_in_sensors.append(tag)    
                 if tag in seen_calculation_tags:
                     duplicate_calculation_tags_in_calculations.append(tag)
-                meas_input_tags = calculation.measured_input_tags
+                meas_input_tags = calculation._measured_input_tags
                 missing_tags = [meas_tag for meas_tag in meas_input_tags if meas_tag not in defined_alias_tags]
                 if len(missing_tags) > 0:
                     exception_group.append(
@@ -109,7 +109,7 @@ class UsableQuantities(BaseModel):
                             f"is not available: {', '.join(missing_tags)}. "
                         )
                     )
-                calc_input_tags = calculation.calculated_input_tags
+                calc_input_tags = calculation._calculated_input_tags
                 missing_tags = [calc_tag for calc_tag in calc_input_tags if calc_tag not in defined_calculation_tags]
                 if len(missing_tags) > 0:
                     exception_group.append(
@@ -191,7 +191,7 @@ class UsableQuantities(BaseModel):
     def tag_list(self) -> Iterable[str]:
         return_list = [s.alias_tag for s in self.sensors]
         for c in self.calculations:
-            return_list.extend(c.output_tags)
+            return_list.extend(c._output_tags)
         return return_list
 
 

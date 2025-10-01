@@ -59,8 +59,10 @@ class BaseIndexedModel(BaseModel):
     def update_from_array(self, array: NDArray[np.float64]) -> None:
         """updates the class in place using the provided array."""
         for field_name, field_index in self._index_map.items():
+            if field_index.start == field_index.stop - 1:
+                setattr(self, field_name, array[field_index][0])
+                continue
             setattr(self, field_name, array[field_index])
-
 class ControlElements(BaseIndexedModel):
     """
     Base container class for control elements.

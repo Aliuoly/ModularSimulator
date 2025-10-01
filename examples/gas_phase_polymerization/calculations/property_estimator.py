@@ -2,7 +2,13 @@ import numpy as np
 from typing import Literal, Dict, Tuple, Deque
 from numpy.typing import NDArray
 from pydantic import Field, PrivateAttr
-from modular_simulation.usables import Calculation
+from modular_simulation.usables import (
+    Calculation, 
+    Constant, 
+    CalculatedTag, 
+    MeasuredTag, 
+    OutputTag
+)
 import collections
 
 
@@ -36,26 +42,42 @@ class PropertyEstimator(Calculation):
         3. instantaneous density ("inst_density")
         4. cummulative density ("cumm_density")
 
+    
     """
-    MI_model_parameters:NDArray = Field(
+    inst_MI_tag: OutputTag
+    inst_density_tag: OutputTag
+    cumm_MI_tag: OutputTag
+    cumm_density_tag: OutputTag
+
+    mass_prod_rate_tag: MeasuredTag
+    lab_MI_tag: MeasuredTag
+    lab_density_tag: MeasuredTag
+    
+    rM2_tag: CalculatedTag
+    rH2_tag: CalculatedTag
+    residence_time_tag: CalculatedTag
+
+    MI_model_parameters: Constant = Field(
         default_factory = lambda: np.array([0.26884, 0.10955, 4.29082, 0.46542])
     )
-    density_model_parameters:NDArray = Field(
+    density_model_parameters: Constant = Field(
         default_factory = lambda: np.array([0.96287, 0.00170, 0.00097, 0.38550])
     )
-    MI_meas_rel_noise: float = 0.3/2/3 # +- 0.2 when at value of 2 / 3 to get std
-    density_meas_rel_noise: float = 3/918/3 # +- 2 when at value of 918, /3 to get std
-    MI_model_rel_noise: float = 1e-2 #these are assumed uncertainty (stdev) in the inst. models
-    density_model_rel_noise: float = 1e-2 # same as above
-    a1_variance: float = (1e-3)**2 # absolute variance
-    a2_variance: float = (1e-4)**2
+    MI_meas_rel_noise: Constant = 0.3/2/3 # +- 0.2 when at value of 2 / 3 to get std
+    density_meas_rel_noise: Constant = 3/918/3 # +- 2 when at value of 918, /3 to get std
+    MI_model_rel_noise: Constant = 1e-2 #these are assumed uncertainty (stdev) in the inst. models
+    density_model_rel_noise: Constant = 1e-2 # same as above
+    a1_variance: Constant = (1e-3)**2 # absolute variance
+    a2_variance: Constant = (1e-4)**2
 
     # some initial internal states
-    P: NDArray[np.float64] = Field(
+    P: Constant = Field(
         default_factory = lambda :  np.array(np.diag([(2.0*0.00001)**2, (918*0.00001)**2, (1e-2)**2, (1e-2)**2]))
         ) # initial variance estimate, 10% for MI, 10% for density, 0.1 for a1 and a2
-    cumm_MI: float = 2.0
-    cumm_density: float = 918.0
+    cumm_MI: Constant = 2.0
+    cumm_density: Constant = 918.0
+
+    
 
     _lab_MI_last: float = PrivateAttr()
     _lab_density_last: float = PrivateAttr()
@@ -85,22 +107,28 @@ class PropertyEstimator(Calculation):
         self, 
         t: float, 
         inputs_dict: Dict[str, float | NDArray]
-        ) -> float | NDArray:
+        ) -> Dict[str, float]:
 
-        prod_rate = inputs_dict["mass_prod_rate"]
-        tau = inputs_dict["residence_time"] # in hours
-        rM2 = inputs_dict["rM2"]
-        rH2 = inputs_dict["rH2"]
-        lab_MI_val = float(inputs_dict["lab_MI"])
-        lab_density_val = float(inputs_dict["lab_density"])
+        prod_rate = inputs_dict[self.mass_prod_rate_tag]
+        tau = inputs_dict[self.residence_time_tag] # in hours
+        rM2 = inputs_dict[self.rM2_tag]
+        rH2 = inputs_dict[self.rH2_tag]
+        lab_MI_val = float(inputs_dict[self.lab_MI_tag])
+        lab_density_val = float(inputs_dict[self.lab_density_tag])
         # alittle special here, to avoid adding trivial calculations,
         # I am going to reach into the triplet dictionary and grab the 
         # time stamp of the lab sampling times
-        lab_MI_sample_time = float(self._last_input_triplet_dict["lab_MI"].t)
-        lab_density_sample_time = float(self._last_input_triplet_dict["lab_density"].t)
+        lab_MI_sample_time = float(self._last_input_triplet_dict[self.lab_MI_tag].t)
+        lab_density_sample_time = float(self._last_input_triplet_dict[self.lab_density_tag].t)
         if prod_rate < 5:
             cumm_MI_placeholder, cumm_density_placeholder = self.compute_yhat(self._x).flatten()
-            return np.array([cumm_MI_placeholder, cumm_MI_placeholder, cumm_density_placeholder, cumm_density_placeholder])
+            return_dict = {
+                self.inst_MI_tag: cumm_MI_placeholder,
+                self.inst_density_tag: cumm_density_placeholder,
+                self.cumm_MI_tag: cumm_MI_placeholder,
+                self.cumm_density_tag: cumm_density_placeholder,
+            }
+            return return_dict
         # 1. obtain model inputs and append to input queue
         
         dt = (t - self._t_last_call) / 3600. # convert to hours
@@ -178,11 +206,17 @@ class PropertyEstimator(Calculation):
                 # update EKF state estimates (calculate posterior) at time of sample
                 EKF_hist = self._improve_EKF(EKF_hist, y, sample = sorted_samples[i])
                 # repropagate up until current time, with the current state estimates as output
-                inst_MI_est, inst_density_est, cumm_MI_est, cumm_density_est = self._propagate_EKF(EKF_hist, u_i)
+                inst_MI_est, cumm_MI_est, inst_density_est, cumm_density_est = self._propagate_EKF(EKF_hist, u_i)
             
         #5. return estimation results
         assert len(self._EKF_q) == len(self._u_q), "Buffers are misaligned!"
-        return np.array([inst_MI_est, inst_density_est, cumm_MI_est, cumm_density_est])
+        return_dict = {
+            self.inst_MI_tag: inst_MI_est,
+            self.inst_density_tag: inst_density_est,
+            self.cumm_MI_tag: cumm_MI_est,
+            self.cumm_density_tag: cumm_density_est,
+        }
+        return return_dict
 
     def _improve_EKF(self, EKF_hist: tuple, y: NDArray[np.float64], sample = Literal['both','MI','density']):
         Hmask = np.zeros((2,4))

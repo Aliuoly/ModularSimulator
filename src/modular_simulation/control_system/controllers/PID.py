@@ -71,9 +71,8 @@ class PIDController(Controller):
         p_term = self.Kp * error
         i_term = self.Kp / self.Ti * self._integral
         d_term = self.Kp * self.Td / dt * self._filtered_derivative
-        output = p_term + i_term + d_term
-        # account for initial 'zero integral' output
-        overflow, underflow = output + self._u0 - self.mv_range[1], output + self._u0 - self.mv_range[0]
+        output = p_term + i_term + d_term + self._u0 # initial setpoint u0 accounted for in PID
+        overflow, underflow = output - self.mv_range[1], output - self.mv_range[0]
         saturated = "No"
         if overflow > 0 and self.Ti != np.inf:
             # we are overflowing the range, reduce integral and output to match upper range
@@ -97,7 +96,7 @@ class PIDController(Controller):
             # and from the decimal point another space is taken. thus, need at least 6 + decimal place many spaces
             # so leave 5 spaces free. e.g., %6.1e is ok, since max space = 6, use 1 for decimal, 4 for scientific notation, 1 for sign
             "%-12.12s PID | sat=%-10.10s t=%8.1f cv=%8.2f sp=%8.2f err=%10.2e P=%10.2e I=%10.2e D=%10.2e out=%8.2f",
-            self.cv_tag, saturated, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, output + self._u0,
+            self.cv_tag, saturated, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, output,
         )
         # Ensure output is non-negative (e.g., flow rate can't be negative)
         self._last_error = error

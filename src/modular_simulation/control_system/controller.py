@@ -8,16 +8,39 @@ from pydantic import BaseModel, PrivateAttr, Field, ConfigDict
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
 from modular_simulation.control_system.trajectory import Trajectory
 if TYPE_CHECKING:
-    from modular_simulation.quantities.usable_quantities import UsableQuantities
-    from modular_simulation.measurables import ControlElements
     from modular_simulation.usables.sensor import Sensor
     from modular_simulation.usables.calculation import Calculation
+    from modular_simulation.quantities.usable_quantities import UsableQuantities
+    from modular_simulation.measurables import ControlElements
 import logging
 logger = logging.getLogger(__name__)
 
 def do_nothing_mv_setter(value):
     pass
 
+def make_mv_setter(control_elements, tag):
+    def mv_setter(value):
+        setattr(control_elements, tag, value)
+    return mv_setter
+
+def make_cv_getter_from_sensor(sensor: "Sensor"):
+    def cv_getter():
+        return sensor._last_value
+    return cv_getter
+
+def make_cv_getter_from_calculation(calculation: "Calculation", tag: str):
+    def cv_getter():
+        return calculation._last_results[tag]
+    return cv_getter
+
+def wrap_cv_getter_as_sp_getter(cv_getter):
+    """
+    Turns a cv_getter, which takes no arguments, 
+        into a sp_getter, which takes t as argument
+    """
+    def sp_getter(t: float):
+        return cv_getter()
+    return sp_getter
 
 
 class ControllerMode(IntEnum):
@@ -85,12 +108,12 @@ class Controller(BaseModel, ABC):
         # validation already done during quantity initiation. No error checking here. 
         for sensor in sensors:
             if sensor.alias_tag == self.cv_tag:
-                self._cv_getter = lambda : sensor._last_value
+                self._cv_getter = make_cv_getter_from_sensor(sensor)
                 break
         for calculation in calculations:
-            for tag in calculation.output_tags:
+            for tag in calculation._output_tags:
                 if tag == self.cv_tag:
-                    self._cv_getter = lambda : calculation._last_results[tag]
+                    self._cv_getter = make_cv_getter_from_calculation(calculation, self.cv_tag)
                     break
     def _initialize_non_final_control_element_mv_setter(
         self,
@@ -104,7 +127,7 @@ class Controller(BaseModel, ABC):
                 self._mv_setter = do_nothing_mv_setter
                 break
         for calculation in usable_quantities.calculations:
-            for tag in calculation.output_tags:
+            for tag in calculation._output_tags:
                 if tag == self.mv_tag:
                     # set the '0 point' value with whatever the measurement is
                     self._u0 = calculation._last_results[tag].value
@@ -122,7 +145,7 @@ class Controller(BaseModel, ABC):
             if control_element_name == self.mv_tag:
                 # set the '0 point' value with whatever the measurement is
                 self._u0 = getattr(control_elements, control_element_name)
-                self._mv_setter = lambda value : setattr(control_elements, self.mv_tag, value)
+                self._mv_setter = make_mv_setter(control_elements, self.mv_tag)
                 break
         
         self._last_output = TimeValueQualityTriplet(t = 0, value = self._u0, ok = True)
@@ -180,7 +203,7 @@ class Controller(BaseModel, ABC):
             if self.cascade_controller is not None:
                 self.cascade_controller._change_control_mode(ControllerMode.TRACKING, initialization)
         elif mode == ControllerMode.TRACKING:
-            self._sp_getter = lambda t: self._cv_getter() #type:ignore # lambda t just to make the signiture match
+            self._sp_getter = wrap_cv_getter_as_sp_getter(self._cv_getter)
             self.mode = ControllerMode.TRACKING
             # if has cascade controller, it must shed to TRACKING mode now
             if self.cascade_controller is not None:
@@ -273,7 +296,7 @@ class Controller(BaseModel, ABC):
 
         # compute control output
         control_output = self._control_algorithm(t = t, cv = cv.value, sp = sp_val)
-        control_output = np.clip(control_output + self._u0, *self.mv_range)
+        control_output = np.clip(control_output, *self.mv_range)
         ramp_output = self._apply_mv_ramp(
             t0 = self._last_output.t, mv0 = self._last_output.value, mv_target = control_output, t_now = t
             )

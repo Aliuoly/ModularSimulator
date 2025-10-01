@@ -408,7 +408,8 @@ class System(BaseModel, ABC):
         controller = self.controller_dictionary[cv_tag]
         if controller.mode != ControllerMode.AUTO:
             warnings.warn(
-                f"Tried to change trajectory of '{controller.cv_tag}' controller but failed - controller must be in AUTO mode, but is {controller.mode.name}. "
+                f"Tried to change trajectory of '{controller.cv_tag}' controller but failed - "
+                f"controller must be in AUTO mode, but is {controller.mode.name}. "
             )
         active_trajectory = controller.sp_trajectory
         if value is None:

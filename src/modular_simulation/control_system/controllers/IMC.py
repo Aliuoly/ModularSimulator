@@ -57,7 +57,7 @@ class InternalModelController(Controller):
         if isinstance(self.model, CalculationModelPath):
             # look through the available calculations and grab the right one
             for calculation in usable_quantities.calculations:
-                if calculation.name == self.model.calculation_name:
+                if calculation.calculation_name == self.model.calculation_name:
                     self._internal_model = getattr(calculation, self.model.method_name)
                     return 
             # if we didn't return, raise error
@@ -94,5 +94,8 @@ class InternalModelController(Controller):
 
         # --- 3  root‑solve starting from last control action -----------------
         output = minimize_scalar(residual, bounds = self.mv_range).x
-
+        logger.debug(
+            "%-12.12s IMC | t=%8.1f cv=%8.2f sp=%8.2f out=%8.2f, cv_pred_at_out=%8.2f",
+            self.cv_tag, t, cv, sp, output, internal_model(output)
+        )
         return output

@@ -2,12 +2,18 @@ from numpy.typing import NDArray
 import numpy as np
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
-from typing import TYPE_CHECKING, Any, List
+from typing import TYPE_CHECKING, Any, List, Callable
 from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
 
 if TYPE_CHECKING:
     from modular_simulation.quantities import MeasurableQuantities
     from modular_simulation.measurables.base_classes import BaseIndexedModel
+
+def make_measurement_getter(object: "BaseIndexedModel", tag: str) -> Callable[[], float|NDArray]:
+    def measurement_getter() -> float | NDArray:
+        return getattr(object, tag)
+    return measurement_getter
+
 
 class Sensor(BaseModel, ABC):
 
@@ -48,12 +54,11 @@ class Sensor(BaseModel, ABC):
 
     _rng: np.random.Generator = PrivateAttr()
     _last_value: TimeValueQualityTriplet | None = PrivateAttr(default = None)
-    _measurement_owner: "BaseIndexedModel" = PrivateAttr()
     _initialized: bool = PrivateAttr(default = False)
     _history: List["TimeValueQualityTriplet"] = PrivateAttr(default_factory = list)
-    
+    _measurement_getter: Callable[[], float | NDArray] = PrivateAttr()
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
+    
     def model_post_init(self, context: Any) -> None:
         self._rng = np.random.default_rng(self.random_seed)
         if self.alias_tag is None:
@@ -67,38 +72,30 @@ class Sensor(BaseModel, ABC):
         Validation is already done so no error handling is placed here. 
         """
         search_order = list(measurable_quantities.model_dump())
-        found_owner = None
         
         for category in search_order:
             owner = getattr(measurable_quantities, category)
             if owner is not None and hasattr(owner, self.measurement_tag):
-                found_owner = owner
-                break
-        # Store raw pieces
-        self._measurement_owner = found_owner
+                self._measurement_getter = make_measurement_getter(owner, self.measurement_tag)
+                self._initialized = True
+                return
 
     # --- Template Method ---
     def measure(self, t: float) -> TimeValueQualityTriplet:
         """
         Public method that defines the complete measurement algorithm.
         """
-
+        if not self._initialized:
+            raise RuntimeError(
+                "Tried to call 'measure' before the system orchestrated the various quantities. "
+                "Make sure this sensor is part of a system and the system has been constructed."
+            )
         # 1. Decide if a new measurement should be taken
         if not self._should_update(t) and self._last_value is not None:
             return self._last_value
 
-        # 2. Get the true, raw value from the system. At this point, 
-        #       measurement function is NOT None, so Mypy shut up lol (hence type: ignore)
-        owner = getattr(self, "_measurement_owner", None)
-        if owner is not None:
-            raw_value = getattr(owner, self.measurement_tag)
-        else:
-            measurement_function = getattr(self, "_measurement_function", None)
-            if measurement_function is None:
-                raise AttributeError(
-                    "Sensor must be initialized with a measurement owner before calling measure()."
-                )
-            raw_value = measurement_function()
+        # 2. Get the true, raw value from the system. 
+        raw_value = self._measurement_getter()
 
         # 3. Apply subclass-specific processing (e.g., time delay) to the true value
         processed_value = self._get_processed_value(t = t, raw_value = raw_value)

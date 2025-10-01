@@ -15,8 +15,16 @@ sensors = [
     SampledDelayedSensor(measurement_tag="pressure"),
     SampledDelayedSensor(measurement_tag="bed_weight"),
     SampledDelayedSensor(measurement_tag="mass_prod_rate"),
-    SampledDelayedSensor(measurement_tag="cumm_MI", alias_tag="lab_MI"),
-    SampledDelayedSensor(measurement_tag="cumm_density", alias_tag = "lab_density"),
+    SampledDelayedSensor(
+        measurement_tag="cumm_MI", alias_tag="lab_MI",
+        deadtime = 2 * 3600,
+        sampling_period = 2 * 3600,# 2 hours
+    ),
+    SampledDelayedSensor(
+        measurement_tag="cumm_density", alias_tag = "lab_density",
+        deadtime = 2 * 3600,
+        sampling_period = 2 * 3600,# 2 hours
+    ),
     SampledDelayedSensor(measurement_tag="bed_level"),
     SampledDelayedSensor(measurement_tag="F_cat"),
     SampledDelayedSensor(measurement_tag="F_teal"),
@@ -27,34 +35,46 @@ sensors = [
     SampledDelayedSensor(measurement_tag="F_vent"),
     SampledDelayedSensor(measurement_tag="discharge_valve_position"),
 ]
-
 calculations = [
     MoleRatioCalculation(
-        output_tags = ["rM2","rH2"], #!!! order DOES matter, check implementation
-        measured_input_tags = ["yM1","yM2","yH2"]  # order DOES NOT matter here lol
+        rM2_tag = "rM2",
+        rH2_tag = "rH2",
+        yM1_tag = "yM1",
+        yM2_tag = "yM2",
+        yH2_tag = "yH2",
     ),
     Monomer1PartialPressure(
-        output_tags = ["pM1"], 
-        measured_input_tags = ["yM1","pressure"]  # order DOES NOT matter here lol
+        pM1_tag = "pM1", 
+        yM1_tag = "yM1",
+        pressure_tag = "pressure"
     ),
     ResidenceTimeCalculation(
-        output_tags = "residence_time", # auto converts to list if you provide a single string. 
-        measured_input_tags = ["mass_prod_rate", "bed_weight"],  
+        residence_time_tag = "residence_time", 
+        mass_prod_rate_tag = "mass_prod_rate", 
+        bed_weight_tag = "bed_weight",  
     ),
     CatInventoryEstimator(
-        output_tags = "cat_inventory",
-        measured_input_tags = ["F_cat","mass_prod_rate","bed_weight"],  
+        cat_inventory_tag = "cat_inventory",
+        F_cat_tag = "F_cat",
+        mass_prod_rate_tag = "mass_prod_rate",
+        bed_weight_tag = "bed_weight",  
     ),
     AlTiRatioEstimator(
-        output_tags = "Al_Ti_ratio",
-        measured_input_tags = ["F_teal", "F_cat"],
+        AlTi_ratio_tag = "Al_Ti_ratio",
+        F_teal_tag = "F_teal",
+        F_cat_tag = "F_cat",
     ),
     PropertyEstimator(
-        output_tags = ["inst_MI","inst_density","cumm_MI","cumm_density"], #!!! order DOES matter, check implementation
-        measured_input_tags = ["mass_prod_rate","lab_MI","lab_density"],
-        calculated_input_tags = ["residence_time","rM2","rH2"], 
+        inst_MI_tag = "inst_MI",
+        inst_density_tag = "inst_density",
+        cumm_MI_tag = "cumm_MI",
+        cumm_density_tag = "cumm_density",
+        mass_prod_rate_tag = "mass_prod_rate",
+        lab_MI_tag = "lab_MI",
+        lab_density_tag = "lab_density",
+        residence_time_tag = "residence_time",
+        rM2_tag = "rM2",
+        rH2_tag = "rH2", 
         # rest keep default for now
     )
 ]
-
-controllers = []

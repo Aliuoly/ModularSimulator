@@ -40,7 +40,7 @@ class FirstOrderTrajectoryController(Controller):
                     return
 
             for calculation in usable_quantities.calculations:
-                for output_tag in calculation.output_tags:
+                for output_tag in calculation._output_tags:
                     if output_tag == self.open_loop_time_constant:
                         self._get_open_loop_tc = lambda c = calculation: c._last_results[output_tag].value
                         return

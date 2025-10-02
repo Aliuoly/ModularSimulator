@@ -1,7 +1,12 @@
 
 from modular_simulation.control_system.controller import Controller
 from modular_simulation.measurables import ControlElements, States
-from modular_simulation.usables import Sensor, Calculation
+from modular_simulation.usables import (
+    Sensor,
+    Calculation,
+    MeasuredTag,
+    OutputTag,
+)
 
 
 class ErrorEchoController(Controller):
@@ -33,7 +38,15 @@ class DummySensor(Sensor):
         return True # always update
     
 class AddAllCalculation(Calculation):
+    output_tag: OutputTag
+
+    mv1_tag: MeasuredTag
+    mv2_tag: MeasuredTag
+    cv1_tag: MeasuredTag
+    cv2_tag: MeasuredTag
+
     def _calculation_algorithm(self, t, inputs_dict):
-        return sum(inputs_dict.values())
+        result = sum(inputs_dict.values())
+        return {self.output_tag: result}
 
     

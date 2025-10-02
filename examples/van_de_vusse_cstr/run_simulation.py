@@ -58,14 +58,15 @@ def make_systems():
         SampledDelayedSensor(measurement_tag="Tj_in", sampling_period=0.1),
     ]
 
-    calculations: List["Calculation"] = [ #type:ignore
+    calculations: List["Calculation"] = [  # type: ignore[var-annotated]
         HeatDutyCalculation(
-            output_tags=["Qk"],
-            measured_input_tags=["Tk", "T"],
+            heat_duty_tag="Qk",
+            Tk_tag="Tk",
+            T_tag="T",
             # just gonna use real system constants here.
-            # however, you can really make them anything - fit from data, etc. 
-            area = system_constants.AR,
-            kw = system_constants.kw,
+            # however, you can really make them anything - fit from data, etc.
+            area=system_constants.AR,
+            kw=system_constants.kw,
         )
     ]
 

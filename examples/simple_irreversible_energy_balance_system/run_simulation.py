@@ -140,9 +140,9 @@ def make_systems():
         system_constants=system_constants,
         use_numba=True
     )
-    return {'normal': system , 'numba': numba_system}
+    return {"normal": system, "fast": numba_system}
 
-def plot(system):
+def plot(name, system):
     history = system.measured_history
     sensor_hist = history["sensors"]
     sp_hist = system.setpoint_history
@@ -279,6 +279,11 @@ def plot(system):
         plt.legend()
 
     plt.tight_layout()
+
+
+systems = make_systems()
+normal_system = systems["normal"]
+fast_system = systems["fast"]
     
 
 
@@ -291,7 +296,7 @@ if __name__ == "__main__":
 
     for j, (name, system) in enumerate(systems.items()):
         system.step(nsteps = 2000)
-        plot(system)
+        plot(name, system)
     
     plt.show()
 

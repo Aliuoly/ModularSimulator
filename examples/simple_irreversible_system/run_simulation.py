@@ -118,6 +118,11 @@ def make_systems():
     )
 
     return {"fast": fast_system, "normal": normal_system}
+
+
+systems = make_systems()
+fast_system = systems["fast"]
+normal_system = systems["normal"]
 if __name__ == "__main__":
 
     logging.basicConfig(

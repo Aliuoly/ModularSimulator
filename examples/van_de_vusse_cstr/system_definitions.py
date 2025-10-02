@@ -6,7 +6,7 @@ from pydantic import ConfigDict, Field
 
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
 from modular_simulation.framework.system import System
-from modular_simulation.usables import Calculation
+from modular_simulation.usables import Calculation, Constant, MeasuredTag, OutputTag
 
 
 class VanDeVusseStates(States):
@@ -51,18 +51,25 @@ class VanDeVusseConstants(Constants):
 
 class HeatDutyCalculation(Calculation):
     """Calculate the instantaneous heat duty transferred between jacket and reactor."""
-    kw: float
-    area: float
+
+    heat_duty_tag: OutputTag
+
+    Tk_tag: MeasuredTag
+    T_tag: MeasuredTag
+
+    kw: Constant
+    area: Constant
+
     def _calculation_algorithm(
         self,
         t: float,
         inputs_dict: Dict[str, float],
-        ) -> float:
-        Tk = inputs_dict["Tk"]
-        T = inputs_dict["T"]
+    ) -> Dict[str, float]:
+        Tk = inputs_dict[self.Tk_tag]
+        T = inputs_dict[self.T_tag]
 
         heat_duty = self.kw * self.area * (Tk - T)
-        return heat_duty
+        return {self.heat_duty_tag: heat_duty}
 
 
 class VanDeVusseSystem(System):

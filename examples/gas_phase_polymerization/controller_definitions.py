@@ -27,7 +27,7 @@ prod_rate_controller = InternalModelController(
         cv_tag = "mass_prod_rate",
         sp_trajectory = Trajectory(0.0).ramp(50, ramprate=10/3600.),
         mv_range = (0.0, 1e9),
-        Kp = 450.,
+        Kp = 250.,
         Ti = 4500.,
         Td = 0.,
     )
@@ -37,9 +37,9 @@ pM1_controller = PIDController(
     cv_tag="pM1",
     sp_trajectory=Trajectory(700.0),
     mv_range=(0.0, 70_000), # kg/h
-    Kp=0.0304*3600*28/1000,
-    Ti=370.0*3600*28/1000,
-    Td=70.0*3600*28/1000,
+    Kp=2.454*3600*28/1000,
+    Ti=270.0*3600*28/1000,
+    Td=0.0*3600*28/1000,
 )
 density_controller = PIDController(
     mv_tag="F_m2",
@@ -48,7 +48,7 @@ density_controller = PIDController(
     mv_range=(0.0, 7_000), #kg/h
     Kp=2.0*3600*56/1000,
     Ti=4500.0*3600*56/1000,
-    Td=90.0*3600*56/1000,
+    Td=0.0*3600*56/1000,
     cascade_controller=InternalModelController(
         mv_tag = "rM2",
         cv_tag = "inst_density",

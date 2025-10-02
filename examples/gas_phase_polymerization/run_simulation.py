@@ -29,7 +29,7 @@ normal_system = create_system(
     controllers=controllers,
 )
 
-normal_system.step(1000)
+normal_system.step(2000)
 history = normal_system.measured_history
 sensor_hist = history["sensors"]
 calculations_hist = history["calculations"]

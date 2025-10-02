@@ -22,14 +22,20 @@ def _make_improper_sensors():
 
 def _make_proper_calculations():
     return [AddAllCalculation(
-        output_tag = "proper_output",
-        measured_input_tags = ["mv1","mv2",'cv1','cv2']
+        output_tag="proper_output",
+        mv1_tag="mv1",
+        mv2_tag="mv2",
+        cv1_tag="cv1",
+        cv2_tag="cv2",
     )]
 
 def _make_improper_calculations():
     return [AddAllCalculation(
-        output_tag = "improper_output",
-        measured_input_tags = ["mv5","cv5"]
+        output_tag="improper_output",
+        mv1_tag="mv5",
+        mv2_tag="mv2",
+        cv1_tag="cv5",
+        cv2_tag="cv2",
     )]
 
 

@@ -101,14 +101,12 @@ class CatInventoryEstimator(Calculation):
         sol = odeint(CatInventoryEstimator.ode_rhs, y0 = [y0], t = [0, dt], args = (fcat, pr, bw), tfirst = True)
         return sol.ravel()[-1]
     
-    def discrete_model(self, F_cat):
-        """discretized, the model is just
-            inventory_new = dt * (u - inventory / bw * pr) + inventory"""
+    def model(self, F_cat):
         pr = self._last_input_value_dict[self.mass_prod_rate_tag] / 3600 # ton/s
         bw = self._last_input_value_dict[self.bed_weight_tag]
         
         dt = 600. # hardcoded 10 minutes from now for now. 
-        return dt * (F_cat - self._inventory / bw * pr) + self._inventory
+        return self.integrate_inventory(self._inventory, F_cat, pr, bw, dt)
 
 
 class AlTiRatioEstimator(Calculation):

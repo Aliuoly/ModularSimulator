@@ -103,6 +103,11 @@ class PropertyEstimator(Calculation):
 
         self._EKF_q.append((0, self._x.copy(), self.P.copy()))
 
+        #print("[INIT] x =", self._x.flatten())
+        #print("[INIT] MI_params =", self.MI_model_parameters)
+        #print("[INIT] density_params =", self.density_model_parameters)
+        #print("[INIT] P =", np.diag(self.P))
+
     def _calculation_algorithm(
         self, 
         t: float, 
@@ -206,7 +211,7 @@ class PropertyEstimator(Calculation):
                 # update EKF state estimates (calculate posterior) at time of sample
                 EKF_hist = self._improve_EKF(EKF_hist, y, sample = sorted_samples[i])
                 # repropagate up until current time, with the current state estimates as output
-                inst_MI_est, cumm_MI_est, inst_density_est, cumm_density_est = self._propagate_EKF(EKF_hist, u_i)
+                inst_MI_est, inst_density_est, cumm_MI_est, cumm_density_est = self._propagate_EKF(EKF_hist, u_i)
             
         #5. return estimation results
         assert len(self._EKF_q) == len(self._u_q), "Buffers are misaligned!"
@@ -253,6 +258,8 @@ class PropertyEstimator(Calculation):
         EKF_hist = (t_lag, x_lag_plus, P_lag_plus)
         self._EKF_q.append(EKF_hist)
 
+        #print(" Updated MI_params =", self.MI_model_parameters)
+        #print(" Updated density_params =", self.density_model_parameters)
         return EKF_hist
 
     def _propagate_EKF(self, EKF_hist: tuple, u_i: int):
@@ -301,6 +308,7 @@ class PropertyEstimator(Calculation):
             self.P = P.copy()
         self._x = x.copy()
         cumm_MI_est, cumm_density_est = self.compute_yhat(x).flatten()
+        #print(f"MI inst: {inst_MI_est:5.3f}, cumm: {cumm_MI_est:5.3f}; density inst: {inst_density_est:5.1f}, cumm: {cumm_density_est:5.1f}")
         return inst_MI_est, inst_density_est, cumm_MI_est, cumm_density_est
     
     def get_uncertainty(self):

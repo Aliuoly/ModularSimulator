@@ -10,6 +10,8 @@ class BangBangController(Controller):
         until when the measurement goes above HL. 
         Vice versa, will return off_value when measurement goes above HL
          until when the measurement goes below UL.
+        The mv range MUST have off value < on value, but 
+        the default behavior can be INVERTED with the inverted flag.
         """
     deadband: float = Field(
         ...,
@@ -29,7 +31,10 @@ class BangBangController(Controller):
         default = (0., 1.),
         description = "limits assumed to correspond to off (first element) or on (second element)"
     )
-    
+    inverted: bool = Field(
+        default = False,
+        description = "If True, the controller inverts the on/off logic described in the documentation."
+    )
     _cv_filtered: float|None = PrivateAttr(default = None) 
     _state: bool = PrivateAttr(default = False)
 
@@ -51,6 +56,8 @@ class BangBangController(Controller):
             self._state = False # if above high limit, turn OFF controller
         elif self._cv_filtered <= LL:
             self._state = True # if below low limit, turn ON controller
+        if self.inverted:
+            self._state = not self._state
         
         if self._state:
             return self.mv_range[1]

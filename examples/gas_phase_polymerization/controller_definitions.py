@@ -20,7 +20,7 @@ prod_rate_controller = InternalModelController(
     mv_range=(0.0, 20.0),
     model = CalculationModelPath(
         calculation_name = CatInventoryEstimator,
-        method_name = "discrete_model"
+        method_name = "model"
     ),
     cascade_controller = PIDController(
         mv_tag = "cat_inventory",
@@ -37,18 +37,18 @@ pM1_controller = PIDController(
     cv_tag="pM1",
     sp_trajectory=Trajectory(700.0),
     mv_range=(0.0, 70_000), # kg/h
-    Kp=2.454*3600*28/1000,
+    Kp=3.454*3600*28/1000,
     Ti=270.0*3600*28/1000,
-    Td=0.0*3600*28/1000,
+    Td=0,
 )
 density_controller = PIDController(
     mv_tag="F_m2",
     cv_tag="rM2",
     sp_trajectory=Trajectory(0.3),
     mv_range=(0.0, 7_000), #kg/h
-    Kp=2.0*3600*56/1000,
-    Ti=4500.0*3600*56/1000,
-    Td=0.0*3600*56/1000,
+    Kp=55.0*3600*56/1000,
+    Ti=35.0*3600*56/1000,
+    Td=0,
     cascade_controller=InternalModelController(
         mv_tag = "rM2",
         cv_tag = "inst_density",
@@ -73,9 +73,9 @@ MI_controller = PIDController(
     cv_tag="rH2",
     sp_trajectory=Trajectory(0.0),
     mv_range=(0., 15), #kg/h
-    Kp=56.0*3600*2/1000,
-    Ti=74870.0*3600*2/1000,
-    Td=0.0*3600*2/1000,
+    Kp=26.0*3600*2/1000,
+    Ti=748.0*3600*2/1000,
+    Td=0,
     cascade_controller=InternalModelController(
         mv_tag = "rH2",
         cv_tag = "inst_MI",
@@ -124,13 +124,14 @@ over_pressure_controller = PIDController(
     Td=0.0,
     inverted=True,
 )
-discharge_level_controller = BangBangController(
+discharge_level_controller = BangBangController( 
     mv_tag="discharge_valve_position",
     cv_tag="bed_level",
     sp_trajectory=Trajectory(15.0), #m
     deadband = 0.1,
-    mv_range = (0.0, 1.0),
+    mv_range = (0.0, 1.0), 
     alpha = 0.4,
+    inverted = True,
 )
 
 

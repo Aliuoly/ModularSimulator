@@ -70,4 +70,11 @@ class FirstOrderTrajectoryController(Controller):
 
         # e.g. cv = 0, sp = 1, dt = 1, tc = 4, desired tc = 1 -> alpha = 0.2, desired_alpha = 0.5
         # desired_next_value = 0.5, output = (0.5 - 0.8 * 0) / 0.2 = 2.5 -> next value = 0.2*2.5 + 0.8 * 0 = 0.5
-        return (desired_next_value - (1-alpha) * cv) / dt
+        output = (desired_next_value - (1-alpha) * cv) / alpha
+        expected_next_value = alpha * output + (1-alpha) * cv
+        logger.debug(
+            "%-12.12s FOTC | t=%8.1f cv=%8.2f sp=%8.2f out=%8.2f, cv_pred_at_out=%8.2f",
+            self.cv_tag, t, cv, sp, output, expected_next_value
+        )
+        return output
+    

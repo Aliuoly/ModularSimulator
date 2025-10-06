@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 from modular_simulation.usables.tag_info import TagData
 from modular_simulation.validation.exceptions import CalculationConfigurationError, CalculationDefinitionError
 from modular_simulation.usables.tag_info import TagInfo, TagData
-from astropy.units import UnitBase
+from astropy.units import UnitBase, Unit
 from enum import IntEnum
 if TYPE_CHECKING:
     from modular_simulation.quantities.usable_quantities import UsableQuantities

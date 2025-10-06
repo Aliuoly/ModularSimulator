@@ -123,8 +123,8 @@ class PropertyEstimator(Calculation):
         # alittle special here, to avoid adding trivial calculations,
         # I am going to reach into the triplet dictionary and grab the 
         # time stamp of the lab sampling times
-        lab_MI_sample_time = float(self._last_input_triplet_dict[self.lab_MI_tag].t)
-        lab_density_sample_time = float(self._last_input_triplet_dict[self.lab_density_tag].t)
+        lab_MI_sample_time = float(self._last_input_triplet_dict[self.lab_MI_tag].time)
+        lab_density_sample_time = float(self._last_input_triplet_dict[self.lab_density_tag].time)
         if prod_rate < 5:
             cumm_MI_placeholder, cumm_density_placeholder = self.compute_yhat(self._x).flatten()
             return_dict = {

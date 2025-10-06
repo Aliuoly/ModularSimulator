@@ -17,7 +17,7 @@ The workflow shall be
 4. When instantiating controllers and defining the cv and mv tags, their units are assumed to be
     the unit specified in the sensors and calculations, so no unit needs to be provided here (for now). 
 
-For these to work well, the TimeValueQualityTriplet should now also have a Unit field, or the Value should be a unit
+For these to work well, the TagData should now also have a Unit field, or the Value should be a unit
     aware data type (e.g., using Pint). 
 
 During validation, (say we are using Pint), the unit convertability will be verified. 

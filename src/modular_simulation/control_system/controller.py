@@ -5,12 +5,11 @@ from numpy.typing import NDArray
 import numpy as np
 from enum import IntEnum
 from pydantic import BaseModel, PrivateAttr, Field, ConfigDict
-from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
+from modular_simulation.usables.tag_info import TagData, TagInfo
 from modular_simulation.control_system.trajectory import Trajectory
+from modular_simulation.validation.exceptions import ControllerConfigurationError
+from astropy.units import Quantity, Unit #type: ignore
 if TYPE_CHECKING:
-    from modular_simulation.usables.sensor import Sensor
-    from modular_simulation.usables.calculation import Calculation
-    from modular_simulation.quantities.usable_quantities import UsableQuantities
     from modular_simulation.measurables import ControlElements
 import logging
 logger = logging.getLogger(__name__)
@@ -19,18 +18,28 @@ def do_nothing_mv_setter(value):
     pass
 
 def make_mv_setter(control_elements, tag):
-    def mv_setter(value):
+    def mv_setter(value) -> None:
         setattr(control_elements, tag, value)
     return mv_setter
 
-def make_cv_getter_from_sensor(sensor: "Sensor"):
-    def cv_getter():
-        return sensor._last_value
-    return cv_getter
-
-def make_cv_getter_from_calculation(calculation: "Calculation", tag: str):
-    def cv_getter():
-        return calculation._last_results[tag]
+def make_cv_getter(raw_tag_info: TagInfo, desired_tag_info: TagInfo):
+    if raw_tag_info.unit != desired_tag_info.unit:
+        if raw_tag_info.unit.is_equivalent(desired_tag_info.unit):
+            converter = raw_tag_info.unit.get_converter(desired_tag_info.unit)
+            def cv_getter() -> TagData:
+                return TagData(
+                    raw_tag_info.data.time, 
+                    converter(raw_tag_info.data.value),
+                    raw_tag_info.data.ok
+                )
+            return cv_getter
+        else:
+            raise ControllerConfigurationError(
+                f"Tried to convert tag '{raw_tag_info.tag}' from '{raw_tag_info.unit}' to '{desired_tag_info.unit}' and failed. "
+                "Make sure these units are compatible. "
+            )
+    def cv_getter() -> TagData:
+        return raw_tag_info.data
     return cv_getter
 
 def wrap_cv_getter_as_sp_getter(cv_getter):
@@ -62,7 +71,11 @@ class Controller(BaseModel, ABC):
     sp_trajectory: Trajectory = Field(
         ..., 
         description="A Trajectory instance defining the setpoint (SP) over time.")
-    mv_range: Tuple[float, float] = Field(
+    sp_unit: Unit = Field(
+        ...,
+        description = "unit of the sp provided by sp_trajectory and thus the working unit of cv."
+    )
+    mv_range: Tuple[float | Quantity, float | Quantity] = Field(
         ...,
         description = "Lower and upper bound of the manipulated variable, in that order."
     )
@@ -91,50 +104,70 @@ class Controller(BaseModel, ABC):
             "If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
         )
     )
+    _converted_mv_range_value:Tuple[float, float] = PrivateAttr()
     _is_final_control_element: bool = PrivateAttr(default = True)
-    _sp_getter: Callable[[float], TimeValueQualityTriplet] = PrivateAttr()
-    _cv_getter: Callable[[], TimeValueQualityTriplet] = PrivateAttr()
+    _sp_getter: Callable[[float], TagData] = PrivateAttr()
+    _cv_getter: Callable[[], TagData] = PrivateAttr()
     _mv_setter: Callable[[float|NDArray], None] = PrivateAttr()
-    _last_output: TimeValueQualityTriplet = PrivateAttr()
+    _sp_tag_info: TagInfo = PrivateAttr()
+    _last_output: TagData = PrivateAttr()
     _u0: float | NDArray = PrivateAttr(default = 0.)
-    _sp_history: List[TimeValueQualityTriplet] = PrivateAttr(default_factory = list)
+    _sp_history: List[TagData] = PrivateAttr(default_factory = list)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
 
+    def _make_sp_tag_info_and_mv_range(self, tag_infos: List[TagInfo]):
+        """
+        makes sp tag info AND handles mv_range in case it is a Quantity
+        """
+        for tag_info in tag_infos:
+            if tag_info.tag == self.cv_tag:
+                self._sp_tag_info = TagInfo(
+                    tag = f"{self.cv_tag}.sp", 
+                    unit = tag_info.unit,
+                    description = f"setpoint for {self.cv_tag}"
+                )
+                if type(self.mv_range[0]) is not type(self.mv_range[1]):
+                    raise ControllerConfigurationError(
+                        f"'{self.cv_tag}' controller's mv_range lower and upper bound are not "
+                        "of the same type. Both elements must either be of type float|NDArray "
+                        "or astropy.units.Quantity."
+                    )
+                converted_range = [0., 0.]
+                for i in range(2):
+                    if isinstance(self.mv_range[i], Quantity):
+                        if self.mv_range[i].unit.is_equivalent(tag_info.unit): #type: ignore
+                            converted_range[i] = self.mv_range[i].to(tag_info.unit).value #type: ignore
+                    else:
+                        converted_range[i] = self.mv_range[i]
+
+                self._converted_mv_range_value = tuple(converted_range) #type: ignore
+                return self._sp_tag_info
+        
     def _initialize_cv_getter(
         self,
-        sensors: List["Sensor"],
-        calculations: List["Calculation"],
+        tag_infos: List[TagInfo]
         ) -> None:
         # validation already done during quantity initiation. No error checking here. 
-        for sensor in sensors:
-            if sensor.alias_tag == self.cv_tag:
-                self._cv_getter = make_cv_getter_from_sensor(sensor)
+        for tag_info in tag_infos:
+            if tag_info.tag == self.cv_tag:
+                self._cv_getter = make_cv_getter(
+                    raw_tag_info = tag_info,
+                    desired_tag_info = self._sp_tag_info
+                    )
                 break
-        for calculation in calculations:
-            for tag in calculation._output_tags:
-                if tag == self.cv_tag:
-                    self._cv_getter = make_cv_getter_from_calculation(calculation, self.cv_tag)
-                    break
     def _initialize_non_final_control_element_mv_setter(
         self,
-        usable_quantities : "UsableQuantities"
+        tag_infos : List[TagInfo]
         ) -> None:
         # validation already done during quantity initiation. No error checking here. 
-        for sensor in usable_quantities.sensors:
-            if sensor.measurement_tag == self.mv_tag:
+        for tag_info in tag_infos:
+            if tag_info.tag == self.mv_tag:
                 # set the '0 point' value with whatever the measurement is
-                self._u0 = sensor._last_value.value
+                self._u0 = tag_info.data.value
                 self._mv_setter = do_nothing_mv_setter
                 break
-        for calculation in usable_quantities.calculations:
-            for tag in calculation._output_tags:
-                if tag == self.mv_tag:
-                    # set the '0 point' value with whatever the measurement is
-                    self._u0 = calculation._last_results[tag].value
-                    self._mv_setter = do_nothing_mv_setter
-                    break
         
-        self._last_output = TimeValueQualityTriplet(t = 0, value = self._u0, ok = True)
+        self._last_output = TagData(time = 0, value = self._u0, ok = True)
         
     def _initialize_mv_setter(
         self,
@@ -148,7 +181,7 @@ class Controller(BaseModel, ABC):
                 self._mv_setter = make_mv_setter(control_elements, self.mv_tag)
                 break
         
-        self._last_output = TimeValueQualityTriplet(t = 0, value = self._u0, ok = True)
+        self._last_output = TagData(time = 0, value = self._u0, ok = True)
     
     def change_control_mode(self, mode: ControllerMode | str) -> None:
         """public facing method for changing controller mode"""
@@ -215,7 +248,7 @@ class Controller(BaseModel, ABC):
         # will be provided by the sp_trajectory
     def _initialize(
         self,
-        usable_quantities: "UsableQuantities",
+        tag_infos: List[TagInfo], 
         control_elements: "ControlElements",
         is_final_control_element: bool = True,
         ) -> None:
@@ -225,12 +258,12 @@ class Controller(BaseModel, ABC):
         # A. check if is final control element and initialize mv setter if is
         if not is_final_control_element:
             self._is_final_control_element = False
-            self._initialize_non_final_control_element_mv_setter(usable_quantities)
+            self._initialize_non_final_control_element_mv_setter(tag_infos)
         else:
             self._initialize_mv_setter(control_elements)
         
         # B. initialize cv_getter
-        self._initialize_cv_getter(usable_quantities.sensors, usable_quantities.calculations)
+        self._initialize_cv_getter(tag_infos)
 
         # C. do control mode validation for initialization (i.e., change from cascade to appropriate one if CASCADE not applicable.)
         self._change_control_mode(self.mode, initialization=True)
@@ -244,16 +277,16 @@ class Controller(BaseModel, ABC):
                 logger.debug(f"'{self.cv_tag}' controller not in CASCADE mode -> cascade controller forced to TRACKING. ")
             
             self.cascade_controller._initialize(
-                usable_quantities, 
+                tag_infos, 
                 control_elements, 
                 is_final_control_element=False,
                 )
         
 
-    def update(self, t: float) -> TimeValueQualityTriplet:
+    def update(self, t: float) -> TagData:
 
         # 0. check dt -> if 0, skip all and return _last_output
-        if t - self._last_output.t < 1e-12:
+        if t - self._last_output.time < 1e-12:
             return self._last_output
         # 1. get controlled variable (aka pv). Is always a Triplet
         cv = self._cv_getter()
@@ -277,7 +310,7 @@ class Controller(BaseModel, ABC):
         #       if is not from a cascade controller, is a float or NDArray from sp_trajectory(t)
         sp = self._sp_getter(t)
         
-        if isinstance(sp, TimeValueQualityTriplet):
+        if isinstance(sp, TagData):
             # this means we are in cascade control mode
             # so we go ahead and update trajectory with cascade setpoint
             sp_val = sp.value
@@ -288,7 +321,7 @@ class Controller(BaseModel, ABC):
             sp_val = sp
             proceed = cv.ok
             #setpoint from sp_trajectory quality is always good (user sets it)
-            self._sp_history.append(TimeValueQualityTriplet(t, sp_val, True)) 
+            self._sp_history.append(TagData(t, sp_val, True)) 
         
         # if setpoint or cv quality is bad, skip controller update and return last value
         if not proceed:
@@ -296,15 +329,15 @@ class Controller(BaseModel, ABC):
 
         # compute control output
         control_output = self._control_algorithm(t = t, cv = cv.value, sp = sp_val)
-        control_output = np.clip(control_output, *self.mv_range)
+        control_output = np.clip(control_output, *self._converted_mv_range_value)
         ramp_output = self._apply_mv_ramp(
-            t0 = self._last_output.t, mv0 = self._last_output.value, mv_target = control_output, t_now = t
+            t0 = self._last_output.time, mv0 = self._last_output.value, mv_target = control_output, t_now = t
             )
         if self._is_final_control_element:
             self._mv_setter(ramp_output)
 
         # do misc things like set _last_output, make sp track PV (if TRACKING mode), update sp_trajectory with cascade sp (if CASCADE mode)
-        self._last_output = TimeValueQualityTriplet(t = t, value = ramp_output, ok = True) # TODO: figure out what to do with quality for MV - seems to always be OK.
+        self._last_output = TagData(time = t, value = ramp_output, ok = True) # TODO: figure out what to do with quality for MV - seems to always be OK.
 
         return self._last_output
 

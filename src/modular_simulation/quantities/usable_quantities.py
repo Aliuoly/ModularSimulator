@@ -1,6 +1,7 @@
 from typing import Dict, List, TYPE_CHECKING, Iterable
 from pydantic import  PrivateAttr, BaseModel, ConfigDict, Field, model_validator
-from modular_simulation.validation.exceptions import SensorConfigurationError, CalculationConfigurationError
+from modular_simulation.validation.exceptions import SensorConfigurationError, CalculationConfigurationError, ControllerConfigurationError
+from modular_simulation.usables.tag_info import TagInfo
 from functools import cached_property
 import warnings
 import logging
@@ -8,8 +9,9 @@ from textwrap import dedent
 if TYPE_CHECKING:
     from modular_simulation.usables.sensor import Sensor
     from modular_simulation.usables.calculation import Calculation
+    from modular_simulation.control_system.controller import Controller
     from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
-    from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
+    from modular_simulation.usables.time_value_quality_triplet import TagData
 
 logger = logging.getLogger(__name__)
 
@@ -28,60 +30,65 @@ class UsableQuantities(BaseModel):
     calculations: List["Calculation"] = Field(
         default_factory = list,
     )
+    controllers: List["Controller"] = Field(
+        default_factory = list
+    )
     measurable_quantities: "MeasurableQuantities" = Field(
         ...
     )
 
-    _usable_results: Dict[str, "TimeValueQualityTriplet"] = PrivateAttr(default_factory=dict)
+    _usable_results: Dict[str, "TagData"] = PrivateAttr(default_factory=dict)
+    _tag_infos: List[TagInfo] = PrivateAttr(default_factory=list)
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = 'forbid')
 
+    def model_post_init(self, context):
+        # construct the _tag_infos
+        for sensor in self.sensors:
+            self._tag_infos.append(sensor._tag_info)
+        for calculation in self.calculations:
+            for output_tag_info in calculation._output_tag_infos:
+                self._tag_infos.append(output_tag_info)
+        # controller needs cv info so have to pass in tag_infos
+        for controller in self.controllers:
+            while controller.cascade_controller is not None:
+                self._tag_infos.append(controller._make_sp_tag_info_and_mv_range(self._tag_infos))
+                controller = controller.cascade_controller
+            self._tag_infos.append(controller._make_sp_tag_info_and_mv_range(self._tag_infos))
+
     @model_validator(mode = 'after')
-    def check_duplicate_tags_and_resolvable_sensors(self):
-
+    def _validate(self):
         exception_group = []
-
-        # 1. check for duplicate tags in sensor definitions
-        #    and that each tag exists in measurable quantities
-        available_measurement_tags = self.measurable_quantities.tag_list
-        defined_calculation_tags = []
-        for c in self.calculations:
-            defined_calculation_tags.extend(c._output_tags)
-        seen_measurement_tags = []
-        seen_alias_tags = []
-        seen_calculation_tags = []
-        unavailable_measurement_tags = []
-        duplicate_measurement_tags = []
-        duplicate_alias_tags = []
-        duplicate_calculation_tags_in_sensors = []
-        duplicate_calculation_tags_in_calculations = []
+        exception_group.extend(self._validate_duplicate_tag())
+        exception_group.extend(self._validate_sensors_resolvable())
+        exception_group.extend(self._validate_calculations_resolvable())
         
+        if len(exception_group) > 0:
+            raise ExceptionGroup(
+                "errors encountered during usable quantity instantiation:", 
+                exception_group
+                )
+
+        for sensor in self.sensors:
+            sensor._initialize(self.measurable_quantities)
+        for calculation in self.calculations:
+            calculation._initialize(self._tag_infos)
+        for controller in self.controllers:
+            controller._initialize(self._tag_infos, self.measurable_quantities.control_elements)
+        self.update(t = 0)
+
+        return self
+    
+    def _validate_sensors_resolvable(self):
+        exception_group = []
+        available_measurement_tags = self.measurable_quantities.tag_list
+        unavailable_measurement_tags = []
+
         for sensor in self.sensors:
             measurement_tag = sensor.measurement_tag
-            alias_tag = sensor.alias_tag
-            if measurement_tag in seen_measurement_tags:
-                duplicate_measurement_tags.append(measurement_tag)
-            if alias_tag in seen_alias_tags:
-                duplicate_alias_tags.append(alias_tag)
             if measurement_tag not in available_measurement_tags:
                 unavailable_measurement_tags.append(measurement_tag)
-            seen_measurement_tags.append(measurement_tag)
-            seen_alias_tags.append(alias_tag)
 
-        if len(duplicate_measurement_tags) > 0:
-            exception_group.append(
-                SensorConfigurationError(
-                    "The following duplicate measurement tag(s) found: "
-                    f"{', '.join(duplicate_measurement_tags)}."
-                )
-            )
-        if len(duplicate_alias_tags) > 0:
-            exception_group.append(
-                SensorConfigurationError(
-                    "The following duplicate measurement alias tag(s) found: "
-                    f"{', '.join(duplicate_alias_tags)}."
-                )
-            )
         if len(unavailable_measurement_tags) > 0:
             exception_group.append(
                 SensorConfigurationError(
@@ -89,88 +96,87 @@ class UsableQuantities(BaseModel):
                     f"{', '.join(unavailable_measurement_tags)}."
                 )
             )
-
-        # 2A. check for duplicate tags in calculation definitions
-        # 2B. check that all required input tags in calculation is defined as
-        #       either measurements (through sensors) or calculations
-        defined_alias_tags = [s.alias_tag for s in self.sensors]
-        for calculation in self.calculations:
-            for tag in calculation._output_tags:
-                if tag in defined_alias_tags:
-                    duplicate_calculation_tags_in_sensors.append(tag)    
-                if tag in seen_calculation_tags:
-                    duplicate_calculation_tags_in_calculations.append(tag)
-                meas_input_tags = calculation._measured_input_tags
-                missing_tags = [meas_tag for meas_tag in meas_input_tags if meas_tag not in defined_alias_tags]
-                if len(missing_tags) > 0:
-                    exception_group.append(
-                        CalculationConfigurationError(
-                            f"The following measurement tag(s) required by '{calculation.__class__.__name__}' "
-                            f"is not available: {', '.join(missing_tags)}. "
-                        )
-                    )
-                calc_input_tags = calculation._calculated_input_tags
-                missing_tags = [calc_tag for calc_tag in calc_input_tags if calc_tag not in defined_calculation_tags]
-                if len(missing_tags) > 0:
-                    exception_group.append(
-                        CalculationConfigurationError(
-                            f"The following calculation tag(s) required by '{calculation.__class__.__name__}' "
-                            f"is not available: {', '.join(missing_tags)}. "
-                        )
-                    )
-                seen_calculation_tags.append(tag)
-
-        if len(duplicate_calculation_tags_in_calculations):
-            exception_group.append(
-                CalculationConfigurationError(
-                    "The following duplicate calculation tag(s) found: "
-                    f"{', '.join(duplicate_calculation_tags_in_calculations)}."
-                )
-            )
-        if len(duplicate_calculation_tags_in_sensors) > 0:
-            exception_group.append(
-                CalculationConfigurationError(
-                    "The following calculation tag(s) are also defined as sensor measurement tags: "
-                    f"{', '.join(duplicate_calculation_tags_in_calculations)}."
-                )
-            )
-
-        # 3. raise error if necessary
-        
-        if len(exception_group) > 0:
-            measurement_and_alias_tags = []
-            for sensor in self.sensors:
-                if sensor.alias_tag == sensor.measurement_tag:
-                    measurement_and_alias_tags.append(sensor.measurement_tag)
-                else:
-                    measurement_and_alias_tags.append(f"{sensor.measurement_tag} (alias {sensor.alias_tag})")
-            msg = dedent("""Additional info for the sub-exceptions:
-                Defined measurable tags are: {0}.
-                Defined measured tags are  : {1}.
-                Defined calculated tags are: {2}.
-            """).format(
-                ", ".join(available_measurement_tags),
-                ", ".join(measurement_and_alias_tags),
-                ", ".join(defined_calculation_tags),
-            )
-            raise ExceptionGroup(msg, exception_group)
-        
-        # 4. raise warning if necessary if no errors
-        if len(seen_measurement_tags) == 0:
-            warnings.warn(
-                "No measurement configured. Assuming you want to observe state evolution from some condition. "
-            )
-
-        # 5. initialize sensor and calculations once validated
-        for sensor in self.sensors:
-            sensor._initialize(self.measurable_quantities)
-        for calculation in self.calculations:
-            calculation._initialize(self)
-        self.update(t = 0)
-
-        return self
+        return exception_group
     
-    def update(self, t: float) -> Dict[str, "TimeValueQualityTriplet"]:
+    def _validate_duplicate_tag(self):
+        exception_group = []
+        all_tags = [tag_info.tag for tag_info in self._tag_infos]
+        seen_tags = []
+        duplicate_tags = []
+        for tag in all_tags:
+            if tag in seen_tags:
+                duplicate_tags.append(tag)
+            else:
+                seen_tags.append(duplicate_tags)
+        if len(duplicate_tags) > 0:
+            exception_group.append(
+                SensorConfigurationError(
+                    "The following duplicate tag(s) found: "
+                    f"{', '.join(duplicate_tags)}."
+                )
+            )
+        return exception_group
+    
+    def _validate_calculations_resolvable(self):
+        exception_group = []
+        all_tags = [tag_info.tag for tag_info in self._tag_infos]
+        for calculation in self.calculations:
+            missing_input_tags = []
+            for input_tag_info in calculation._input_tag_infos:
+                if input_tag_info.tag not in all_tags:
+                    missing_input_tags.append(input_tag_info.tag)
+                if len(missing_input_tags) > 0:
+                    exception_group.append(
+                        CalculationConfigurationError(
+                            f"The following input tag(s) required by '{calculation.__class__.__name__}' "
+                            f"are not available: {', '.join(missing_input_tags)}. "
+                        )
+                    )
+        return exception_group
+    
+    def _validate_controllers_resolvable(self):
+        exception_group = []
+        
+        all_tags = [tag_info.tag for tag_info in self._tag_infos]
+        missing_cv_tags = []
+        missing_mv_tags = []
+        for controller in self.controllers:
+            if controller.cv_tag not in all_tags:
+                missing_cv_tags.append(controller.cv_tag)
+            if controller.mv_tag not in all_tags:
+                missing_mv_tags.append(controller.mv_tag)
+        if len(missing_cv_tags) > 0:
+            exception_group.append(
+                ControllerConfigurationError(
+                    "The following controlled variables are not available as either measurements or calculations: "
+                    f"{', '.join(missing_cv_tags)}"
+                )
+            )
+        if len(missing_mv_tags) > 0:
+            exception_group.append(
+                ControllerConfigurationError(
+                    "The following manipulated variables are not available as either measurements or calculations:"
+                    f"{', '.join(missing_mv_tags)}"
+                )
+            )
+        # 3. check that final control element designate controlled variables (i.e., most-inner loops)
+        #       are defined as control elements in the system measurables. 
+        improper_ce_tags = []
+        available_ce_tags = self.measurable_quantities.control_elements.tag_list
+        for tag in [c.mv_tag for c in self.controllers]: # ignoring the cascade controllers, these mvs must be control elements
+            if tag not in available_ce_tags:
+                improper_ce_tags.append(tag)
+        
+        if len(improper_ce_tags) > 0:
+            exception_group.append(
+                ControllerConfigurationError(
+                    "The following controlled variables are not defined as system control elements:"
+                    f"{', '.join(improper_ce_tags)}."
+                )
+            )
+        return exception_group
+    
+    def update(self, t: float) -> None:
         """
         updates the measurements and performs calculations with the latest info.
         Results are automatically linked to the controllers that depend on these 
@@ -181,17 +187,8 @@ class UsableQuantities(BaseModel):
         # It is also faster than callaing dict.update on a newly constructed
         # dictionary made using comprehension.
         for sensor in self.sensors: 
-            self._usable_results[sensor.alias_tag] = sensor.measure(t)
+            sensor.measure(t)
         for calculation in self.calculations:
-            self._usable_results.update(calculation.calculate(t)) # this one returns a dictionary so use .update
-            
-        return self._usable_results
-
-    @cached_property
-    def tag_list(self) -> Iterable[str]:
-        return_list = [s.alias_tag for s in self.sensors]
-        for c in self.calculations:
-            return_list.extend(c._output_tags)
-        return return_list
+            calculation.calculate(t) 
 
 

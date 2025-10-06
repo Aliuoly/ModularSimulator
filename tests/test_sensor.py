@@ -29,6 +29,6 @@ def test_sensor_measurement_history_tracks_samples():
         samples.append(measurement.value)
 
     history = sensor.measurement_history()
-    assert [h.t for h in history] == [float(i) for i in range(5)]
+    assert [h.time for h in history] == [float(i) for i in range(5)]
     assert [h.value for h in history] == samples
     assert [h.ok for h in history] == [True] * 5

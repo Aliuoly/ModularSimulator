@@ -1,5 +1,5 @@
 import numpy as np
-from modular_simulation.usables.sensor import Sensor, TimeValueQualityTriplet
+from modular_simulation.usables.sensor import Sensor, TagData
 import collections
 from numpy.typing import NDArray
 from pydantic import Field, PrivateAttr
@@ -24,7 +24,7 @@ class SampledDelayedSensor(Sensor):
                         "This is how long it takes for new measurements to become available."
     )
 
-    _sample_queue: collections.deque[TimeValueQualityTriplet] = PrivateAttr(default_factory=collections.deque)
+    _sample_queue: collections.deque[TagData] = PrivateAttr(default_factory=collections.deque)
 
         
     def _should_update(self, t: float) -> bool:
@@ -44,7 +44,7 @@ class SampledDelayedSensor(Sensor):
         such as time delays, filtering, etc.
         """
         # process value and append to queue
-        measurement = TimeValueQualityTriplet(t, raw_value)
+        measurement = TagData(t, raw_value)
         self._sample_queue.append(measurement)
 
         # determine the timestamp of the measurement to be returned
@@ -56,7 +56,7 @@ class SampledDelayedSensor(Sensor):
         #   (which was the last available sample with timestamp <= target_t) 
         #       is to be returned. 
         return_sample = self._sample_queue.popleft()
-        while len(self._sample_queue) > 1 and self._sample_queue[0].t <= target_t:
+        while len(self._sample_queue) > 1 and self._sample_queue[0].time <= target_t:
             return_sample = self._sample_queue.popleft()
         # reappend the sample just in case
         self._sample_queue.appendleft(return_sample)

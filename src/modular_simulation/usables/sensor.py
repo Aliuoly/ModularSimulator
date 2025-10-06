@@ -2,8 +2,10 @@ from numpy.typing import NDArray
 import numpy as np
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
-from typing import TYPE_CHECKING, Any, List, Callable
-from modular_simulation.usables.time_value_quality_triplet import TimeValueQualityTriplet
+from typing import TYPE_CHECKING, Any, List, Callable, Optional
+from modular_simulation.usables.time_value_quality_triplet import TagData
+from astropy.units import Unit #type:ignore
+from modular_simulation.usables.tag_info import TagData, TagInfo
 
 if TYPE_CHECKING:
     from modular_simulation.quantities import MeasurableQuantities
@@ -21,13 +23,21 @@ class Sensor(BaseModel, ABC):
         ...,
         description = "tag of the state or control element to measure."
         )
-    alias_tag: str|None = Field(
+    alias_tag: Optional[str] = Field(
         default = None,
         description = (
             "alias of the measurement to be used when the sensor returns results."
             "e.g., if measurement_tag was 'cumm_MI' and alias tag was 'lab_MI', "
             "then, a usable with tag 'lab_MI' will be available, while 'cumm_MI' would not be available."
         )
+    )
+    unit: Unit = Field(
+        ...,
+        description = "Unit of the measured quantity."
+    )
+    description: Optional[str] = Field(
+        default = None,
+        description = "Description of the sensor's measurement."
     )
     coefficient_of_variance: float = Field(
         default = 0.0,
@@ -53,9 +63,9 @@ class Sensor(BaseModel, ABC):
     random_seed: int = Field(0)
 
     _rng: np.random.Generator = PrivateAttr()
-    _last_value: TimeValueQualityTriplet | None = PrivateAttr(default = None)
+    _last_value: TagData | None = PrivateAttr(default = None)
+    _tag_info: TagInfo = PrivateAttr()
     _initialized: bool = PrivateAttr(default = False)
-    _history: List["TimeValueQualityTriplet"] = PrivateAttr(default_factory = list)
     _measurement_getter: Callable[[], float | NDArray] = PrivateAttr()
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
@@ -63,6 +73,11 @@ class Sensor(BaseModel, ABC):
         self._rng = np.random.default_rng(self.random_seed)
         if self.alias_tag is None:
             self.alias_tag = self.measurement_tag
+        self._tag_info = TagInfo(
+            tag = self.alias_tag,
+            unit = self.unit,
+            description = f"Sensor measurement of '{self.measurement_tag}'" if self.description is None else self.description
+        )
 
     def _initialize(self, measurable_quantities: "MeasurableQuantities") -> None:
         """
@@ -81,7 +96,7 @@ class Sensor(BaseModel, ABC):
                 return
 
     # --- Template Method ---
-    def measure(self, t: float) -> TimeValueQualityTriplet:
+    def measure(self, t: float) -> TagData:
         """
         Public method that defines the complete measurement algorithm.
         """
@@ -107,10 +122,7 @@ class Sensor(BaseModel, ABC):
         #     This is to simulate the fact that the sensor itself doesnt know its faulty yet. 
         #     If you want to use it though, change it lol. 
         ok = True if not self.faulty_aware else (not is_faulty)
-        new_measurement = TimeValueQualityTriplet(t = t, value = final_value, ok = ok)
-        self._last_value = new_measurement
-        self._history.append(new_measurement)
-        return new_measurement
+        self._tag_info.data = TagData(time = t, value = final_value, ok = ok)
     
     @abstractmethod
     def _should_update(self, t: float) -> bool:
@@ -157,5 +169,5 @@ class Sensor(BaseModel, ABC):
         return noisy_value, False
 
     @property
-    def measurement_history(self) -> List[TimeValueQualityTriplet]:
+    def measurement_history(self) -> List[TagData]:
         return self._history.copy()

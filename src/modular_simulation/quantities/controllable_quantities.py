@@ -1,5 +1,5 @@
 from typing import List, Dict
-from modular_simulation.usables import TimeValueQualityTriplet
+from modular_simulation.usables import TagData
 from modular_simulation.measurables import ControlElements
 from modular_simulation.control_system.controller import Controller
 from modular_simulation.quantities import UsableQuantities
@@ -23,7 +23,7 @@ class ControllableQuantities(BaseModel):
         description = "Object defining the sensors and calculations of the system."
     )
 
-    _control_outputs: Dict[str, TimeValueQualityTriplet] = PrivateAttr(default_factory=dict)
+    _control_outputs: Dict[str, TagData] = PrivateAttr(default_factory=dict)
 
     @model_validator(mode = 'after')
     def check_duplicate_controllers(self):
@@ -126,7 +126,7 @@ class ControllableQuantities(BaseModel):
 
         return self
 
-    def update(self, t: float) -> Dict[str, TimeValueQualityTriplet]:
+    def update(self, t: float) -> Dict[str, TagData]:
         """updates the controllers available. Controllers are linked to the instance of ControlElement
         internally, so the results are reflected in the simulation automatically without having
         to return anything here. However, it is still returned for tracking purposes."""

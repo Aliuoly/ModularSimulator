@@ -31,7 +31,7 @@ implementation concise.【F:src/modular_simulation/quantities/measurable_quantit
 
 ### Usable quantities
 Sensors and calculations are grouped in a `UsableQuantities` object.  Sensors
-sample `MeasurableQuantities` values and return `TimeValueQualityTriplet`
+sample `MeasurableQuantities` values and return `TagData`
 objects that carry the measurement time, value and a quality flag.  Built-in
 sensors support realistic effects such as sample-and-hold behaviour, dead time,
 noise and fault injection.【F:src/modular_simulation/usables/sensors/sampled_delayed_sensor.py†L1-L146】
@@ -110,7 +110,7 @@ During a step, the framework executes the following sequence:
 * **Trajectories** – Piecewise setpoint profiles that can be chained together
   for scenarios and setpoint scheduling.【F:src/modular_simulation/control_system/trajectory.py†L1-L143】
 * **Plotting helpers** – Convenience functions for plotting
-  `TimeValueQualityTriplet` histories.【F:src/modular_simulation/plotting/__init__.py†L1-L34】
+  `TagData` histories.【F:src/modular_simulation/plotting/__init__.py†L1-L34】
 * **Validation** – Automatic tag validation prevents runtime errors caused by
   missing sensors or controllers.【F:src/modular_simulation/validation/system_validation.py†L1-L118】
 

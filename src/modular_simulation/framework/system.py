@@ -15,7 +15,7 @@ import warnings
 from modular_simulation.control_system.controller import ControllerMode
 from modular_simulation.measurables.base_classes import BaseIndexedModel
 if TYPE_CHECKING:
-    from modular_simulation.usables import TimeValueQualityTriplet
+    from modular_simulation.usables import TagData
     from modular_simulation.control_system import Controller, Trajectory
 import logging
 from tqdm import tqdm
@@ -441,8 +441,8 @@ class System(BaseModel, ABC):
     def measured_history(self) -> Dict[str, Any]:
         """Returns historized measurements and calculations."""
 
-        sensors_detail: Dict[str, List[TimeValueQualityTriplet]] = {}
-        calculations_detail: Dict[str, List[TimeValueQualityTriplet]] = {}
+        sensors_detail: Dict[str, List[TagData]] = {}
+        calculations_detail: Dict[str, List[TagData]] = {}
         history: Dict[str, Any] = {
             "sensors": sensors_detail,
             "calculations": calculations_detail,

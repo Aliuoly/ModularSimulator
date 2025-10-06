@@ -46,7 +46,7 @@ form the coupled reactor and jacket dynamics advanced by the solver.
 ## Instrumentation
 
 Sensors sample each state and the actuator at 0.1 h intervals using the
-`SampledDelayedSensor` model.  This produces `TimeValueQualityTriplet`
+`SampledDelayedSensor` model.  This produces `TagData`
 measurements that are historized by the framework.【F:examples/van_de_vusse_cstr/run_simulation.py†L33-L44】
 
 ## Control strategy

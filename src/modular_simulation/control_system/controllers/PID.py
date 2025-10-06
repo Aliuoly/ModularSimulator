@@ -72,7 +72,7 @@ class PIDController(Controller):
         i_term = self.Kp / self.Ti * self._integral
         d_term = self.Kp * self.Td / dt * self._filtered_derivative
         output = p_term + i_term + d_term + self._u0 # initial setpoint u0 accounted for in PID
-        overflow, underflow = output - self.mv_range[1], output - self.mv_range[0]
+        overflow, underflow = output - self._converted_mv_range_value[1], output - self._converted_mv_range_value[0]
         saturated = "No"
         if overflow > 0 and self.Ti != np.inf:
             # we are overflowing the range, reduce integral and output to match upper range

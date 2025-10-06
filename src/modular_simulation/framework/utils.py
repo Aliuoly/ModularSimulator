@@ -9,11 +9,12 @@ if TYPE_CHECKING:
     from modular_simulation.control_system import Controller
 from copy import deepcopy
 import logging
+from astropy.units import Quantity
 logger = logging.getLogger(__name__)
 
 def create_system(
         system_class: Type[System],
-        dt: float,
+        dt: Quantity,
         initial_states: "States",
         initial_controls: "ControlElements",
         initial_algebraic: "AlgebraicStates",

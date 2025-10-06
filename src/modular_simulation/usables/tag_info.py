@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Callable
-from astropy.units import Unit, UnitBase
+from astropy.units import Unit, UnitBase, UnitsError
 import numpy as np
 from numpy.typing import NDArray
 
@@ -22,7 +22,7 @@ class TagInfo:
     read only properties. 
     """
     tag: str
-    unit: Optional[Unit] = None
+    unit: Unit
     description: Optional[str] = "no description provided"
     # data is private attr such that user can't set its value directly
     _data: TagData = field(
@@ -33,7 +33,11 @@ class TagInfo:
         init = False,
         default_factory = list
     )
-
+    def __post_int__(self):
+        if self.unit is None:
+            raise UnitsError(
+                "Unit for tag '{self.tag}' is None."
+            )
     @property
     def data(self) -> TagData:
         """public access to the private data"""

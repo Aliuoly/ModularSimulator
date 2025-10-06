@@ -12,6 +12,7 @@ from numba import jit
 from numba.typed.typeddict import Dict as NDict
 from numba import types
 import warnings
+from astropy.units import Quantity
 from modular_simulation.control_system.controller import ControllerMode
 from modular_simulation.measurables.base_classes import BaseIndexedModel
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ class System(BaseModel, ABC):
         _t (float): The current simulation time.
         _history (List[Dict]): A log of the system's state at each time step.
     """
-    dt: float = Field(
+    dt: Quantity = Field(
         default = ...,
         description = (
             "How often the system's sensors, calculations, and controllers update. "
@@ -330,7 +331,7 @@ class System(BaseModel, ABC):
             algebraic_map = algebraic_map
             )
     
-    def step(self, nsteps: int = 1) -> None:
+    def step(self, duration: Quantity) -> None:
         """
         The main public method to advance the simulation by one time step.
 
@@ -340,17 +341,12 @@ class System(BaseModel, ABC):
         states with the final, successful result.
         """
         show_progress = False
+        nsteps = round(duration.to(self.dt.unit).value / self.dt.value)
         if nsteps > 1:
             if logger.level == logging.NOTSET:
                 # dont show progress bar if we are logging.
                 show_progress = self.show_progress
-            
-        if not isinstance(nsteps, int):
-            if isinstance(nsteps, float) and nsteps.is_integer():
-                nsteps = int(nsteps)
-                
-            else:
-                raise TypeError("nsteps must be an integer number of steps")
+
 
         y_map = self._params['y_map']
         u_map = self._params['u_map']
@@ -362,14 +358,14 @@ class System(BaseModel, ABC):
         algebraic_size = self._params["algebraic_size"]
         
         if show_progress:
-            pbar = tqdm(total = nsteps*self.dt)
-        for _ in range(nsteps):
+            pbar = tqdm(total = nsteps)
+        for _ in range(int(nsteps)):
             y0, u0 = self._pre_integration_step()
             final_y = y0
             if self.measurable_quantities.states:
                 result = solve_ivp(
                     fun = self._rhs_wrapper,
-                    t_span = (self._t, self._t + self.dt),
+                    t_span = (self._t, self._t + self.dt.value),
                     y0 = y0,
                     args = (u0, k, y_map, u_map, k_map, algebraic_map, algebraic_values_function, rhs_function, algebraic_size),
                     **self.solver_options
@@ -384,10 +380,10 @@ class System(BaseModel, ABC):
                 )
                 self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
             
-            self._t += self.dt
+            self._t += self.dt.value
             self._update_history()
             if show_progress:
-                pbar.update(self.dt)
+                pbar.update(1)
         return 
     
     def extend_controller_trajectory(self, cv_tag: str, value: float | None = None) -> "Trajectory":

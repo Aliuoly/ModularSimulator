@@ -14,7 +14,7 @@ class BaseIndexedModel(BaseModel):
     """
 
     _index_map: Dict[str, slice] = PrivateAttr()
-    _tag_unit_info: Dict[str, UnitBase] = PrivateAttr()
+    _tag_unit_info: Dict[str, UnitBase] = PrivateAttr(default_factory = dict)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
     
     def model_post_init(self, context):
@@ -50,11 +50,11 @@ class BaseIndexedModel(BaseModel):
                     f"Field '{field_name}' of '{self.__class__.__name__}' is missing a unit annotation."
                 )
             unit = metadata[0]
-            if not isinstance(unit, Unit):
+            if not isinstance(unit, UnitBase):
                 raise MeasurableConfigurationError(
                     f"Field '{field_name}' of '{self.__class__.__name__}' must be annotated with a Unit in the first metadata slot."
                 )
-            self._tag_unit_info[getattr(self, field_name)] = unit
+            self._tag_unit_info[field_name] = unit
         return self
     @cached_property
     def tag_unit_info(self) -> Dict[str, UnitBase]:

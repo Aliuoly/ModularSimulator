@@ -8,7 +8,7 @@ from pydantic import BaseModel, PrivateAttr, Field, ConfigDict
 from modular_simulation.usables.tag_info import TagData, TagInfo
 from modular_simulation.control_system.trajectory import Trajectory
 from modular_simulation.validation.exceptions import ControllerConfigurationError
-from astropy.units import Quantity, Unit
+from astropy.units import Quantity, UnitBase
 if TYPE_CHECKING:
     from modular_simulation.measurables import ControlElements
 import logging
@@ -38,9 +38,10 @@ def make_cv_getter(raw_tag_info: TagInfo, desired_tag_info: TagInfo):
                 f"Tried to convert tag '{raw_tag_info.tag}' from '{raw_tag_info.unit}' to '{desired_tag_info.unit}' and failed. "
                 "Make sure these units are compatible. "
             )
-    def cv_getter() -> TagData:
-        return raw_tag_info.data
-    return cv_getter
+    else:
+        def cv_getter() -> TagData:
+            return raw_tag_info.data
+        return cv_getter
 
 def wrap_cv_getter_as_sp_getter(cv_getter):
     """
@@ -71,11 +72,7 @@ class Controller(BaseModel, ABC):
     sp_trajectory: Trajectory = Field(
         ..., 
         description="A Trajectory instance defining the setpoint (SP) over time.")
-    sp_unit: UnitBase = Field(
-        ...,
-        description = "unit of the sp provided by sp_trajectory and thus the working unit of cv."
-    )
-    mv_range: Tuple[float | Quantity, float | Quantity] = Field(
+    mv_range: Tuple[Quantity, Quantity] = Field(
         ...,
         description = "Lower and upper bound of the manipulated variable, in that order."
     )
@@ -121,27 +118,20 @@ class Controller(BaseModel, ABC):
         """
         for tag_info in tag_infos:
             if tag_info.tag == self.cv_tag:
+                print(tag_info)
                 self._sp_tag_info = TagInfo(
                     tag = f"{self.cv_tag}.sp", 
-                    unit = tag_info.unit,
+                    unit = self.sp_trajectory.unit,
                     description = f"setpoint for {self.cv_tag}"
                 )
-                if type(self.mv_range[0]) is not type(self.mv_range[1]):
-                    raise ControllerConfigurationError(
-                        f"'{self.cv_tag}' controller's mv_range lower and upper bound are not "
-                        "of the same type. Both elements must either be of type float|NDArray "
-                        "or astropy.units.Quantity."
-                    )
+                
+            if tag_info.tag == self.mv_tag:
                 converted_range = [0., 0.]
                 for i in range(2):
-                    if isinstance(self.mv_range[i], Quantity):
-                        if self.mv_range[i].unit.is_equivalent(tag_info.unit): #type: ignore
-                            converted_range[i] = self.mv_range[i].to(tag_info.unit).value #type: ignore
-                    else:
-                        converted_range[i] = self.mv_range[i]
-
+                    if self.mv_range[i].unit.is_equivalent(tag_info.unit): #type: ignore
+                        converted_range[i] = self.mv_range[i].to(tag_info.unit).value #type: ignore
                 self._converted_mv_range_value = tuple(converted_range) #type: ignore
-                return self._sp_tag_info
+        return self._sp_tag_info
         
     def _initialize_cv_getter(
         self,

@@ -60,6 +60,6 @@ class BangBangController(Controller):
             self._state = not self._state
         
         if self._state:
-            return self.mv_range[1]
+            return self._converted_mv_range_value[1]
         else:
-            return self.mv_range[0]
+            return self._converted_mv_range_value[0]

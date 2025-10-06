@@ -53,10 +53,10 @@ ConstantAnnotation: TypeAlias = Annotated[float | NDArray, TagMetadata]
 # Default tag aliases used throughout the examples.  Users can always opt to
 # specify their own :class:`Annotated` types with custom units and descriptions
 # when more detail is required.
-MeasuredTag: TypeAlias = Annotated[str, TagMetadata(TagType.Input, Unit("dimensionless"))]
-CalculatedTag: TypeAlias = Annotated[str, TagMetadata(TagType.Input, Unit("dimensionless"))]
-OutputTag: TypeAlias = Annotated[str, TagMetadata(TagType.Output, Unit("dimensionless"))]
-Constant: TypeAlias = Annotated[float | NDArray, TagMetadata(TagType.Constant, Unit("dimensionless"))]
+MeasuredTag: TypeAlias = Annotated[str, TagMetadata(TagType.Input, Unit(""))]
+CalculatedTag: TypeAlias = Annotated[str, TagMetadata(TagType.Input, Unit(""))]
+OutputTag: TypeAlias = Annotated[str, TagMetadata(TagType.Output, Unit(""))]
+Constant: TypeAlias = Annotated[float | NDArray, TagMetadata(TagType.Constant, Unit(""))]
 
 class Calculation(ABC, BaseModel):
     """

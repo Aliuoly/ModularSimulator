@@ -93,7 +93,7 @@ class InternalModelController(Controller):
             return (internal_model(u) - sp_effective)**2
 
         # --- 3  root‑solve starting from last control action -----------------
-        output = minimize_scalar(residual, bounds = self.mv_range).x
+        output = minimize_scalar(residual, bounds = self._converted_mv_range_value).x
         logger.debug(
             "%-12.12s IMC | t=%8.1f cv=%8.2f sp=%8.2f out=%8.2f, cv_pred_at_out=%8.2f",
             self.cv_tag, t, cv, sp, output, internal_model(output)

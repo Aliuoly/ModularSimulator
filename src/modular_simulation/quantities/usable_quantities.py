@@ -46,6 +46,9 @@ class UsableQuantities(BaseModel):
         # construct the _tag_infos
         for sensor in self.sensors:
             self._tag_infos.append(sensor._tag_info)
+            if sensor.unit is None:
+                sensor.unit = self.measurable_quantities.tag_unit_info[sensor.measurement_tag]
+                sensor._tag_info.unit = sensor.unit
         for calculation in self.calculations:
             for output_tag_info in calculation._output_tag_infos:
                 self._tag_infos.append(output_tag_info)

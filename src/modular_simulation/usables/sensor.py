@@ -11,9 +11,9 @@ if TYPE_CHECKING:
     from modular_simulation.quantities import MeasurableQuantities
     from modular_simulation.measurables.base_classes import BaseIndexedModel
 
-def make_measurement_getter(object: "BaseIndexedModel", tag: str) -> Callable[[], float|NDArray]:
+def make_measurement_getter(object: "BaseIndexedModel", tag: str, converter:Callable) -> Callable[[], float|NDArray]:
     def measurement_getter() -> float | NDArray:
-        return getattr(object, tag)
+        return converter(getattr(object, tag))
     return measurement_getter
 
 
@@ -76,7 +76,7 @@ class Sensor(BaseModel, ABC):
         self._tag_info = TagInfo(
             tag = self.alias_tag,
             unit = self.unit,
-            description = f"Sensor measurement of '{self.measurement_tag}'" if self.description is None else self.description
+            description = "" if self.description is None else self.description
         )
 
     def _initialize(self, measurable_quantities: "MeasurableQuantities") -> None:
@@ -91,9 +91,9 @@ class Sensor(BaseModel, ABC):
         for category in search_order:
             owner = getattr(measurable_quantities, category)
             if owner is not None and hasattr(owner, self.measurement_tag):
-                self._measurement_getter = make_measurement_getter(owner, self.measurement_tag)
-                if self._tag_info.unit is None:
-                    self._tag_info.unit = measurable_quantities.tag_unit_info[self.measurement_tag]
+                converter = measurable_quantities.tag_unit_info[self.measurement_tag].\
+                    get_converter(self._tag_info.unit)
+                self._measurement_getter = make_measurement_getter(owner, self.measurement_tag, converter)
                 self._initialized = True
                 return
 

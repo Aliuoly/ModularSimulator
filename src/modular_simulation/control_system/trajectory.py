@@ -3,6 +3,7 @@ from typing import List, Optional, Union, Callable
 import bisect
 import math
 import numpy as np
+from astropy.units import UnitBase #type: ignore
 
 Number = Union[int, float]
 
@@ -115,7 +116,8 @@ class RandomWalk(Segment):
 
 @dataclass
 class Trajectory:
-    y0: float = 0.0
+    y0: float
+    unit: UnitBase
     t0: float = 0.0
     segments: List[Segment] = field(default_factory=list)
 

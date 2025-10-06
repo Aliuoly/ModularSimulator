@@ -3,10 +3,10 @@ from typing import Callable, Dict, List, TYPE_CHECKING, Any, Tuple, Annotated, U
 from numpy.typing import NDArray
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
-from modular_simulation.usables.time_value_quality_triplet import TagData
+from modular_simulation.usables.tag_info import TagData
 from modular_simulation.validation.exceptions import CalculationConfigurationError, CalculationDefinitionError
 from modular_simulation.usables.tag_info import TagInfo, TagData
-from modular_simulation.utils.unit_compat import Unit
+from astropy.units import Unit
 from enum import IntEnum
 if TYPE_CHECKING:
     from modular_simulation.quantities.usable_quantities import UsableQuantities

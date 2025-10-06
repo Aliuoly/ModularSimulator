@@ -23,7 +23,7 @@ from modular_simulation.control_system import Trajectory, PIDController
 from typing import List, TYPE_CHECKING
 import logging
 import matplotlib as mpl
-from modular_simulation.utils.unit_compat import Unit
+from astropy.units import Unit
 
 if TYPE_CHECKING:
     from modular_simulation.usables import Calculation

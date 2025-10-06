@@ -7,7 +7,7 @@ from pydantic import ConfigDict, Field
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
 from modular_simulation.framework.system import System
 from modular_simulation.usables import Calculation, Constant, MeasuredTag, OutputTag
-from modular_simulation.utils.unit_compat import Unit
+from astropy.units import Unit
 
 
 class VanDeVusseStates(States):

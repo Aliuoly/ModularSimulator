@@ -8,7 +8,7 @@ from pydantic import BaseModel, PrivateAttr, Field, ConfigDict
 from modular_simulation.usables.tag_info import TagData, TagInfo
 from modular_simulation.control_system.trajectory import Trajectory
 from modular_simulation.validation.exceptions import ControllerConfigurationError
-from modular_simulation.utils.unit_compat import Quantity, Unit
+from astropy.units import Quantity, Unit
 if TYPE_CHECKING:
     from modular_simulation.measurables import ControlElements
 import logging

@@ -3,7 +3,7 @@ import numpy as np
 from numpy.typing import NDArray
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
 from modular_simulation.framework import System
-from modular_simulation.utils.unit_compat import Unit
+from astropy.units import Unit
 
 
 # 1. Define the Data Structures for the System
@@ -40,7 +40,7 @@ class EnergyBalanceConstants(Constants):
     k0: Annotated[float, Unit("1/s")]
     activation_energy: Annotated[float, Unit("J/mol")]
     gas_constant: Annotated[float, Unit("J/(mol*K)")]
-    Cv: Annotated[float, Unit("(L**0.5)/s")]
+    Cv: Annotated[float, Unit("L")**0.5/Unit("s")]
     CA_in: Annotated[float, Unit("mol/L")]
     T_in: Annotated[float, Unit("K")]
     reaction_enthalpy: Annotated[float, Unit("J/mol")]

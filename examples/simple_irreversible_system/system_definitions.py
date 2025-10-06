@@ -3,7 +3,7 @@ from typing import Mapping, Annotated
 from numpy.typing import NDArray
 from modular_simulation.measurables import States, ControlElements, AlgebraicStates, Constants
 from modular_simulation.framework import System
-from modular_simulation.utils.unit_compat import Unit
+from astropy.units import Unit
 
 # 1. Define the Data Structures for the System
 # ============================================

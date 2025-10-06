@@ -3,8 +3,8 @@ import numpy as np
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 from typing import TYPE_CHECKING, Any, List, Callable, Optional
-from modular_simulation.usables.time_value_quality_triplet import TagData
-from modular_simulation.utils.unit_compat import Unit
+from modular_simulation.usables.tag_info import TagData
+from astropy.units import Unit
 from modular_simulation.usables.tag_info import TagData, TagInfo
 
 if TYPE_CHECKING:

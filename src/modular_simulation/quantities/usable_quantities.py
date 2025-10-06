@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from modular_simulation.usables.calculation import Calculation
     from modular_simulation.control_system.controller import Controller
     from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
-    from modular_simulation.usables.time_value_quality_triplet import TagData
+    from modular_simulation.usables.tag_info import TagData
 
 logger = logging.getLogger(__name__)
 
@@ -198,5 +198,7 @@ class UsableQuantities(BaseModel):
             sensor.measure(t)
         for calculation in self.calculations:
             calculation.calculate(t) 
+        for controller in self.controllers:
+            controller.update(t)
 
 

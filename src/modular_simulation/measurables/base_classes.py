@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 from functools import cached_property
 from modular_simulation.validation.exceptions import MeasurableConfigurationError
-from modular_simulation.utils.unit_compat import Unit
+from astropy.units import Unit
 class BaseIndexedModel(BaseModel):
     """
     Base class for the measurable data containers which are
@@ -43,6 +43,7 @@ class BaseIndexedModel(BaseModel):
     def _ensure_unit_annotated(self):
         for field_name, field_info in self.__class__.model_fields.items():
             metadata = field_info.metadata
+            print(field_info)
             if not metadata:
                 raise MeasurableConfigurationError(
                     f"Field '{field_name}' of '{self.__class__.__name__}' is missing a unit annotation."

@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Callable
-from modular_simulation.utils.unit_compat import Unit
+from astropy.units import Unit
 import numpy as np
 from numpy.typing import NDArray
 

@@ -130,9 +130,10 @@ class ControllableQuantities(BaseModel):
         """updates the controllers available. Controllers are linked to the instance of ControlElement
         internally, so the results are reflected in the simulation automatically without having
         to return anything here. However, it is still returned for tracking purposes."""
-        self._control_outputs.update(
-            {controller.mv_tag: controller.update(t) for controller in self.controllers}
-        )
+        return {}
+        #self._control_outputs.update(
+       #     {controller.mv_tag: controller.update(t) for controller in self.controllers}
+        #)
         
-        return self._control_outputs
+        #return self._control_outputs
     

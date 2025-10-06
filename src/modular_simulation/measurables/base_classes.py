@@ -1,9 +1,10 @@
-from pydantic import BaseModel, PrivateAttr, ConfigDict
+from pydantic import BaseModel, PrivateAttr, ConfigDict, model_validator
 from typing import Dict, List
 import numpy as np
 from numpy.typing import NDArray
 from functools import cached_property
-
+from modular_simulation.validation.exceptions import MeasurableConfigurationError
+from astropy.units import Unit
 class BaseIndexedModel(BaseModel):
     """
     Base class for the measurable data containers which are
@@ -38,6 +39,19 @@ class BaseIndexedModel(BaseModel):
             array_size = max(array_size, slice_of_field.stop)
         self._array_size = array_size
 
+    @model_validator(mode = 'after')
+    def _ensure_unit_annotated(self):
+        for field_name, field_info in self.__class__.model_fields():
+            try:
+                unit = field_info.metadata[0]
+                if not isinstance(unit, Unit):
+                    raise MeasurableConfigurationError(
+                        f"field '{field_name} of '{self.__class__.__name__}' is not "
+                        "annotated with an astropy Unit in the first metadata slot."
+                    )
+            except Exception as ex:
+                raise ex
+        return self
     @cached_property
     def tag_list(self) -> List[str]:
         return list(self._index_map.keys())

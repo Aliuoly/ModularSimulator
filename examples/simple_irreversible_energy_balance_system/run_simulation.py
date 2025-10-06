@@ -8,6 +8,7 @@ from modular_simulation.control_system import PIDController, Trajectory
 from modular_simulation.plotting import plot_triplet_series
 from modular_simulation.framework import create_system
 from modular_simulation.usables import SampledDelayedSensor
+from astropy.units import Unit, UnitBase
 
 
 try:
@@ -40,16 +41,17 @@ def make_systems():
     initial_algebraic = EnergyBalanceAlgebraicStates(F_out=1.0)
 
     sensors = [
-        SampledDelayedSensor(measurement_tag="F_out"),
-        SampledDelayedSensor(measurement_tag="F_in", coefficient_of_variance=0.05),
+        SampledDelayedSensor(measurement_tag="F_out", unit = Unit("L/s")),
+        SampledDelayedSensor(measurement_tag="F_in", unit = Unit("L/s"), coefficient_of_variance=0.05),
         SampledDelayedSensor(
             measurement_tag="B",
+            unit = Unit("mol/L"),
             coefficient_of_variance=0.05,
             sampling_period=900.0,
             deadtime=900.0,
         ),
-        SampledDelayedSensor(measurement_tag="V"),
-        SampledDelayedSensor(measurement_tag="T"),
+        SampledDelayedSensor(measurement_tag="V", unit = Unit("L")),
+        SampledDelayedSensor(measurement_tag="T", unit = Unit("K")),
         SampledDelayedSensor(measurement_tag="T_J"),
         SampledDelayedSensor(measurement_tag="T_J_in"),
         SampledDelayedSensor(measurement_tag="jacket_flow"),

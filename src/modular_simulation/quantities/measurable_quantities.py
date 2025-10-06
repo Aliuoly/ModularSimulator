@@ -1,8 +1,10 @@
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, PrivateAttr
 from modular_simulation.validation.exceptions import MeasurableConfigurationError
 from modular_simulation.measurables.base_classes import AlgebraicStates, States, ControlElements, Constants
 from functools import cached_property
-from typing import Iterable
+from typing import Iterable, Dict
+from astropy.units import UnitBase # type:ignore
+
 
 
 
@@ -36,9 +38,9 @@ class MeasurableQuantities(BaseModel):
                 "the consumption rate of a species due to multiple reactions taking place."
         )
     )
-
+    _unit_info: Dict[str, UnitBase] = PrivateAttr()
     model_config = ConfigDict(extra = 'forbid')
-
+    
     @model_validator(mode = 'after')
     def validate_tag_list(self):
         """ensures no tag shows up in multiple places."""
@@ -58,7 +60,7 @@ class MeasurableQuantities(BaseModel):
                 "No measurable quantities defined. Aborting."
             )
         return self
-
+    
     @cached_property
     def tag_list(self) -> Iterable[str]:
         return_list = list(self.states.tag_list)
@@ -66,3 +68,12 @@ class MeasurableQuantities(BaseModel):
         return_list.extend(list(self.control_elements.tag_list))
         return_list.extend(list(self.constants.tag_list))
         return return_list
+    
+    @cached_property
+    def tag_unit_info(self) -> Dict[str, UnitBase]:
+        return_dict = {}
+        return_dict.update(self.algebraic_states.tag_unit_info)
+        return_dict.update(self.states.tag_unit_info)
+        return_dict.update(self.constants.tag_unit_info)
+        return_dict.update(self.control_elements.tag_unit_info)
+        return return_dict

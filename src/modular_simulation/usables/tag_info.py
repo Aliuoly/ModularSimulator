@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Callable
-from astropy.units import Unit
+from astropy.units import Unit, UnitBase
 import numpy as np
 from numpy.typing import NDArray
 
@@ -22,7 +22,7 @@ class TagInfo:
     read only properties. 
     """
     tag: str
-    unit: Unit
+    unit: Optional[Unit] = None
     description: Optional[str] = "no description provided"
     # data is private attr such that user can't set its value directly
     _data: TagData = field(

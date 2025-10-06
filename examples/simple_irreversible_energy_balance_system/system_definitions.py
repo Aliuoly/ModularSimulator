@@ -3,7 +3,7 @@ import numpy as np
 from numpy.typing import NDArray
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
 from modular_simulation.framework import System
-from astropy.units import Unit
+from astropy.units import Unit, UnitBase
 
 
 # 1. Define the Data Structures for the System
@@ -15,7 +15,7 @@ class EnergyBalanceStates(States):
     """Pydantic model for the differential states of the system."""
 
     V: Annotated[float, Unit("L")]
-    A: Annotated[float, Unit("mol/L")]
+    A: Annotated[float, Unit("mol")/Unit("L")]
     B: Annotated[float, Unit("mol/L")]
     T: Annotated[float, Unit("K")]
     T_J: Annotated[float, Unit("K")]

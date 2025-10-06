@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 from functools import cached_property
 from modular_simulation.validation.exceptions import MeasurableConfigurationError
-from astropy.units import Unit
+from astropy.units import Unit, UnitBase
 class BaseIndexedModel(BaseModel):
     """
     Base class for the measurable data containers which are
@@ -14,6 +14,7 @@ class BaseIndexedModel(BaseModel):
     """
 
     _index_map: Dict[str, slice] = PrivateAttr()
+    _tag_unit_info: Dict[str, UnitBase] = PrivateAttr()
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
     
     def model_post_init(self, context):
@@ -53,7 +54,12 @@ class BaseIndexedModel(BaseModel):
                 raise MeasurableConfigurationError(
                     f"Field '{field_name}' of '{self.__class__.__name__}' must be annotated with a Unit in the first metadata slot."
                 )
+            self._tag_unit_info[getattr(self, field_name)] = unit
         return self
+    @cached_property
+    def tag_unit_info(self) -> Dict[str, UnitBase]:
+        return self._tag_unit_info
+    
     @cached_property
     def tag_list(self) -> List[str]:
         return list(self._index_map.keys())

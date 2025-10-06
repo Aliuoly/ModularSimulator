@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 from typing import TYPE_CHECKING, Any, List, Callable, Optional
 from modular_simulation.usables.tag_info import TagData
-from astropy.units import Unit
+from astropy.units import UnitBase
 from modular_simulation.usables.tag_info import TagData, TagInfo
 
 if TYPE_CHECKING:
@@ -31,8 +31,8 @@ class Sensor(BaseModel, ABC):
             "then, a usable with tag 'lab_MI' will be available, while 'cumm_MI' would not be available."
         )
     )
-    unit: Unit = Field(
-        ...,
+    unit: Optional[UnitBase] = Field(
+        None, 
         description = "Unit of the measured quantity."
     )
     description: Optional[str] = Field(
@@ -92,6 +92,8 @@ class Sensor(BaseModel, ABC):
             owner = getattr(measurable_quantities, category)
             if owner is not None and hasattr(owner, self.measurement_tag):
                 self._measurement_getter = make_measurement_getter(owner, self.measurement_tag)
+                if self._tag_info.unit is None:
+                    self._tag_info.unit = measurable_quantities.tag_unit_info[self.measurement_tag]
                 self._initialized = True
                 return
 

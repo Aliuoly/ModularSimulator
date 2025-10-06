@@ -71,7 +71,7 @@ class Controller(BaseModel, ABC):
     sp_trajectory: Trajectory = Field(
         ..., 
         description="A Trajectory instance defining the setpoint (SP) over time.")
-    sp_unit: Unit = Field(
+    sp_unit: UnitBase = Field(
         ...,
         description = "unit of the sp provided by sp_trajectory and thus the working unit of cv."
     )

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 from modular_simulation.usables.tag_info import TagData
 from modular_simulation.validation.exceptions import CalculationConfigurationError, CalculationDefinitionError
 from modular_simulation.usables.tag_info import TagInfo, TagData
-from astropy.units import Unit
+from astropy.units import UnitBase
 from enum import IntEnum
 if TYPE_CHECKING:
     from modular_simulation.quantities.usable_quantities import UsableQuantities
@@ -42,7 +42,7 @@ class TagType(IntEnum):
     Constant = 3
 
 class TagMetadata:
-    def __init__(self, type: TagType, unit: Unit, description: str | None = None):
+    def __init__(self, type: TagType, unit: UnitBase, description: str | None = None):
         self.unit = unit
         self.description = description
         self.type = type

@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, TYPE_CHECKING, Any, Tuple, NewType, Annotated, Union, TypeAlias
+from typing import Callable, Dict, List, TYPE_CHECKING, Any, Tuple, Annotated, Union, TypeAlias
 from numpy.typing import NDArray
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, BeforeValidator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 from modular_simulation.usables.time_value_quality_triplet import TagData
 from modular_simulation.validation.exceptions import CalculationConfigurationError, CalculationDefinitionError
 from modular_simulation.usables.tag_info import TagInfo, TagData
-from astropy.units import Unit #type:ignore
+from modular_simulation.utils.unit_compat import Unit
 from enum import IntEnum
 if TYPE_CHECKING:
     from modular_simulation.quantities.usable_quantities import UsableQuantities
@@ -20,16 +20,21 @@ def ensure_list(value: Any) -> Any:
 
 
 def make_converted_input_getter(raw_tag_info: TagInfo, desired_tag_info: TagInfo):
-    if raw_tag_info.unit.is_equivalent(raw_tag_info):
+    if raw_tag_info.unit.is_equivalent(desired_tag_info.unit):
         converter = raw_tag_info.unit.get_converter(desired_tag_info.unit)
+
         def input_getter() -> TagData:
-            return TagData(raw_tag_info.data.time, converter(raw_tag_info.data.value), raw_tag_info.data.ok)
+            return TagData(
+                raw_tag_info.data.time,
+                converter(raw_tag_info.data.value),
+                raw_tag_info.data.ok,
+            )
+
         return input_getter
-    else:
-        raise CalculationDefinitionError(
-            f"Tried to convert tag '{raw_tag_info.tag}' from '{raw_tag_info.unit}' to '{desired_tag_info.unit}' and failed. "
-            "Make sure these units are compatible. "
-        )
+    raise CalculationDefinitionError(
+        f"Tried to convert tag '{raw_tag_info.tag}' from '{raw_tag_info.unit}' to '{desired_tag_info.unit}' and failed. "
+        "Make sure these units are compatible. "
+    )
     
 class TagType(IntEnum):
     Input = 1
@@ -44,6 +49,14 @@ class TagMetadata:
 
 TagAnnotation: TypeAlias = Annotated[str, TagMetadata]
 ConstantAnnotation: TypeAlias = Annotated[float | NDArray, TagMetadata]
+
+# Default tag aliases used throughout the examples.  Users can always opt to
+# specify their own :class:`Annotated` types with custom units and descriptions
+# when more detail is required.
+MeasuredTag: TypeAlias = Annotated[str, TagMetadata(TagType.Input, Unit("dimensionless"))]
+CalculatedTag: TypeAlias = Annotated[str, TagMetadata(TagType.Input, Unit("dimensionless"))]
+OutputTag: TypeAlias = Annotated[str, TagMetadata(TagType.Output, Unit("dimensionless"))]
+Constant: TypeAlias = Annotated[float | NDArray, TagMetadata(TagType.Constant, Unit("dimensionless"))]
 
 class Calculation(ABC, BaseModel):
     """

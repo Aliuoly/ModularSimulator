@@ -23,6 +23,7 @@ from modular_simulation.control_system import Trajectory, PIDController
 from typing import List, TYPE_CHECKING
 import logging
 import matplotlib as mpl
+from modular_simulation.utils.unit_compat import Unit
 
 if TYPE_CHECKING:
     from modular_simulation.usables import Calculation
@@ -55,19 +56,23 @@ def make_systems():
     sensors=[
         SampledDelayedSensor(
             measurement_tag = "F_out",
+            unit = Unit("L/s"),
         ),
         SampledDelayedSensor(
             measurement_tag = "F_in",
+            unit = Unit("L/s"),
             coefficient_of_variance=0.05
         ),
         SampledDelayedSensor(
             measurement_tag = "B",
+            unit = Unit("mol/L"),
             coefficient_of_variance=0.05,
             sampling_period = 900,
             deadtime = 900,
         ),
         SampledDelayedSensor(
             measurement_tag = "V",
+            unit = Unit("L"),
             faulty_probability = 0.01,
             faulty_aware = True
         ),
@@ -80,6 +85,7 @@ def make_systems():
             cv_tag="B",
             mv_tag = "F_in",
             sp_trajectory=Trajectory(0.5),
+            sp_unit=Unit("mol/L"),
             Kp=1.0e-1,
             Ti=100.0,
             mv_range = (0, 100.)

@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 from typing import TYPE_CHECKING, Any, List, Callable, Optional
 from modular_simulation.usables.time_value_quality_triplet import TagData
-from astropy.units import Unit #type:ignore
+from modular_simulation.utils.unit_compat import Unit
 from modular_simulation.usables.tag_info import TagData, TagInfo
 
 if TYPE_CHECKING:
@@ -170,4 +170,4 @@ class Sensor(BaseModel, ABC):
 
     @property
     def measurement_history(self) -> List[TagData]:
-        return self._history.copy()
+        return list(self._tag_info.history)

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import ClassVar, Dict, Mapping
+from typing import Annotated, ClassVar, Dict, Mapping
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import ConfigDict, Field
@@ -7,21 +7,22 @@ from pydantic import ConfigDict, Field
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
 from modular_simulation.framework.system import System
 from modular_simulation.usables import Calculation, Constant, MeasuredTag, OutputTag
+from modular_simulation.utils.unit_compat import Unit
 
 
 class VanDeVusseStates(States):
     """Differential state variables for the Van de Vusse CSTR."""
 
-    Ca: float = Field(description="Concentration of A in the reactor [mol/L]")
-    Cb: float = Field(description="Concentration of B in the reactor [mol/L]")
-    T: float = Field(description="Reactor temperature [°C]")
-    Tk: float = Field(description="Jacket temperature [°C]")
+    Ca: Annotated[float, Unit("mol/L")] = Field(description="Concentration of A in the reactor [mol/L]")
+    Cb: Annotated[float, Unit("mol/L")] = Field(description="Concentration of B in the reactor [mol/L]")
+    T: Annotated[float, Unit("K")] = Field(description="Reactor temperature [K]")
+    Tk: Annotated[float, Unit("K")] = Field(description="Jacket temperature [K]")
 
 
 class VanDeVusseControlElements(ControlElements):
     """Externally actuated variables for the Van de Vusse reactor."""
 
-    Tj_in: float = Field(description="Jacket inlet temperature [°C]")
+    Tj_in: Annotated[float, Unit("K")] = Field(description="Jacket inlet temperature [K]")
 
 
 class VanDeVusseAlgebraicStates(AlgebraicStates):
@@ -33,20 +34,20 @@ class VanDeVusseAlgebraicStates(AlgebraicStates):
 class VanDeVusseConstants(Constants):
     """Physical constants for the Van de Vusse model."""
 
-    F: float
-    Ca0: float
-    T0: float
-    k10: float
-    E1: float
-    dHr1: float
-    rho: float
-    Cp: float
-    kw: float
-    AR: float
-    VR: float
-    mK: float
-    CpK: float
-    Fj: float
+    F: Annotated[float, Unit("L/s")]
+    Ca0: Annotated[float, Unit("mol/L")]
+    T0: Annotated[float, Unit("K")]
+    k10: Annotated[float, Unit("1/s")]
+    E1: Annotated[float, Unit("J/mol")]
+    dHr1: Annotated[float, Unit("J/mol")]
+    rho: Annotated[float, Unit("kg/L")]
+    Cp: Annotated[float, Unit("J/(kg*K)")]
+    kw: Annotated[float, Unit("J/(s*K*L**2)")]
+    AR: Annotated[float, Unit("L**2")]
+    VR: Annotated[float, Unit("L")]
+    mK: Annotated[float, Unit("kg")]
+    CpK: Annotated[float, Unit("J/(kg*K)")]
+    Fj: Annotated[float, Unit("L/s")]
 
 
 class HeatDutyCalculation(Calculation):

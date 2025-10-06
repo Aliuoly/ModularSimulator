@@ -55,6 +55,7 @@ def create_system(
     usables = UsableQuantities(
         sensors=copied_sensors,
         calculations=copied_calculations,
+        controllers=copied_controllers,
         measurable_quantities=measurables,
     )
 

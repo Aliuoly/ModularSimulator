@@ -136,7 +136,7 @@ class UsableQuantities(BaseModel):
     
     def _validate_controllers_resolvable(self):
         exception_group = []
-        
+
         all_tags = [tag_info.tag for tag_info in self._tag_infos]
         missing_cv_tags = []
         missing_mv_tags = []
@@ -175,6 +175,14 @@ class UsableQuantities(BaseModel):
                 )
             )
         return exception_group
+
+    @cached_property
+    def tag_list(self) -> Iterable[str]:
+        return [tag_info.tag for tag_info in self._tag_infos]
+
+    @property
+    def tag_infos(self) -> List[TagInfo]:
+        return self._tag_infos
     
     def update(self, t: float) -> None:
         """

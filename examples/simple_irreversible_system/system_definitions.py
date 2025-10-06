@@ -1,29 +1,32 @@
 import numpy as np
-from typing import Mapping
+from typing import Mapping, Annotated
 from numpy.typing import NDArray
 from modular_simulation.measurables import States, ControlElements, AlgebraicStates, Constants
 from modular_simulation.framework import System
+from modular_simulation.utils.unit_compat import Unit
 
 # 1. Define the Data Structures for the System
 # ============================================
 
 class IrreversibleStates(States):
     """Pydantic model for the differential states of the system."""
-    V: float
-    A: float
-    B: float
+
+    V: Annotated[float, Unit("L")]
+    A: Annotated[float, Unit("mol/L")]
+    B: Annotated[float, Unit("mol/L")]
 
 class IrreversibleControlElements(ControlElements):
-    F_in: float  # Inlet flow rate
+    F_in: Annotated[float, Unit("L/s")]  # Inlet flow rate
 
 class IrreversibleAlgebraicStates(AlgebraicStates):
-    F_out: float # Outlet flow rate, an algebraic function of Volume
+    F_out: Annotated[float, Unit("L/s")]  # Outlet flow rate, an algebraic function of Volume
 
 class IrreversibleConstants(Constants):
     """"""
-    k: float
-    Cv: float
-    CA_in: float
+
+    k: Annotated[float, Unit("1/s")]
+    Cv: Annotated[float, Unit("(L**0.5)/s")]
+    CA_in: Annotated[float, Unit("mol/L")]
     
 # 2. Define the System Dynamics
 # =============================

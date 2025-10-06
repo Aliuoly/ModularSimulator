@@ -120,7 +120,7 @@ class ControllableQuantities(BaseModel):
 
         # initialize controllers once validated
         for controller in self.controllers:
-            controller._initialize(self.usable_quantities, self.control_elements)
+            controller._initialize(self.usable_quantities.tag_infos, self.control_elements)
         # unlike the usable quantities, a manual .update is not necessary
         # as it is essentially done in the _initialize_mv_setter step for controllers.
 

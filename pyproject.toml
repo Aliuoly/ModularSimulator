@@ -32,9 +32,10 @@ dependencies = [
   "tqdm==4.67.1",
   "pydantic==2.11.7",
   "matplotlib>=3.10.6",
+  "astropy>=7.1.0",
+  "pytest",
 ]
 [dependency-groups]
 dev = [
     "ruff>=0.13.1",
-    "pytest",
 ]

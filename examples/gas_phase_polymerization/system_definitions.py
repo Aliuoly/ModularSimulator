@@ -1,12 +1,13 @@
 """Gas-phase polymerization reactor written for the framework interface."""
 
-from typing import Mapping
+from typing import Annotated, Mapping
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 
 from modular_simulation.framework import System
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
+from astropy.units import Unit
 
 R_GAS_KPA_L_PER_MOL_K = 8.31446261815324
 ATM_PRESSURE_KPA = 101.325
@@ -17,26 +18,52 @@ SMALL = 1.0e-12
 class GasPhaseReactorStates(States):
     """Differential states for the polymerization reactor."""
 
-    c_impurity: float = 0.0
-    c_teal: float = 2.22e-4
-    c_monomer: float = 0.2354
-    c_comonomer: float = 0.08239
-    c_hydrogen: float = 0.04707
-    c_nitrogen: float = (738794.3 - 1000.0e3*(0.04707 + 0.2354 + 0.08239))/1000.0e3
-    Nstar: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    N0: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    NdIH0: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    NdI0: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    NH0: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    Y0: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    Y1: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    Y2: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    X0: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    X1: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    X2: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    B: NDArray[np.float64] = Field(default_factory=lambda : np.array([1e-20, 1e-20]))
-    V_poly: float = 200.0e3 # L
-    V_gas: float = 1000.0e3 # L
+    c_impurity: Annotated[float, Unit("mol/L")] = 0.0
+    c_teal: Annotated[float, Unit("mol/L")] = 2.22e-4
+    c_monomer: Annotated[float, Unit("mol/L")] = 0.2354
+    c_comonomer: Annotated[float, Unit("mol/L")] = 0.08239
+    c_hydrogen: Annotated[float, Unit("mol/L")] = 0.04707
+    c_nitrogen: Annotated[float, Unit("mol/L")] = (
+        738794.3 - 1000.0e3 * (0.04707 + 0.2354 + 0.08239)
+    ) / 1000.0e3
+    Nstar: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    N0: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    NdIH0: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    NdI0: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    NH0: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    Y0: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    Y1: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    Y2: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    X0: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    X1: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    X2: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    B: Annotated[NDArray[np.float64], Unit("")] = Field(
+        default_factory=lambda: np.array([1e-20, 1e-20])
+    )
+    V_poly: Annotated[float, Unit("L")] = 200.0e3
+    V_gas: Annotated[float, Unit("L")] = 1000.0e3
 
 
 
@@ -44,178 +71,194 @@ class GasPhaseReactorStates(States):
 class GasPhaseReactorControlElements(ControlElements):
     """Externally manipulated feed and valve positions."""
 
-    F_cat: float = 0.0
-    F_m1: float = 0.0
-    F_m2: float = 0.0
-    F_h2: float = 0.0
-    F_n2: float = 0.0
-    F_vent: float = 0.0
-    F_teal: float = 0.0
-    F_impurity: float = 0.0
-    discharge_valve_position: float = 0.0
+    F_cat: Annotated[float, Unit("kg/h")] = 0.0
+    F_m1: Annotated[float, Unit("kg/h")] = 0.0
+    F_m2: Annotated[float, Unit("kg/h")] = 0.0
+    F_h2: Annotated[float, Unit("kg/h")] = 0.0
+    F_n2: Annotated[float, Unit("kg/h")] = 0.0
+    F_vent: Annotated[float, Unit("L/s")] = 0.0
+    F_teal: Annotated[float, Unit("kg/h")] = 0.0
+    F_impurity: Annotated[float, Unit("kg/h")] = 0.0
+    discharge_valve_position: Annotated[float, Unit("")] = 0.0
 
 
 class GasPhaseReactorAlgebraicStates(AlgebraicStates):
     """Derived quantities required by the differential balances."""
 
-    hydrogen_rate: float = 0.0
-    monomer_rates: NDArray[np.float64] = Field(default_factory=lambda: np.zeros(2, dtype=np.float64))
-    vol_prod_rate: float = 0.0
-    total_monomer_concentration: float = 0.0
-    total_gas_loss_rate: float = 0.0
-    dV_poly: float = 0.0
-    dV_gas: float = 0.0
-    impurity_balance_A: float = 0.0
-    impurity_balance_B: float = 0.0
-    pseudo_kiT: NDArray[np.float64] = Field(default_factory=lambda: np.zeros(2, dtype=np.float64))
-    pseudo_khT: NDArray[np.float64] = Field(default_factory=lambda: np.zeros(2, dtype=np.float64))
-    pseudo_kpTT: NDArray[np.float64] = Field(default_factory=lambda: np.zeros(2, dtype=np.float64))
-    pseudo_kfmTT: NDArray[np.float64] = Field(default_factory=lambda: np.zeros(2, dtype=np.float64))
-    pseudo_kfhT: NDArray[np.float64] = Field(default_factory=lambda: np.zeros(2, dtype=np.float64))
-    pseudo_kfrT: NDArray[np.float64] = Field(default_factory=lambda: np.zeros(2, dtype=np.float64))
-    pseudo_kfsT: NDArray[np.float64] = Field(default_factory=lambda: np.zeros(2, dtype=np.float64))
-    c_impurity_qssa: float = 0.0
-    impurity_qssa_applicable: float = 0.0
-    cumm_MI: float = 2.0
-    cumm_density: float = 918.0
-    bed_level: float = 15.0
-    bed_weight: float = 100.0
-    yM1: float = 0.0
-    yM2: float = 0.0
-    yH2: float = 0.0
-    pressure: float = 0.0
-    mass_prod_rate: float = 0.0
+    hydrogen_rate: Annotated[float, Unit("mol/(L*s)")] = 0.0
+    monomer_rates: Annotated[NDArray[np.float64], Unit("mol/(L*s)")] = Field(
+        default_factory=lambda: np.zeros(2, dtype=np.float64)
+    )
+    vol_prod_rate: Annotated[float, Unit("L/s")] = 0.0
+    total_monomer_concentration: Annotated[float, Unit("mol/L")] = 0.0
+    total_gas_loss_rate: Annotated[float, Unit("L/s")] = 0.0
+    dV_poly: Annotated[float, Unit("L/s")] = 0.0
+    dV_gas: Annotated[float, Unit("L/s")] = 0.0
+    impurity_balance_A: Annotated[float, Unit("1/s")] = 0.0
+    impurity_balance_B: Annotated[float, Unit("1/s")] = 0.0
+    pseudo_kiT: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
+        default_factory=lambda: np.zeros(2, dtype=np.float64)
+    )
+    pseudo_khT: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
+        default_factory=lambda: np.zeros(2, dtype=np.float64)
+    )
+    pseudo_kpTT: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
+        default_factory=lambda: np.zeros(2, dtype=np.float64)
+    )
+    pseudo_kfmTT: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
+        default_factory=lambda: np.zeros(2, dtype=np.float64)
+    )
+    pseudo_kfhT: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
+        default_factory=lambda: np.zeros(2, dtype=np.float64)
+    )
+    pseudo_kfrT: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
+        default_factory=lambda: np.zeros(2, dtype=np.float64)
+    )
+    pseudo_kfsT: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
+        default_factory=lambda: np.zeros(2, dtype=np.float64)
+    )
+    c_impurity_qssa: Annotated[float, Unit("mol/L")] = 0.0
+    impurity_qssa_applicable: Annotated[float, Unit("")] = 0.0
+    cumm_MI: Annotated[float, Unit("")] = 2.0
+    cumm_density: Annotated[float, Unit("kg/m3")] = 918.0
+    bed_level: Annotated[float, Unit("m")] = 15.0
+    bed_weight: Annotated[float, Unit("kg")] = 100.0
+    yM1: Annotated[float, Unit("")] = 0.0
+    yM2: Annotated[float, Unit("")] = 0.0
+    yH2: Annotated[float, Unit("")] = 0.0
+    pressure: Annotated[float, Unit("kPa")] = 0.0
+    mass_prod_rate: Annotated[float, Unit("kg/h")] = 0.0
 
 
 
 class GasPhaseReactorConstants(Constants):
     """Physical and kinetic parameters for the reactor."""
 
-    cat_sites_per_gram: float = 0.02718
-    cat_type1_site_fraction: float = 0.55
-    discharge_efficiency: float = 0.80
-    discharge_valve_constant: float = 5e-6
-    cross_section_area: float = 13.0 # m2
-    temperature: float = 85.0 + 273.0
-    monomer_mw: float = 28.0
-    comonomer_mw: float = 56.0
-    hydrogen_mw: float = 2.0
-    nitrogen_mw: float = 28.0
-    kf: NDArray[np.float64] = Field(
+    cat_sites_per_gram: Annotated[float, Unit("1/g")] = 0.02718
+    cat_type1_site_fraction: Annotated[float, Unit("")] = 0.55
+    discharge_efficiency: Annotated[float, Unit("")] = 0.80
+    discharge_valve_constant: Annotated[float, Unit("L/(s*kPa**2)")] = 5e-6
+    cross_section_area: Annotated[float, Unit("m2")] = 13.0
+    temperature: Annotated[float, Unit("K")] = 85.0 + 273.0
+    monomer_mw: Annotated[float, Unit("g/mol")] = 28.0
+    comonomer_mw: Annotated[float, Unit("g/mol")] = 56.0
+    hydrogen_mw: Annotated[float, Unit("g/mol")] = 2.0
+    nitrogen_mw: Annotated[float, Unit("g/mol")] = 28.0
+    kf: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: np.array([1.0, 1.0], dtype=np.float64)
         * np.array([3e-3, 3e-3], dtype=np.float64),
         description="Rate of active-site formation (per catalyst site).",
     )
-    ka: NDArray[np.float64] = Field(
+    ka: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: np.array([3e-4, 3e-4], dtype=np.float64),
         description="Reactivation of poisoned/impurity-adsorbed sites via desorption.",
     )
-    kds: NDArray[np.float64] = Field(
+    kds: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: np.array([1e-5, 1e-5], dtype=np.float64),
         description="Spontaneous active-site deactivation.",
     )
-    kdI: NDArray[np.float64] = Field(
+    kdI: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: np.array([2000.0, 2000.0], dtype=np.float64),
         description="Active-site deactivation due to poison/impurity adsorption.",
     )
-    kti: float = Field(
+    kti: Annotated[float, Unit("1/s")] = Field(
         default=1.0e2,
         description="TEAL scavenging of poisons (lumped rate constant).",
     )
-    khr: NDArray[np.float64] = Field(
+    khr: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: np.array([20.0, 20.0], dtype=np.float64),
         description="Site (re)labeling/activation by TEAL at H₂-labeled active sites.",
     )
-    ki1: NDArray[np.float64] = Field(
+    ki1: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: np.array([1e-3, 1e-3], dtype=np.float64),
         description="Chain initiation with monomer 1 at an active site.",
     )
-    ki2: NDArray[np.float64] = Field(
+    ki2: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.14, 0.14], dtype=np.float64)
                                  * np.array([1e-3, 1e-3], dtype=np.float64)),
         description="Chain initiation with monomer 2 at an active site.",
     )
-    kh1: NDArray[np.float64] = Field(
+    kh1: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([1.0, 1.0], dtype=np.float64)
                                  * np.array([6e-3, 6e-3], dtype=np.float64)),
         description="Chain initiation with monomer 1 at an H₂-labeled site.",
     )
-    kh2: NDArray[np.float64] = Field(
+    kh2: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.1, 0.1], dtype=np.float64)
                                  * np.array([6e-3, 6e-3], dtype=np.float64)),
         description="Chain initiation with monomer 2 at an H₂-labeled site.",
     )
-    kp11: NDArray[np.float64] = Field(
+    kp11: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([85.0, 85.0], dtype=np.float64)
                                  * np.array([2e-1, 2e-1], dtype=np.float64)),
         description="Propagation with monomer 1 at a monomer-1-labeled site.",
     )
-    kp12: NDArray[np.float64] = Field(
+    kp12: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([2.0, 15.0], dtype=np.float64)
                                  * np.array([2e-1, 3e-1], dtype=np.float64)),
         description="Propagation with monomer 2 at a monomer-1-labeled site.",
     )
-    kp21: NDArray[np.float64] = Field(
+    kp21: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([64.0, 64.0], dtype=np.float64)
                                  * np.array([2e-1, 2e-1], dtype=np.float64)),
         description="Propagation with monomer 1 at a monomer-2-labeled site.",
     )
-    kp22: NDArray[np.float64] = Field(
+    kp22: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([1.5, 6.2], dtype=np.float64)
                                  * np.array([3e-1, 3e-1], dtype=np.float64)),
         description="Propagation with monomer 2 at a monomer-2-labeled site.",
     )
-    kfm11: NDArray[np.float64] = Field(
+    kfm11: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.0021, 0.0021], dtype=np.float64)
                                  * np.array([2e-1, 2e-1], dtype=np.float64)),
         description="Chain transfer to monomer 1 at a monomer-1-labeled site.",
     )
-    kfm12: NDArray[np.float64] = Field(
+    kfm12: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.006, 0.11], dtype=np.float64)
                                  * np.array([2e-1, 2e-1], dtype=np.float64)),
         description="Chain transfer to monomer 2 at a monomer-1-labeled site.",
     )
-    kfm21: NDArray[np.float64] = Field(
+    kfm21: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.0021, 0.001], dtype=np.float64)
                                  * np.array([2e-1, 2e-1], dtype=np.float64)),
         description="Chain transfer to monomer 1 at a monomer-2-labeled site.",
     )
-    kfm22: NDArray[np.float64] = Field(
+    kfm22: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.006, 0.11], dtype=np.float64)
                                  * np.array([2e-1, 2e-1], dtype=np.float64)),
         description="Chain transfer to monomer 2 at a monomer-2-labeled site.",
     )
-    kfh1: NDArray[np.float64] = Field(
+    kfh1: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.088, 0.37], dtype=np.float64)
                                  * np.array([4.0e-1, 6.9e-1], dtype=np.float64)),
         description="Chain transfer to hydrogen at a monomer-1-labeled site.",
     )
-    kfh2: NDArray[np.float64] = Field(
+    kfh2: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.088, 0.37], dtype=np.float64)
                                  * np.array([4.2e-1, 6.5e-1], dtype=np.float64)),
         description="Chain transfer to hydrogen at a monomer-2-labeled site.",
     )
-    kfr1: NDArray[np.float64] = Field(
+    kfr1: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.024, 0.12], dtype=np.float64)
                                  * np.array([1e-1, 1e-1], dtype=np.float64)),
         description="Chain transfer to TEAL at a monomer-1-labeled site.",
     )
-    kfr2: NDArray[np.float64] = Field(
+    kfr2: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.048, 0.24], dtype=np.float64)
                                  * np.array([1e-1, 1e-1], dtype=np.float64)),
         description="Chain transfer to TEAL at a monomer-2-labeled site.",
     )
-    kfs1: NDArray[np.float64] = Field(
+    kfs1: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.0001, 0.0001], dtype=np.float64)
                                  * np.array([1e-2, 1e-2], dtype=np.float64)),
         description="Spontaneous chain transfer at a monomer-1-labeled site.",
     )
-    kfs2: NDArray[np.float64] = Field(
+    kfs2: Annotated[NDArray[np.float64], Unit("1/s")] = Field(
         default_factory=lambda: (np.array([0.0001, 0.0001], dtype=np.float64)
                                  * np.array([1e-2, 1e-2], dtype=np.float64)),
         description="Spontaneous chain transfer at a monomer-2-labeled site.",
     )
-    min_production_rate_for_qssa: float = 110.0
+    min_production_rate_for_qssa: Annotated[float, Unit("kg/h")] = 110.0
 
 
 class GasPhaseReactorSystem(System):

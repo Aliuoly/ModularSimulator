@@ -1,13 +1,14 @@
 from modular_simulation.framework import System
 from numpy.typing import NDArray
-from typing import Mapping
+from typing import Annotated, Mapping
 import numpy as np
 from modular_simulation.measurables import (
-    States, 
+    States,
     AlgebraicStates,
     Constants,
     ControlElements
 )
+from astropy.units import Unit
 
 
 # tank A -> tank B
@@ -15,31 +16,31 @@ from modular_simulation.measurables import (
 # tank A outlet becomes tank B inlet
 
 class TankAStates(States):
-    V_A: float
+    V_A: Annotated[float, Unit("L")]
 
 class TankAControlElements(ControlElements):
-    F_in_A: float
+    F_in_A: Annotated[float, Unit("L/s")]
 
 class TankAAlgebraicStates(AlgebraicStates):
-    F_out_A: float
+    F_out_A: Annotated[float, Unit("L/s")]
 
 class TankAConstants(Constants):
-    Cv_F_out_A: float
+    Cv_F_out_A: Annotated[float, Unit("(L**0.5)/s")]
 
 
 
 class TankBStates(States):
-    V_B: float
+    V_B: Annotated[float, Unit("L")]
 
 class TankBControlElements(ControlElements):
     pass
 
 class TankBAlgebraicStates(AlgebraicStates):
-    F_in_B: float
-    F_out_B: float
+    F_in_B: Annotated[float, Unit("L/s")]
+    F_out_B: Annotated[float, Unit("L/s")]
     
 class TankBConstants(Constants):
-    Cv_F_out_B: float
+    Cv_F_out_B: Annotated[float, Unit("(L**0.5)/s")]
 
 class TankASystem(System):
     

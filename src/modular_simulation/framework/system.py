@@ -382,7 +382,7 @@ class System(BaseModel, ABC):
         """
         used to 'extend' the setpoint trajectory of a controller from the current time onwards.
         If the trajectory has already been defined into the future, the trajectory is trimmed
-        back to the current time. 
+        back to the current time.
 
         cv_tag is used to specify which controller
         
@@ -410,7 +410,18 @@ class System(BaseModel, ABC):
                         "from %(old)0.1e to %(new)0.1e",
                         {'tag': cv_tag, 'time': self._t, 'old': old_value, 'new': new_value})
         return active_trajectory
-        
+
+    def set_controller_mode(self, cv_tag: str, mode: ControllerMode | str) -> ControllerMode:
+        """Change the mode of a controller identified by ``cv_tag``."""
+        if cv_tag not in self.controller_dictionary:
+            raise ValueError(
+                f"Specified cv_tag '{cv_tag}' does not correspond to any defined controllers. "
+                f"Available controller cv_tags are {self.cv_tag_list}."
+            )
+        controller = self.controller_dictionary[cv_tag]
+        controller.change_control_mode(mode)
+        return controller.mode
+
     @cached_property
     def controller_dictionary(self) -> Dict[str, "Controller"]:
         return_dict = {}
@@ -424,6 +435,11 @@ class System(BaseModel, ABC):
     @cached_property
     def cv_tag_list(self) -> List[str]:
         return list(self.controller_dictionary.keys())
+
+    @property
+    def time(self) -> float:
+        """Return the current simulation time."""
+        return self._t
 
     @property
     def measured_history(self) -> Dict[str, Any]:

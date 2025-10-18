@@ -1,5 +1,3 @@
-import matplotlib.pyplot as plt
-
 try:
     from .system_definitions import (
         IrreversibleStates,
@@ -22,7 +20,6 @@ from modular_simulation.framework import create_system
 from modular_simulation.control_system import Trajectory, PIDController
 from typing import List, TYPE_CHECKING
 import logging
-import matplotlib as mpl
 from astropy.units import Unit, UnitBase
 
 if TYPE_CHECKING:
@@ -83,12 +80,11 @@ def make_systems():
     controllers=[
         PIDController(
             cv_tag="B",
-            mv_tag = "F_in",
-            sp_trajectory=Trajectory(0.5),
-            sp_unit=Unit("mol/L"),
+            mv_tag="F_in",
+            sp_trajectory=Trajectory(0.5, Unit("mol/L")),
             Kp=1.0e-1,
             Ti=100.0,
-            mv_range = (0, 100.)
+            mv_range=(0 * Unit("L/s"), 100 * Unit("L/s")),
         )
     ]
 
@@ -96,7 +92,7 @@ def make_systems():
 
 
     # --- 2. Assemble and Initialize the System ---
-    dt = 30.
+    dt = 30.0 * Unit("s")
     normal_system = create_system(
         dt = dt,
         system_class = IrreversibleSystem,
@@ -131,6 +127,9 @@ fast_system = systems["fast"]
 normal_system = systems["normal"]
 if __name__ == "__main__":
 
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+
     logging.basicConfig(
     level=logging.INFO,
     format="%(message)s"
@@ -144,10 +143,10 @@ if __name__ == "__main__":
     for j, (system_name, system) in enumerate(systems.items()):
         plt.figure(figsize=(12, 8))
         # --- First simulation run ---
-        system.step(nsteps = 5000) #type: ignore
+        system.step(5000 * dt)
         # --- Change the setpoint and continue the simulation ---
-        system.extend_controller_trajectory(cv_tag = "B", value = 0.2)
-        system.step(nsteps = 5000)  #type: ignore
+        system.extend_controller_trajectory(cv_tag="B", value=0.2)
+        system.step(5000 * dt)
             
 
         # 3. Plot the results.

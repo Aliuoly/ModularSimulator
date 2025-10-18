@@ -101,7 +101,7 @@ main {
 }
 
 .controller-card__setpoint button,
-#speed-form button {
+.control-form button {
   padding: 0.45rem 0.9rem;
   background: #2563eb;
   color: #ffffff;
@@ -118,7 +118,7 @@ main {
 }
 
 .controller-card__setpoint button:not(:disabled):hover,
-#speed-form button:hover {
+.control-form button:hover {
   background: #1d4ed8;
 }
 
@@ -146,13 +146,20 @@ main {
   color: #b91c1c;
 }
 
-#speed-form {
+.control-forms {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 0.75rem;
 }
 
-#speed-form input {
+.control-form {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.control-form input {
   max-width: 6rem;
   padding: 0.4rem 0.6rem;
   border: 1px solid #d1d5db;
@@ -234,7 +241,7 @@ main {
     padding: 1.25rem 1.5rem;
   }
 
-  #speed-form {
+  .control-form {
     flex-direction: column;
     align-items: flex-start;
   }

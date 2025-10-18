@@ -99,6 +99,7 @@ function initCharts() {
     maintainAspectRatio: false,
     interaction: { mode: "nearest", intersect: false },
     parsing: false,
+    animation: false,
     scales: {
       x: {
         type: "linear",
@@ -107,6 +108,11 @@ function initCharts() {
     },
     plugins: {
       legend: { position: "top" },
+      decimation: {
+        enabled: true,
+        algorithm: "lttb",
+        samples: MAX_POINTS_PER_SERIES,
+      },
     },
   };
 
@@ -158,12 +164,17 @@ function updateCharts(data) {
     return;
   }
 
+  latestTrendPayload = data;
+
   const sensorData = data.sensors || {};
   const setpoints = data.setpoints || {};
   const manipulated = data.manipulated || {};
 
-  const bSensor = sensorData.B ? buildPoints(sensorData.B.data) : [];
-  const bSetpoint = setpoints.B ? buildPoints(setpoints.B.data) : [];
+  const rawTime = Number(data?.time);
+  const currentTimeMinutes = Number.isFinite(rawTime) ? rawTime / 60.0 : undefined;
+
+  const bSensor = sensorData.B ? buildPoints(sensorData.B.data, timeWindowMinutes) : [];
+  const bSetpoint = setpoints.B ? buildPoints(setpoints.B.data, timeWindowMinutes) : [];
 
   const bDatasets = [
     {
@@ -189,9 +200,9 @@ function updateCharts(data) {
   applyRange(charts.b, bDatasets);
   charts.b.update("none");
 
-  const fInSensor = sensorData.F_in ? buildPoints(sensorData.F_in.data) : [];
-  const fOutSensor = sensorData.F_out ? buildPoints(sensorData.F_out.data) : [];
-  const fInCommand = manipulated.F_in ? buildPoints(manipulated.F_in.data) : [];
+  const fInSensor = sensorData.F_in ? buildPoints(sensorData.F_in.data, timeWindowMinutes) : [];
+  const fOutSensor = sensorData.F_out ? buildPoints(sensorData.F_out.data, timeWindowMinutes) : [];
+  const fInCommand = manipulated.F_in ? buildPoints(manipulated.F_in.data, timeWindowMinutes) : [];
 
   const flowDatasets = [
     {
@@ -375,9 +386,18 @@ async function fetchControllers() {
   }
 }
 
+function trendRequestPoints() {
+  if (Number.isFinite(timeWindowMinutes) && timeWindowMinutes > 0) {
+    const desired = Math.round(timeWindowMinutes * SERVER_POINTS_PER_MINUTE);
+    return Math.max(MIN_SERVER_POINTS, Math.min(MAX_SERVER_POINTS, desired));
+  }
+  return MIN_SERVER_POINTS;
+}
+
 async function fetchTrends() {
   try {
-    const response = await fetch("/api/trends?points=300");
+    const points = trendRequestPoints();
+    const response = await fetch(`/api/trends?points=${points}`);
     if (!response.ok) {
       throw new Error(await response.text());
     }
@@ -463,14 +483,44 @@ function setupEventHandlers() {
   if (speedForm) {
     speedForm.addEventListener("submit", onSpeedSubmit);
   }
+
+  const timeWindowForm = document.getElementById("time-window-form");
+  if (timeWindowForm) {
+    timeWindowForm.addEventListener("submit", onTimeWindowSubmit);
+  }
 }
 
 async function bootstrap() {
   initCharts();
   setupEventHandlers();
+  const timeWindowInput = document.getElementById("time-window-input");
+  if (timeWindowInput) {
+    timeWindowInput.value = String(DEFAULT_TIME_WINDOW_MINUTES);
+  }
   await fetchControllers();
   await fetchTrends();
   setInterval(fetchTrends, 1500);
 }
 
 window.addEventListener("DOMContentLoaded", bootstrap);
+
+function onTimeWindowSubmit(event) {
+  event.preventDefault();
+  const input = document.getElementById("time-window-input");
+  if (!input) {
+    return;
+  }
+
+  const value = parseFloat(input.value);
+  if (Number.isNaN(value) || value <= 0) {
+    showMessage("Trend window must be a positive number of minutes.", "error");
+    return;
+  }
+
+  timeWindowMinutes = value;
+  showMessage(`Trend window set to ${numberFormatter.format(timeWindowMinutes)} minutes.`, "success");
+  if (latestTrendPayload) {
+    updateCharts(latestTrendPayload);
+  }
+  fetchTrends();
+}

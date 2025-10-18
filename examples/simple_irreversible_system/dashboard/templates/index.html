@@ -19,11 +19,18 @@
     <main>
       <section class="panel">
         <h2>Simulation Controls</h2>
-        <form id="speed-form">
-          <label for="speed-input">Speed factor</label>
-          <input id="speed-input" type="number" min="0.1" step="0.1" value="1.0" />
-          <button type="submit">Apply</button>
-        </form>
+        <div class="control-forms">
+          <form id="speed-form" class="control-form">
+            <label for="speed-input">Speed factor</label>
+            <input id="speed-input" type="number" min="0.1" step="0.1" value="1.0" />
+            <button type="submit">Apply</button>
+          </form>
+          <form id="time-window-form" class="control-form">
+            <label for="time-window-input">Trend window (minutes)</label>
+            <input id="time-window-input" type="number" min="1" step="1" />
+            <button type="submit">Apply</button>
+          </form>
+        </div>
         <div id="message" class="message info"></div>
       </section>
       <section class="panel">

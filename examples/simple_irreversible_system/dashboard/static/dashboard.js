@@ -54,7 +54,43 @@ function formatValue(value) {
 }
 
 function buildPoints(history) {
-  return history.map((point) => ({ x: point.time / 60.0, y: point.value }));
+  if (!Array.isArray(history)) {
+    return [];
+  }
+
+  const points = [];
+  let lastX = null;
+  let lastY = null;
+
+  history.forEach((point) => {
+    if (point && point.ok === false) {
+      return;
+    }
+
+    const rawTime = Number(point?.time);
+    const rawValue = Number(point?.value);
+    if (!Number.isFinite(rawTime) || !Number.isFinite(rawValue)) {
+      return;
+    }
+
+    const x = rawTime / 60.0;
+    const y = rawValue;
+
+    if (
+      lastX !== null &&
+      lastY !== null &&
+      Math.abs(x - lastX) < 1e-9 &&
+      Math.abs(y - lastY) < 1e-9
+    ) {
+      return;
+    }
+
+    points.push({ x, y });
+    lastX = x;
+    lastY = y;
+  });
+
+  return points;
 }
 
 function initCharts() {
@@ -136,6 +172,9 @@ function updateCharts(data) {
       borderColor: "#2563eb",
       backgroundColor: "rgba(37, 99, 235, 0.2)",
       tension: 0.2,
+      spanGaps: true,
+      pointRadius: 2,
+      pointHoverRadius: 4,
     },
     {
       label: "B Setpoint",

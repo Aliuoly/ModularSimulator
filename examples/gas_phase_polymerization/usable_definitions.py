@@ -7,25 +7,49 @@ from calculations.misc_calculations import (
     AlTiRatioEstimator,
     Monomer1PartialPressure
 )
-
+from astropy.units import Unit
+from modular_simulation.usables.calculations.first_order_filter import FirstOrderFilter
+from functools import partial
+analyzer_partial = partial(
+    SampledDelayedSensor, 
+    deadtime = 120., 
+    sampling_period = 120.,
+    coefficient_of_variance = 0.01, # 1% rel std
+    ) # 2 min delay and sampling period
 sensors = [
-    SampledDelayedSensor(measurement_tag="yM1"),
-    SampledDelayedSensor(measurement_tag="yM2"),
-    SampledDelayedSensor(measurement_tag="yH2"),
-    SampledDelayedSensor(measurement_tag="pressure"),
-    SampledDelayedSensor(measurement_tag="bed_weight"),
-    SampledDelayedSensor(measurement_tag="mass_prod_rate"),
+    analyzer_partial(measurement_tag="yM1"),
+    analyzer_partial(measurement_tag="yM2"),
+    analyzer_partial(measurement_tag="yH2"),
+    SampledDelayedSensor(
+        measurement_tag="pressure",
+        coefficient_of_variance = 0.02,
+        ),
+    SampledDelayedSensor(
+        measurement_tag="bed_weight",
+        coefficient_of_variance = 0.03,
+        ),
+    SampledDelayedSensor(
+        measurement_tag="mass_prod_rate",
+        deadtime = 120., 
+        sampling_period = 120.,
+        coefficient_of_variance = 0.02,
+        time_constant = 600.0, # system time units -> seconds
+    ),
     SampledDelayedSensor(
         measurement_tag="cumm_MI", alias_tag="lab_MI",
         deadtime = 2 * 3600,
-        sampling_period = 2 * 3600,# 2 hours
+        sampling_period = 2 * 3600,# 2 hours,
+        instrument_range = (0.05, 200.)
     ),
     SampledDelayedSensor(
         measurement_tag="cumm_density", alias_tag = "lab_density",
         deadtime = 2 * 3600,
         sampling_period = 2 * 3600,# 2 hours
+        instrument_range = (900, 970)
     ),
-    SampledDelayedSensor(measurement_tag="bed_level"),
+    SampledDelayedSensor(measurement_tag="bed_level",
+        coefficient_of_variance = 0.03,
+        ),
     SampledDelayedSensor(measurement_tag="F_cat"),
     SampledDelayedSensor(measurement_tag="F_teal"),
     SampledDelayedSensor(measurement_tag="F_m1"),
@@ -36,6 +60,19 @@ sensors = [
     SampledDelayedSensor(measurement_tag="discharge_valve_position"),
 ]
 calculations = [
+    FirstOrderFilter(
+        name = 'mass_prod_rate_filter',
+        raw_signal_tag = 'mass_prod_rate',
+        filtered_signal_tag = 'filtered_mass_prod_rate',
+        time_constant = 600., # system time units again. 
+    ),
+    FirstOrderFilter(
+        name = 'pressure_filter',
+        raw_signal_tag = 'pressure',
+        filtered_signal_tag = 'filtered_pressure',
+        signal_unit = Unit("kPa"),
+        time_constant = 300., # system time units again. 
+    ),
     MoleRatioCalculation(
         rM2_tag = "rM2",
         rH2_tag = "rH2",
@@ -46,17 +83,17 @@ calculations = [
     Monomer1PartialPressure(
         pM1_tag = "pM1", 
         yM1_tag = "yM1",
-        pressure_tag = "pressure"
+        pressure_tag = "filtered_pressure"
     ),
     ResidenceTimeCalculation(
         residence_time_tag = "residence_time", 
-        mass_prod_rate_tag = "mass_prod_rate", 
+        mass_prod_rate_tag = "filtered_mass_prod_rate", 
         bed_weight_tag = "bed_weight",  
     ),
     CatInventoryEstimator(
         cat_inventory_tag = "cat_inventory",
         F_cat_tag = "F_cat",
-        mass_prod_rate_tag = "mass_prod_rate",
+        mass_prod_rate_tag = "filtered_mass_prod_rate",
         bed_weight_tag = "bed_weight",  
     ),
     AlTiRatioEstimator(

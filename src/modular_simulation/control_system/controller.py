@@ -8,9 +8,10 @@ from pydantic import BaseModel, PrivateAttr, Field, ConfigDict
 from modular_simulation.usables.tag_info import TagData, TagInfo
 from modular_simulation.control_system.trajectory import Trajectory
 from modular_simulation.validation.exceptions import ControllerConfigurationError
-from astropy.units import Quantity, UnitBase
+from astropy.units import Quantity, UnitBase, UnitConversionError
 if TYPE_CHECKING:
     from modular_simulation.measurables import ControlElements
+    from modular_simulation.quantities import UsableQuantities
 import logging
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,7 @@ class Controller(BaseModel, ABC):
     _last_output: TagData = PrivateAttr()
     _u0: float | NDArray = PrivateAttr(default = 0.)
     _sp_history: List[TagData] = PrivateAttr(default_factory = list)
+    _mv_system_unit: UnitBase = PrivateAttr()
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
 
     def _make_sp_tag_info_and_mv_range(self, tag_infos: List[TagInfo]):
@@ -118,7 +120,6 @@ class Controller(BaseModel, ABC):
         """
         for tag_info in tag_infos:
             if tag_info.tag == self.cv_tag:
-                print(tag_info)
                 self._sp_tag_info = TagInfo(
                     tag = f"{self.cv_tag}.sp", 
                     unit = self.sp_trajectory.unit,
@@ -128,8 +129,13 @@ class Controller(BaseModel, ABC):
             if tag_info.tag == self.mv_tag:
                 converted_range = [0., 0.]
                 for i in range(2):
-                    if self.mv_range[i].unit.is_equivalent(tag_info.unit): #type: ignore
+                    try:
+                        self._mv_system_unit = tag_info.unit
                         converted_range[i] = self.mv_range[i].to(tag_info.unit).value #type: ignore
+                    except (UnitConversionError, AttributeError) as ex:
+                        raise ControllerConfigurationError(
+                            f"{self.cv_tag} controller's mv_range is improperly defined: {ex}"
+                        )
                 self._converted_mv_range_value = tuple(converted_range) #type: ignore
         return self._sp_tag_info
         
@@ -164,6 +170,7 @@ class Controller(BaseModel, ABC):
         control_elements: "ControlElements",
         ) -> None:
         # validation already done during quantity initiation. No error checking here. 
+
         for control_element_name in control_elements.model_dump():
             if control_element_name == self.mv_tag:
                 # set the '0 point' value with whatever the measurement is
@@ -239,10 +246,15 @@ class Controller(BaseModel, ABC):
     def _initialize(
         self,
         tag_infos: List[TagInfo], 
+        usable_quantities: "UsableQuantities", # kept for IMC intiialization. I hate it. 
         control_elements: "ControlElements",
         is_final_control_element: bool = True,
         ) -> None:
-
+        """
+        Finds the mv and cv for the controller and create cv getters and
+        mv setters (simple callables). Also initializes the control mode
+        to be the highest cascaded & valid configuration. 
+        """
         logger.debug(f"Initializing '{self.cv_tag}' controller.")
         
         # A. check if is final control element and initialize mv setter if is
@@ -267,8 +279,9 @@ class Controller(BaseModel, ABC):
                 logger.debug(f"'{self.cv_tag}' controller not in CASCADE mode -> cascade controller forced to TRACKING. ")
             
             self.cascade_controller._initialize(
-                tag_infos, 
-                control_elements, 
+                tag_infos = tag_infos, 
+                usable_quantities = usable_quantities,
+                control_elements = control_elements, 
                 is_final_control_element=False,
                 )
         
@@ -319,6 +332,10 @@ class Controller(BaseModel, ABC):
 
         # compute control output
         control_output = self._control_algorithm(t = t, cv = cv.value, sp = sp_val)
+        if np.isnan(control_output):
+            raise ValueError(
+                f"{self.cv_tag} controller output is NAN!"
+            )
         control_output = np.clip(control_output, *self._converted_mv_range_value)
         ramp_output = self._apply_mv_ramp(
             t0 = self._last_output.time, mv0 = self._last_output.value, mv_target = control_output, t_now = t

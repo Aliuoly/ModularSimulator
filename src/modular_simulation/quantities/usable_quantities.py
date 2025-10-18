@@ -39,6 +39,7 @@ class UsableQuantities(BaseModel):
 
     _usable_results: Dict[str, "TagData"] = PrivateAttr(default_factory=dict)
     _tag_infos: List[TagInfo] = PrivateAttr(default_factory=list)
+    _initialized: bool = PrivateAttr(default = False)
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = 'forbid')
 
@@ -50,7 +51,7 @@ class UsableQuantities(BaseModel):
                 sensor.unit = self.measurable_quantities.tag_unit_info[sensor.measurement_tag]
                 sensor._tag_info.unit = sensor.unit
         for calculation in self.calculations:
-            for output_tag_info in calculation._output_tag_infos:
+            for output_tag_info in calculation._output_tag_info_dict.values():
                 self._tag_infos.append(output_tag_info)
         # controller needs cv info so have to pass in tag_infos
         for controller in self.controllers:
@@ -71,17 +72,16 @@ class UsableQuantities(BaseModel):
                 "errors encountered during usable quantity instantiation:", 
                 exception_group
                 )
-
+        return self
+    
+    def _initialize(self):
         for sensor in self.sensors:
             sensor._initialize(self.measurable_quantities)
         for calculation in self.calculations:
             calculation._initialize(self._tag_infos)
         for controller in self.controllers:
-            controller._initialize(self._tag_infos, self.measurable_quantities.control_elements)
-        self.update(t = 0)
-
-        return self
-    
+            controller._initialize(self._tag_infos, self, self.measurable_quantities.control_elements)
+        self._initialized = True
     def _validate_sensors_resolvable(self):
         exception_group = []
         available_measurement_tags = self.measurable_quantities.tag_list
@@ -125,7 +125,7 @@ class UsableQuantities(BaseModel):
         all_tags = [tag_info.tag for tag_info in self._tag_infos]
         for calculation in self.calculations:
             missing_input_tags = []
-            for input_tag_info in calculation._input_tag_infos:
+            for input_tag_info in calculation._input_tag_info_dict.values():
                 if input_tag_info.tag not in all_tags:
                     missing_input_tags.append(input_tag_info.tag)
                 if len(missing_input_tags) > 0:
@@ -193,6 +193,11 @@ class UsableQuantities(BaseModel):
         Results are automatically linked to the controllers that depend on these 
         but a dictionary of results is still returned for tracking. 
         """
+        if not self._initialized:
+            raise RuntimeError(
+                "usable quantity is not initialized. Ensure this quantity instance "
+                "belongs to a System, and the system has been constructed. "
+            )
         # fyi, this looping method is faster than caching the sensor callable
         # and tag in a dictionary and bypassing attribute lookup.
         # It is also faster than callaing dict.update on a newly constructed

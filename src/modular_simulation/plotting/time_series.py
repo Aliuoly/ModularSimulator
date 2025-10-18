@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Iterable, List, Tuple, TYPE_CHECKING
+from typing import Any, Iterable, List, Tuple, TYPE_CHECKING, Callable
 
 import numpy as np
 
@@ -84,6 +84,7 @@ def plot_triplet_series(
     style: str = "line",
     line_kwargs: Mapping[str, Any] | None = None,
     bad_kwargs: Mapping[str, Any] | None = None,
+    time_converter: Callable
 ) -> List[Any]:
     """Plot a :class:`TagData` series on ``ax``.
 
@@ -113,6 +114,7 @@ def plot_triplet_series(
     """
 
     times, values, ok = _extract_series(samples)
+    times = time_converter(times)
     artists: List[Any] = []
 
     if times.size == 0:

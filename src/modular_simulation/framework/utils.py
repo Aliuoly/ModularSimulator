@@ -1,6 +1,5 @@
 from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
 from modular_simulation.quantities.usable_quantities import UsableQuantities
-from modular_simulation.quantities.controllable_quantities import ControllableQuantities
 from typing import Any, Dict, List, TYPE_CHECKING, Type
 from modular_simulation.framework.system import System
 if TYPE_CHECKING:
@@ -38,13 +37,13 @@ def create_system(
     unnecessary. Measurements are still historized regardless.
     """
     # 1. Create the components for this specific system instance
-    copied_states = deepcopy(initial_states)
-    copied_controls = deepcopy(initial_controls)
-    copied_algebraic = deepcopy(initial_algebraic)
-    copied_sensors = [deepcopy(s) for s in sensors]
-    copied_calculations = [deepcopy(c) for c in calculations]
-    copied_controllers = [deepcopy(c) for c in controllers]
-    copied_constants = deepcopy(system_constants)
+    copied_states = initial_states.model_copy()
+    copied_controls = initial_controls.model_copy()
+    copied_algebraic = initial_algebraic.model_copy()
+    copied_constants = system_constants.model_copy()
+    copied_sensors = [s.model_copy() for s in sensors]
+    copied_calculations = [c.model_copy() for c in calculations]
+    copied_controllers = [c.model_copy() for c in controllers]
 
     measurables = MeasurableQuantities(
         states=copied_states,
@@ -60,12 +59,6 @@ def create_system(
         measurable_quantities=measurables,
     )
 
-    controllables = ControllableQuantities(
-        controllers=copied_controllers,
-        control_elements=measurables.control_elements,
-        usable_quantities=usables
-    )
-
     # link measurables to usables
     
     # 3. Assemble the final system object
@@ -73,7 +66,6 @@ def create_system(
         dt = dt,
         measurable_quantities=measurables,
         usable_quantities=usables,
-        controllable_quantities=controllables,
         solver_options=solver_options,
         record_history=record_history,
         use_numba=use_numba,

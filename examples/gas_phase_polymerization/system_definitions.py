@@ -62,7 +62,7 @@ class GasPhaseReactorStates(States):
     B: Annotated[NDArray[np.float64], Unit("")] = Field(
         default_factory=lambda: np.array([1e-20, 1e-20])
     )
-    V_poly: Annotated[float, Unit("L")] = 200.0e3
+    V_poly: Annotated[float, Unit("L")] = 108.0e3 # ~100 ton bed for 918 g/L density
     V_gas: Annotated[float, Unit("L")] = 1000.0e3
 
 
@@ -77,7 +77,7 @@ class GasPhaseReactorControlElements(ControlElements):
     F_h2: Annotated[float, Unit("kg/h")] = 0.0
     F_n2: Annotated[float, Unit("kg/h")] = 0.0
     F_vent: Annotated[float, Unit("L/s")] = 0.0
-    F_teal: Annotated[float, Unit("kg/h")] = 0.0
+    F_teal: Annotated[float, Unit("mol/s")] = 0.0
     F_impurity: Annotated[float, Unit("kg/h")] = 0.0
     discharge_valve_position: Annotated[float, Unit("")] = 0.0
 
@@ -85,8 +85,8 @@ class GasPhaseReactorControlElements(ControlElements):
 class GasPhaseReactorAlgebraicStates(AlgebraicStates):
     """Derived quantities required by the differential balances."""
 
-    hydrogen_rate: Annotated[float, Unit("mol/(L*s)")] = 0.0
-    monomer_rates: Annotated[NDArray[np.float64], Unit("mol/(L*s)")] = Field(
+    hydrogen_rate: Annotated[float, Unit("mol/s")] = 0.0
+    monomer_rates: Annotated[NDArray[np.float64], Unit("mol/s")] = Field(
         default_factory=lambda: np.zeros(2, dtype=np.float64)
     )
     vol_prod_rate: Annotated[float, Unit("L/s")] = 0.0
@@ -120,14 +120,14 @@ class GasPhaseReactorAlgebraicStates(AlgebraicStates):
     c_impurity_qssa: Annotated[float, Unit("mol/L")] = 0.0
     impurity_qssa_applicable: Annotated[float, Unit("")] = 0.0
     cumm_MI: Annotated[float, Unit("")] = 2.0
-    cumm_density: Annotated[float, Unit("kg/m3")] = 918.0
+    cumm_density: Annotated[float, Unit("g/L")] = 918.0
     bed_level: Annotated[float, Unit("m")] = 15.0
-    bed_weight: Annotated[float, Unit("kg")] = 100.0
+    bed_weight: Annotated[float, Unit("tonne")] = 100.0
     yM1: Annotated[float, Unit("")] = 0.0
     yM2: Annotated[float, Unit("")] = 0.0
     yH2: Annotated[float, Unit("")] = 0.0
     pressure: Annotated[float, Unit("kPa")] = 0.0
-    mass_prod_rate: Annotated[float, Unit("kg/h")] = 0.0
+    mass_prod_rate: Annotated[float, Unit("tonne/h")] = 0.0
 
 
 
@@ -138,7 +138,7 @@ class GasPhaseReactorConstants(Constants):
     cat_type1_site_fraction: Annotated[float, Unit("")] = 0.55
     discharge_efficiency: Annotated[float, Unit("")] = 0.80
     discharge_valve_constant: Annotated[float, Unit("L/(s*kPa**2)")] = 5e-6
-    cross_section_area: Annotated[float, Unit("m2")] = 13.0
+    cross_section_area: Annotated[float, Unit("m2")] = 7.5
     temperature: Annotated[float, Unit("K")] = 85.0 + 273.0
     monomer_mw: Annotated[float, Unit("g/mol")] = 28.0
     comonomer_mw: Annotated[float, Unit("g/mol")] = 56.0

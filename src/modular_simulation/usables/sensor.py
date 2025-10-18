@@ -3,7 +3,6 @@ import numpy as np
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 from typing import TYPE_CHECKING, Any, List, Callable, Optional
-from modular_simulation.usables.tag_info import TagData
 from astropy.units import UnitBase
 from modular_simulation.usables.tag_info import TagData, TagInfo
 
@@ -59,12 +58,27 @@ class Sensor(BaseModel, ABC):
             "if True, the .ok field of the measurement result will be set automatically. "
             "if False, the .ok field of the measurement will not be set by the sensor routine. "
         ))
-    
+    instrument_range: tuple[float,float] = Field(
+        default_factory = lambda : (-np.inf, np.inf),
+        description = (
+            "the range of value this sensor can return. "
+            "If true value is beyong the range, it is clipped and returned."
+        )
+    )
+    time_constant: float = Field(
+        default = 0.0,
+        description = (
+            "The timeconstant associated with the dynamics of "
+            "this sensor. The final measurement is then filtered "
+            "based on this time constant to mimic sensor dynamics. "
+        )
+    )
     random_seed: int = Field(0)
 
     _rng: np.random.Generator = PrivateAttr()
-    _last_value: TagData | None = PrivateAttr(default = None)
     _tag_info: TagInfo = PrivateAttr()
+    _last_measurement: float|NDArray|None = PrivateAttr(default = None)
+    _last_t: float = PrivateAttr(default = 0)
     _initialized: bool = PrivateAttr(default = False)
     _measurement_getter: Callable[[], float | NDArray] = PrivateAttr()
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -83,7 +97,7 @@ class Sensor(BaseModel, ABC):
         """
         Links the measurable quantities instance and
         finds the correct attribute to measure and creates a simple callable for it.
-        This runs during system initialization.
+        Also calls the .update method once to populate the sensor's TagData instance. 
         Validation is already done so no error handling is placed here. 
         """
         search_order = list(measurable_quantities.model_dump())
@@ -95,12 +109,14 @@ class Sensor(BaseModel, ABC):
                     get_converter(self._tag_info.unit)
                 self._measurement_getter = make_measurement_getter(owner, self.measurement_tag, converter)
                 self._initialized = True
+                self.measure(t = 0)
+                
                 return
 
     # --- Template Method ---
     def measure(self, t: float) -> TagData:
         """
-        Public method that defines the complete measurement algorithm.
+        Public method that defines the complete measurement algorithm. 
         """
         if not self._initialized:
             raise RuntimeError(
@@ -115,8 +131,12 @@ class Sensor(BaseModel, ABC):
         raw_value = self._measurement_getter()
 
         # 3. Apply subclass-specific processing (e.g., time delay) to the true value
-        processed_value = self._get_processed_value(t = t, raw_value = raw_value)
-
+        processed_value = np.clip(
+            self._get_processed_value(t = t, raw_value = raw_value), 
+            *self.instrument_range
+            )
+        processed_value = self._sensor_dynamics(processed_value, t)
+        
         # 4. Apply noise and faults to the processed value
         final_value, is_faulty = self._apply_noise_and_faults(processed_value)
 
@@ -125,6 +145,20 @@ class Sensor(BaseModel, ABC):
         #     If you want to use it though, change it lol. 
         ok = True if not self.faulty_aware else (not is_faulty)
         self._tag_info.data = TagData(time = t, value = final_value, ok = ok)
+    
+    def _sensor_dynamics(self, new_value: float|NDArray, t: float):
+        if self._last_measurement is None:
+            self._last_measurement = new_value
+        dt = t - self._last_t
+        if dt < 1e-12:
+            return self._last_measurement
+        lamb = dt / (self.time_constant + dt)
+        self._last_t = t
+        self._last_measurement = lamb * new_value + (1-lamb) * self._last_measurement
+        return self._last_measurement
+    @property
+    def _last_value(self) -> TagData:
+        return self._tag_info.data
     
     @abstractmethod
     def _should_update(self, t: float) -> bool:

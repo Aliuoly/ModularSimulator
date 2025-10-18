@@ -1,13 +1,12 @@
 import numpy as np
-from typing import Literal, Dict, Tuple, Deque
+from typing import Literal, Dict, Tuple, Deque, Annotated
 from numpy.typing import NDArray
 from pydantic import Field, PrivateAttr
+from astropy.units import Unit #type:ignore
 from modular_simulation.usables import (
     Calculation, 
-    Constant, 
-    CalculatedTag, 
-    MeasuredTag, 
-    OutputTag
+    TagMetadata,
+    TagType,
 )
 import collections
 
@@ -44,38 +43,38 @@ class PropertyEstimator(Calculation):
 
     
     """
-    inst_MI_tag: OutputTag
-    inst_density_tag: OutputTag
-    cumm_MI_tag: OutputTag
-    cumm_density_tag: OutputTag
+    inst_MI_tag: Annotated[str, TagMetadata(TagType.OUTPUT, Unit())] # DON'T need to convert unit here, so I left it out
+    inst_density_tag: Annotated[str, TagMetadata(TagType.OUTPUT, Unit("g/L"))]
+    cumm_MI_tag: Annotated[str, TagMetadata(TagType.OUTPUT, Unit())]
+    cumm_density_tag: Annotated[str, TagMetadata(TagType.OUTPUT, Unit("g/L"))]
 
-    mass_prod_rate_tag: MeasuredTag
-    lab_MI_tag: MeasuredTag
-    lab_density_tag: MeasuredTag
+    mass_prod_rate_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit("tonne/hour"))]
+    lab_MI_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit())]
+    lab_density_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit("g/L"))]
     
-    rM2_tag: CalculatedTag
-    rH2_tag: CalculatedTag
-    residence_time_tag: CalculatedTag
+    rM2_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit())]
+    rH2_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit())]
+    residence_time_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit("hour"))]
 
-    MI_model_parameters: Constant = Field(
+    MI_model_parameters: Annotated[NDArray, TagMetadata(TagType.CONSTANT, Unit())] = Field(
         default_factory = lambda: np.array([0.26884, 0.10955, 4.29082, 0.46542])
     )
-    density_model_parameters: Constant = Field(
+    density_model_parameters: Annotated[NDArray, TagMetadata(TagType.CONSTANT, Unit())] = Field(
         default_factory = lambda: np.array([0.96287, 0.00170, 0.00097, 0.38550])
     )
-    MI_meas_rel_noise: Constant = 0.3/2/3 # +- 0.2 when at value of 2 / 3 to get std
-    density_meas_rel_noise: Constant = 3/918/3 # +- 2 when at value of 918, /3 to get std
-    MI_model_rel_noise: Constant = 1e-2 #these are assumed uncertainty (stdev) in the inst. models
-    density_model_rel_noise: Constant = 1e-2 # same as above
-    a1_variance: Constant = (1e-3)**2 # absolute variance
-    a2_variance: Constant = (1e-4)**2
+    MI_meas_rel_noise: Annotated[float, TagMetadata(TagType.CONSTANT, Unit())] = 0.3/2/3 # +- 0.2 when at value of 2 / 3 to get std
+    density_meas_rel_noise: Annotated[float, TagMetadata(TagType.CONSTANT, Unit())] = 3/918/3 # +- 2 when at value of 918, /3 to get std
+    MI_model_rel_noise: Annotated[float, TagMetadata(TagType.CONSTANT, Unit())] = 1e-2 #these are assumed uncertainty (stdev) in the inst. models
+    density_model_rel_noise: Annotated[float, TagMetadata(TagType.CONSTANT, Unit())] = 1e-2 # same as above
+    a1_variance: Annotated[float, TagMetadata(TagType.CONSTANT, Unit())] = (1e-3)**2 # absolute variance
+    a2_variance: Annotated[float, TagMetadata(TagType.CONSTANT, Unit())] = (1e-4)**2
 
     # some initial internal states
-    P: Constant = Field(
+    P: Annotated[NDArray, TagMetadata(TagType.CONSTANT, Unit())] = Field(
         default_factory = lambda :  np.array(np.diag([(2.0*0.00001)**2, (918*0.00001)**2, (1e-2)**2, (1e-2)**2]))
         ) # initial variance estimate, 10% for MI, 10% for density, 0.1 for a1 and a2
-    cumm_MI: Constant = 2.0
-    cumm_density: Constant = 918.0
+    cumm_MI: Annotated[float, TagMetadata(TagType.CONSTANT, Unit())] = 2.0
+    cumm_density: Annotated[float, TagMetadata(TagType.CONSTANT, Unit("g/L"))] = 918.0
 
     
 
@@ -103,11 +102,6 @@ class PropertyEstimator(Calculation):
 
         self._EKF_q.append((0, self._x.copy(), self.P.copy()))
 
-        #print("[INIT] x =", self._x.flatten())
-        #print("[INIT] MI_params =", self.MI_model_parameters)
-        #print("[INIT] density_params =", self.density_model_parameters)
-        #print("[INIT] P =", np.diag(self.P))
-
     def _calculation_algorithm(
         self, 
         t: float, 
@@ -123,8 +117,8 @@ class PropertyEstimator(Calculation):
         # alittle special here, to avoid adding trivial calculations,
         # I am going to reach into the triplet dictionary and grab the 
         # time stamp of the lab sampling times
-        lab_MI_sample_time = float(self._last_input_triplet_dict[self.lab_MI_tag].time)
-        lab_density_sample_time = float(self._last_input_triplet_dict[self.lab_density_tag].time)
+        lab_MI_sample_time = float(self._last_input_data_dict[self.lab_MI_tag].time)
+        lab_density_sample_time = float(self._last_input_data_dict[self.lab_density_tag].time)
         if prod_rate < 5:
             cumm_MI_placeholder, cumm_density_placeholder = self.compute_yhat(self._x).flatten()
             return_dict = {

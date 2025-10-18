@@ -1,6 +1,7 @@
 from pydantic import Field, PrivateAttr
 from modular_simulation.control_system.controller import Controller
 from typing import Tuple
+from astropy.units import Quantity
 import logging
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class BangBangController(Controller):
         default = 1.0,
         description = "low pass filter factor on measurement. 1.0 = no filter"
     )
-    mv_range: Tuple[float, float] = Field(
+    mv_range: Tuple[Quantity, Quantity] = Field(
         default = (0., 1.),
         description = "limits assumed to correspond to off (first element) or on (second element)"
     )

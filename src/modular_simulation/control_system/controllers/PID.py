@@ -40,6 +40,18 @@ class PIDController(Controller):
         ge = 0.0,
         description = "Time constant of the derivative filter used to smooth out derivative action"
     )
+    setpoint_weight: float = Field(
+        default = 1.0,
+        ge = 0.0,
+        le = 1.0,
+        description = (
+            "Used to implement the 2-DOF PID I-PD form. "
+            "The setpoint weight for the proportional and derivative terms. "
+            "the error for the P and D term are modified to be "
+            "weight * setpoint - pv. "
+            "if 1, corresponds to classic PID. if 0, corresponds to I-PD."
+        )
+    )
 
     # additional PID only private attributes
     _last_t: float = PrivateAttr(default=0.0)
@@ -59,16 +71,18 @@ class PIDController(Controller):
         self._last_t = t
         
         error = sp - cv
+        PD_error = self.setpoint_weight * sp - cv
         if self.inverted:
             error = -error
+            PD_error = -PD_error
         self._integral += error * dt
         # first order approximation of the timec onstant -> filter factor
         # valid enough so whatever. 
         alpha = dt / (dt + self.derivative_filter_tc) 
-        self._filtered_derivative = alpha * (error - self._last_error) + (1-alpha) * self._filtered_derivative
+        self._filtered_derivative = alpha * (PD_error - self._last_error) + (1-alpha) * self._filtered_derivative
         
         # PID control law
-        p_term = self.Kp * error
+        p_term = self.Kp * PD_error
         i_term = self.Kp / self.Ti * self._integral
         d_term = self.Kp * self.Td / dt * self._filtered_derivative
         output = p_term + i_term + d_term + self._u0 # initial setpoint u0 accounted for in PID
@@ -99,5 +113,5 @@ class PIDController(Controller):
             self.cv_tag, saturated, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, output,
         )
         # Ensure output is non-negative (e.g., flow rate can't be negative)
-        self._last_error = error
+        self._last_error = PD_error
         return output

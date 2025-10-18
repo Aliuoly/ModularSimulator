@@ -44,7 +44,6 @@ class BaseIndexedModel(BaseModel):
     def _ensure_unit_annotated(self):
         for field_name, field_info in self.__class__.model_fields.items():
             metadata = field_info.metadata
-            print(field_info)
             if not metadata:
                 raise MeasurableConfigurationError(
                     f"Field '{field_name}' of '{self.__class__.__name__}' is missing a unit annotation."

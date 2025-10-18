@@ -25,6 +25,7 @@ class SampledDelayedSensor(Sensor):
     )
 
     _sample_queue: collections.deque[TagData] = PrivateAttr(default_factory=collections.deque)
+    _last_t_updated: float|None = PrivateAttr(default = None)
 
         
     def _should_update(self, t: float) -> bool:
@@ -33,6 +34,8 @@ class SampledDelayedSensor(Sensor):
         """
         new_sample_available = True # default to do update if no last measurement
         if self._last_value is not None:
+            if self._last_t_updated is None:
+                self._last_t_updated = t-self.sampling_period
             expected_available_t = self._last_t_updated + self.sampling_period
             new_sample_available = t >= expected_available_t
         
@@ -55,13 +58,18 @@ class SampledDelayedSensor(Sensor):
         # then the last removed sample 
         #   (which was the last available sample with timestamp <= target_t) 
         #       is to be returned. 
+        # notice that this would return a value that is not yet supposed to
+        # be available if, to begin with, all samples in queue
+        # have timestamp > target_t. 
+        # this should be allowed when t <= 0 ONLY (if t < 1e-12)
+        # for initialization behavior
+        # anyways, is not implemented, so is a potential bug.  TODO: SEE BEFORE
+        
         return_sample = self._sample_queue.popleft()
         while len(self._sample_queue) > 1 and self._sample_queue[0].time <= target_t:
             return_sample = self._sample_queue.popleft()
         # reappend the sample just in case
         self._sample_queue.appendleft(return_sample)
-
-        self._last_value = return_sample
 
         self._last_t_updated = t
         return return_sample.value

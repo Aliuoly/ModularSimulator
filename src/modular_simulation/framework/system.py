@@ -1,6 +1,5 @@
 from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
 from modular_simulation.quantities.usable_quantities import UsableQuantities
-from modular_simulation.quantities.controllable_quantities import ControllableQuantities
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from numpy.typing import NDArray, ArrayLike
@@ -65,13 +64,7 @@ class System(BaseModel, ABC):
     usable_quantities: "UsableQuantities" = Field(
         ...,
         description = (
-            "Defines how sensors and calculations are used to generate measurements from the system's measurable_quantities."
-        )
-    )
-    controllable_quantities: "ControllableQuantities" = Field(
-        ...,
-        description = (
-            "Defines the controllers that manipulate the system's `ControlElements`."
+            "Defines how sensors and calculations and controllers are used to generate measurements from the system's measurable_quantities."
         )
     )
     solver_options: Dict[str, Any] = Field(
@@ -150,7 +143,7 @@ class System(BaseModel, ABC):
             algebraic_size = self._params["algebraic_size"]
         )
         self.measurable_quantities.algebraic_states.update_from_array(initial_algebraic_array)
-    
+        self.usable_quantities._initialize()
     def _construct_fast_params(self) -> None:
         """
         overwrites System's method of the same name to support numba njit decoration
@@ -221,7 +214,6 @@ class System(BaseModel, ABC):
         array for the solver.
         """
         self.usable_quantities.update(self._t)
-        self.controllable_quantities.update(self._t) # returns results too, but I don't need it here.
         # control elements is already updated here by reference.
         return (
             self.measurable_quantities.states.to_array(),
@@ -422,7 +414,7 @@ class System(BaseModel, ABC):
     @cached_property
     def controller_dictionary(self) -> Dict[str, "Controller"]:
         return_dict = {}
-        for controller in self.controllable_quantities.controllers:
+        for controller in self.usable_quantities.controllers:
             return_dict.update({controller.cv_tag : controller})
             while controller.cascade_controller is not None:
                 controller = controller.cascade_controller
@@ -449,7 +441,8 @@ class System(BaseModel, ABC):
             sensors_detail[sensor.alias_tag] = sensor.measurement_history
 
         for calculation in self.usable_quantities.calculations:
-            calculations_detail.update(calculation.history)
+            for output_tag_name, output_tag_info in calculation._output_tag_info_dict.items():
+                calculations_detail[output_tag_name] = (output_tag_info.history)
 
         return history
 
@@ -464,7 +457,7 @@ class System(BaseModel, ABC):
     def setpoint_history(self) -> Dict[str, Dict[str, List]]:
         """Returns historized controller setpoints keyed by ``cv_tag``."""
         history: Dict[str, Dict[str, List]] = {}
-        for controller in self.controllable_quantities.controllers:
+        for controller in self.usable_quantities.controllers:
             history.update(controller.sp_history)
         return history
 

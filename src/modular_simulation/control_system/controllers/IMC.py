@@ -1,8 +1,11 @@
-from typing import Callable, Dict, Any, Type
+from typing import Callable, Dict, Any, Type, Protocol
+from numpy.typing import NDArray
 from scipy.optimize import minimize_scalar
 from pydantic import Field, PrivateAttr
+from astropy.units import Quantity
 from modular_simulation.control_system.controller import Controller
 from modular_simulation.usables import Calculation
+from modular_simulation.usables.tag_info import TagInfo
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 import logging
 logger = logging.getLogger(__name__)
@@ -22,6 +25,12 @@ class CalculationModelPath:
         else:
             self.calculation_name = calculation_name.__name__
         self.method_name = method_name
+
+class IMCModel(Protocol):
+    def __call__(self, input: Quantity) -> float | NDArray:
+        ...
+
+
 
 class InternalModelController(Controller):
     
@@ -44,21 +53,34 @@ class InternalModelController(Controller):
     )
 
     _filtered_sp: float|None = PrivateAttr(default = None)
+    _mv_range_in_model_units: tuple[float, float] = PrivateAttr()
+    _mv_converter_from_model_units_to_system_units: Callable = PrivateAttr()
 
     def _initialize(
             self, 
-            usable_quantities,
+            tag_infos: list[TagInfo],
+            usable_quantities, # kept for IMC intiialization. I hate it. 
             control_elements, 
             is_final_control_element = True):
         """override the controller _initialize method to do some additional work in setting model"""
         # first do the normal initialize though
-        super()._initialize(usable_quantities, control_elements, is_final_control_element)
+        super()._initialize(tag_infos, usable_quantities, control_elements, is_final_control_element)
         # and now set the model
         if isinstance(self.model, CalculationModelPath):
             # look through the available calculations and grab the right one
+            # also grab the unit info so we can pass in the model input
+            # with the units the calculation expects. 
             for calculation in usable_quantities.calculations:
                 if calculation.calculation_name == self.model.calculation_name:
                     self._internal_model = getattr(calculation, self.model.method_name)
+                    self._mv_range_in_model_units = (
+                        self.mv_range[0].to(calculation._input_tag_info_dict[self.mv_tag].unit).value,
+                        self.mv_range[1].to(calculation._input_tag_info_dict[self.mv_tag].unit).value
+                    )
+                    self._mv_converter_from_model_units_to_system_units = \
+                        calculation._input_tag_info_dict[self.mv_tag].unit.get_converter(
+                            self._mv_system_unit
+                        )
                     return 
             # if we didn't return, raise error
             raise ControllerConfigurationError(
@@ -93,9 +115,9 @@ class InternalModelController(Controller):
             return (internal_model(u) - sp_effective)**2
 
         # --- 3  root‑solve starting from last control action -----------------
-        output = minimize_scalar(residual, bounds = self._converted_mv_range_value).x
+        output = minimize_scalar(residual, bounds = self._mv_range_in_model_units).x
         logger.debug(
             "%-12.12s IMC | t=%8.1f cv=%8.2f sp=%8.2f out=%8.2f, cv_pred_at_out=%8.2f",
             self.cv_tag, t, cv, sp, output, internal_model(output)
         )
-        return output
+        return self._mv_converter_from_model_units_to_system_units(output)

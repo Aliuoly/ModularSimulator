@@ -14,60 +14,8 @@ function formatValue(value) {
   return numberFormatter.format(value);
 }
 
-function extractNumericValue(rawValue) {
-  if (rawValue === null || rawValue === undefined) {
-    return NaN;
-  }
-
-  if (Array.isArray(rawValue)) {
-    // Prefer the most recent entry when a controller exposes a history vector.
-    return extractNumericValue(rawValue[rawValue.length - 1]);
-  }
-
-  if (typeof rawValue === "object") {
-    if ("value" in rawValue) {
-      return extractNumericValue(rawValue.value);
-    }
-    return NaN;
-  }
-
-  const numeric = Number(rawValue);
-  return Number.isFinite(numeric) ? numeric : NaN;
-}
-
 function buildPoints(history) {
-  return history
-    .map((point) => ({
-      x: point.time / 60.0,
-      y: extractNumericValue(point.value),
-    }))
-    .filter((point) => Number.isFinite(point.y));
-}
-
-function updateAxisBounds(chart) {
-  const yScale = chart.options?.scales?.y;
-  if (!yScale) {
-    return;
-  }
-
-  const yValues = chart.data.datasets.flatMap((dataset) =>
-    (dataset.data || [])
-      .map((point) => point.y)
-      .filter((value) => Number.isFinite(value))
-  );
-
-  if (!yValues.length) {
-    delete yScale.min;
-    delete yScale.max;
-    return;
-  }
-
-  const min = Math.min(...yValues);
-  const max = Math.max(...yValues);
-  const padding = (max - min) * 0.1 || Math.abs(max || min) * 0.1 || 1;
-
-  yScale.min = min - padding;
-  yScale.max = max + padding;
+  return history.map((point) => ({ x: point.time / 60.0, y: point.value }));
 }
 
 function initCharts() {
@@ -159,7 +107,6 @@ function updateCharts(data) {
       tension: 0.2,
     },
   ];
-  updateAxisBounds(charts.b);
   charts.b.update("none");
 
   const fInSensor = sensorData.F_in ? buildPoints(sensorData.F_in.data) : [];
@@ -190,7 +137,6 @@ function updateCharts(data) {
       tension: 0.2,
     },
   ];
-  updateAxisBounds(charts.flow);
   charts.flow.update("none");
 
   const volumeSensor = sensorData.V ? buildPoints(sensorData.V.data) : [];
@@ -203,7 +149,6 @@ function updateCharts(data) {
       tension: 0.2,
     },
   ];
-  updateAxisBounds(charts.volume);
   charts.volume.update("none");
 }
 

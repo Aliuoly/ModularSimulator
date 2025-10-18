@@ -48,7 +48,7 @@ class InternalModelController(Controller):
         description = "first order filter factor on setpoint changes. "
     )
     solver_options: Dict[str, Any] = Field(
-        default = {"tol": 1e-6, "max_iter": 25},
+        default = {"tol": 1e-3, "max_iter": 25},
         description="optional arguments for the minimize_scalar solver from scipy."
     )
 

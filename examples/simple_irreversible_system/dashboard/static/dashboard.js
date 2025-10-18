@@ -7,15 +7,6 @@ const charts = {
   volume: null,
 };
 
-const DEFAULT_TIME_WINDOW_MINUTES = 30;
-const MAX_POINTS_PER_SERIES = 400;
-const SERVER_POINTS_PER_MINUTE = 12;
-const MIN_SERVER_POINTS = 150;
-const MAX_SERVER_POINTS = 1200;
-
-let timeWindowMinutes = DEFAULT_TIME_WINDOW_MINUTES;
-let latestTrendPayload = null;
-
 function computeRange(datasets) {
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
@@ -62,40 +53,7 @@ function formatValue(value) {
   return numberFormatter.format(value);
 }
 
-function decimate(points, maxPoints) {
-  if (!Array.isArray(points) || points.length <= maxPoints) {
-    return points || [];
-  }
-
-  const decimated = [];
-  const step = (points.length - 1) / (maxPoints - 1);
-
-  for (let i = 0; i < maxPoints; i += 1) {
-    const index = Math.floor(i * step);
-    const chosen = points[index];
-    if (!chosen) {
-      continue;
-    }
-    if (!decimated.length) {
-      decimated.push(chosen);
-      continue;
-    }
-    const last = decimated[decimated.length - 1];
-    if (last.x !== chosen.x || last.y !== chosen.y) {
-      decimated.push(chosen);
-    }
-  }
-
-  const lastPoint = points[points.length - 1];
-  const lastDecimated = decimated[decimated.length - 1];
-  if (lastPoint && lastDecimated && (lastPoint.x !== lastDecimated.x || lastPoint.y !== lastDecimated.y)) {
-    decimated.push(lastPoint);
-  }
-
-  return decimated;
-}
-
-function buildPoints(history, windowMinutes) {
+function buildPoints(history) {
   if (!Array.isArray(history)) {
     return [];
   }
@@ -103,7 +61,6 @@ function buildPoints(history, windowMinutes) {
   const points = [];
   let lastX = null;
   let lastY = null;
-  let maxX = Number.NEGATIVE_INFINITY;
 
   history.forEach((point) => {
     if (point && point.ok === false) {
@@ -131,46 +88,9 @@ function buildPoints(history, windowMinutes) {
     points.push({ x, y });
     lastX = x;
     lastY = y;
-    if (x > maxX) {
-      maxX = x;
-    }
   });
 
-  if (!points.length) {
-    return points;
-  }
-
-  let filtered = points;
-  if (Number.isFinite(windowMinutes) && windowMinutes > 0 && Number.isFinite(maxX)) {
-    const minX = maxX - windowMinutes;
-    filtered = points.filter((point) => point.x >= minX);
-  }
-
-  return decimate(filtered, MAX_POINTS_PER_SERIES);
-}
-
-function applyTimeRange(chart, currentTimeMinutes) {
-  if (!chart) {
-    return;
-  }
-  const xScale = chart.options.scales.x;
-  if (!xScale) {
-    return;
-  }
-
-  if (Number.isFinite(currentTimeMinutes)) {
-    const window = Number.isFinite(timeWindowMinutes) && timeWindowMinutes > 0 ? timeWindowMinutes : null;
-    const min = window ? Math.max(currentTimeMinutes - window, 0) : undefined;
-    if (min !== undefined) {
-      xScale.min = min;
-    } else {
-      delete xScale.min;
-    }
-    xScale.max = currentTimeMinutes;
-  } else {
-    delete xScale.min;
-    delete xScale.max;
-  }
+  return points;
 }
 
 function initCharts() {
@@ -278,7 +198,6 @@ function updateCharts(data) {
   ];
   charts.b.data.datasets = bDatasets;
   applyRange(charts.b, bDatasets);
-  applyTimeRange(charts.b, currentTimeMinutes);
   charts.b.update("none");
 
   const fInSensor = sensorData.F_in ? buildPoints(sensorData.F_in.data, timeWindowMinutes) : [];
@@ -311,10 +230,9 @@ function updateCharts(data) {
   ];
   charts.flow.data.datasets = flowDatasets;
   applyRange(charts.flow, flowDatasets);
-  applyTimeRange(charts.flow, currentTimeMinutes);
   charts.flow.update("none");
 
-  const volumeSensor = sensorData.V ? buildPoints(sensorData.V.data, timeWindowMinutes) : [];
+  const volumeSensor = sensorData.V ? buildPoints(sensorData.V.data) : [];
   const volumeDatasets = [
     {
       label: "V (sensor)",
@@ -326,7 +244,6 @@ function updateCharts(data) {
   ];
   charts.volume.data.datasets = volumeDatasets;
   applyRange(charts.volume, volumeDatasets);
-  applyTimeRange(charts.volume, currentTimeMinutes);
   charts.volume.update("none");
 }
 

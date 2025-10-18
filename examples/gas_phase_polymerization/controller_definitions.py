@@ -32,10 +32,10 @@ controllers: List[Controller] = [
             sp_trajectory=Trajectory(0.0, unit=Unit("tonne/hour")).ramp(
                 50.0, ramprate=25.0 / 3600.0 
                 #TODO: ramp magnitude and ramp rate are always assumed rate is currently always unit / system time unit. Newed to make this unit aware as well.
-            ),
-            mv_range=(0.0 * Unit("kg"), 1e9 * Unit("kg")),
-            Kp=1.0,
-            Ti=3600.0, # 3 hours
+            ), 
+            mv_range=(0.0 * Unit("kg"), 80 * Unit("kg")), # 20kg/h, 4 hour res time -> 0 = F - inv/tau -> max inv = F * tau = 80kg
+            Kp=0.5, # expect about 2 ton pr per kg of cat inv -> for error = 1, want 0.5kg of inv
+            Ti=3600.0, 
             Td=0.0,
             setpoint_weight = 0.0
         ),
@@ -47,8 +47,8 @@ controllers: List[Controller] = [
         cv_tag="pM1",
         sp_trajectory=Trajectory(700.0, unit=Unit("kPa")),
         mv_range=(0.0 * Unit("kg/h"), 70_000.0 * Unit("kg/h")),
-        Kp=100, #kg/h per kPa of error in pM1. Typicaly error < 10kPa, and expected mv to move maybe 1 ton there.
-        Ti=1800, # in system units, which is seconds
+        Kp=50, #kg/h per kPa of error in pM1. Typicaly error < 20kPa, and expected mv to move maybe 1 ton there.
+        Ti=3600, # in system units, which is seconds
         Td=0.0,
     ),
 
@@ -61,6 +61,7 @@ controllers: List[Controller] = [
         Kp=3500, #kg/h / mol ratio of error. Typical error < 0.1, so halve the range seems reasonable
         Ti=1800, #Kp/Ti kg/h per 1 unit of error accumulated. Just gonna pick like expected tc / 2 or something
         Td=0.0,
+        setpoint_weight = 0.0,
         cascade_controller=InternalModelController(
             mv_tag="rM2",
             cv_tag="inst_density",
@@ -90,6 +91,7 @@ controllers: List[Controller] = [
         Kp=200,
         Ti=5400,
         Td=0.0,
+        setpoint_weight = 0.0,
         cascade_controller=InternalModelController(
             mv_tag="rH2",
             cv_tag="inst_MI",
@@ -138,8 +140,8 @@ controllers: List[Controller] = [
         mv_tag="F_vent",
         cv_tag="filtered_pressure",
         sp_trajectory=Trajectory(2300.0, unit=Unit("kPa")),
-        mv_range=(0.0 * Unit("L/s"), 250_000.0 * Unit("L/s")),
-        Kp=250_000.0 / 200.0,
+        mv_range=(0.0 * Unit("L/hr"), 250_00.0 * Unit("L/hr")),
+        Kp=250_00.0 / 200.0,
         Ti=np.inf,
         Td=0.0,
         inverted=True,

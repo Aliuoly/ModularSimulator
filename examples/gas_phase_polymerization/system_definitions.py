@@ -134,7 +134,7 @@ class GasPhaseReactorAlgebraicStates(AlgebraicStates):
 class GasPhaseReactorConstants(Constants):
     """Physical and kinetic parameters for the reactor."""
 
-    cat_sites_per_gram: Annotated[float, Unit("1/g")] = 0.02718
+    cat_sites_per_gram: Annotated[float, Unit("1/g")] = 0.05
     cat_type1_site_fraction: Annotated[float, Unit("")] = 0.55
     discharge_efficiency: Annotated[float, Unit("")] = 0.80
     discharge_valve_constant: Annotated[float, Unit("L/(s*kPa**2)")] = 5e-6
@@ -258,7 +258,7 @@ class GasPhaseReactorConstants(Constants):
                                  * np.array([1e-2, 1e-2], dtype=np.float64)),
         description="Spontaneous chain transfer at a monomer-2-labeled site.",
     )
-    min_production_rate_for_qssa: Annotated[float, Unit("kg/h")] = 110.0
+    min_production_rate_for_qssa: Annotated[float, Unit("kg/h")] = 5.0
 
 
 class GasPhaseReactorSystem(System):

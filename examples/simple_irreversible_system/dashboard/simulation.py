@@ -29,7 +29,7 @@ def _coerce_value(value: Any) -> float | List[float]:
 class SimulationManager:
     """Run a system simulation in the background and expose structured history."""
 
-    def __init__(self, system: System, *, history_window: int = 400) -> None:
+    def __init__(self, system: System, *, history_window: int = 2000) -> None:
         self.system = system
         self.history_window = history_window
         self.speed_factor: float = 1.0

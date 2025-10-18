@@ -101,7 +101,7 @@ main {
 }
 
 .controller-card__setpoint button,
-#speed-form button {
+.control-form button {
   padding: 0.45rem 0.9rem;
   background: #2563eb;
   color: #ffffff;
@@ -118,7 +118,7 @@ main {
 }
 
 .controller-card__setpoint button:not(:disabled):hover,
-#speed-form button:hover {
+.control-form button:hover {
   background: #1d4ed8;
 }
 
@@ -146,13 +146,20 @@ main {
   color: #b91c1c;
 }
 
-#speed-form {
+.control-forms {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 0.75rem;
 }
 
-#speed-form input {
+.control-form {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.control-form input {
   max-width: 6rem;
   padding: 0.4rem 0.6rem;
   border: 1px solid #d1d5db;
@@ -200,19 +207,29 @@ main {
   border-radius: 12px;
   padding: 1rem;
   box-shadow: 0 15px 30px -25px rgba(15, 23, 42, 0.3);
-  min-height: 280px;
   display: flex;
   flex-direction: column;
+  gap: 0.75rem;
 }
 
 .chart-card h3 {
-  margin: 0 0 0.75rem 0;
+  margin: 0;
   font-size: 1.1rem;
   color: #1f2937;
 }
 
-.chart-card canvas {
+.chart-card__plot {
   flex: 1;
+  min-height: 260px;
+  height: clamp(220px, 28vw, 340px);
+  position: relative;
+}
+
+.chart-card__plot canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 @media (max-width: 768px) {
@@ -224,7 +241,7 @@ main {
     padding: 1.25rem 1.5rem;
   }
 
-  #speed-form {
+  .control-form {
     flex-direction: column;
     align-items: flex-start;
   }

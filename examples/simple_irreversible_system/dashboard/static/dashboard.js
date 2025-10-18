@@ -7,6 +7,45 @@ const charts = {
   volume: null,
 };
 
+function computeRange(datasets) {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+
+  datasets.forEach((dataset) => {
+    (dataset.data || []).forEach((point) => {
+      const value = Number(point.y);
+      if (!Number.isFinite(value)) {
+        return;
+      }
+      if (value < min) min = value;
+      if (value > max) max = value;
+    });
+  });
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return null;
+  }
+
+  if (min === max) {
+    const offset = Math.max(Math.abs(min) * 0.1, 0.1);
+    return { min: min - offset, max: max + offset };
+  }
+
+  const padding = Math.max((max - min) * 0.1, 1e-6);
+  return { min: min - padding, max: max + padding };
+}
+
+function applyRange(chart, datasets) {
+  const range = computeRange(datasets);
+  if (range) {
+    chart.options.scales.y.min = range.min;
+    chart.options.scales.y.max = range.max;
+  } else {
+    chart.options.scales.y.min = undefined;
+    chart.options.scales.y.max = undefined;
+  }
+}
+
 function formatValue(value) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "—";
@@ -90,7 +129,7 @@ function updateCharts(data) {
   const bSensor = sensorData.B ? buildPoints(sensorData.B.data) : [];
   const bSetpoint = setpoints.B ? buildPoints(setpoints.B.data) : [];
 
-  charts.b.data.datasets = [
+  const bDatasets = [
     {
       label: "B (sensor)",
       data: bSensor,
@@ -107,13 +146,15 @@ function updateCharts(data) {
       tension: 0.2,
     },
   ];
+  charts.b.data.datasets = bDatasets;
+  applyRange(charts.b, bDatasets);
   charts.b.update("none");
 
   const fInSensor = sensorData.F_in ? buildPoints(sensorData.F_in.data) : [];
   const fOutSensor = sensorData.F_out ? buildPoints(sensorData.F_out.data) : [];
   const fInCommand = manipulated.F_in ? buildPoints(manipulated.F_in.data) : [];
 
-  charts.flow.data.datasets = [
+  const flowDatasets = [
     {
       label: "F_in (sensor)",
       data: fInSensor,
@@ -137,10 +178,12 @@ function updateCharts(data) {
       tension: 0.2,
     },
   ];
+  charts.flow.data.datasets = flowDatasets;
+  applyRange(charts.flow, flowDatasets);
   charts.flow.update("none");
 
   const volumeSensor = sensorData.V ? buildPoints(sensorData.V.data) : [];
-  charts.volume.data.datasets = [
+  const volumeDatasets = [
     {
       label: "V (sensor)",
       data: volumeSensor,
@@ -149,6 +192,8 @@ function updateCharts(data) {
       tension: 0.2,
     },
   ];
+  charts.volume.data.datasets = volumeDatasets;
+  applyRange(charts.volume, volumeDatasets);
   charts.volume.update("none");
 }
 

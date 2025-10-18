@@ -6,13 +6,7 @@ from typing import Any
 
 from flask import Flask, abort, jsonify, render_template, request
 
-if __package__ in (None, ""):
-    raise RuntimeError(
-        "The dashboard must be executed as part of the examples package. "
-        "Run `python -m examples.simple_irreversible_system.dashboard` from the repository root."
-    )
-
-from ..run_simulation import make_systems
+from examples.simple_irreversible_system.run_simulation import make_systems
 
 from .simulation import SimulationManager
 
@@ -90,3 +84,8 @@ def create_app(system: Any | None = None) -> Flask:
         return jsonify({"speed": speed})
 
     return app
+
+
+if __name__ == "__main__":
+    flask_app = create_app()
+    flask_app.run(debug=True, host="0.0.0.0", port=5000)

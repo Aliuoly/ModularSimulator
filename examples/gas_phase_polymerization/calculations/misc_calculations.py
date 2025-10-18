@@ -88,7 +88,7 @@ class CatInventoryEstimator(Calculation):
         F_cat = inputs_dict[self.F_cat_tag]
         
         dt = t - self._t
-        self._inventory = CatInventoryEstimator.integrate_inventory(self._inventory, F_cat, pr, bw, dt)
+        self._inventory = self.integrate_inventory(self._inventory, F_cat, pr, bw, dt)
         self._t = t
 
         return {self.cat_inventory_tag: self._inventory}
@@ -98,9 +98,10 @@ class CatInventoryEstimator(Calculation):
         return u - y/bw*pr
 
     @staticmethod
-    def integrate_inventory(y0, fcat, pr, bw, dt):
-        sol = odeint(CatInventoryEstimator.ode_rhs, y0 = [y0], t = [0, dt], args = (fcat, pr, bw), tfirst = True)
-        return sol.ravel()[-1]
+    def integrate_inventory(inventory, fcat, pr, bw, dt):
+        # just first degree forward euler
+        dinvdt = fcat - inventory/bw*pr
+        return inventory + dinvdt * dt
     
     def model(self, F_cat):
         pr = self._last_input_value_dict[self.mass_prod_rate_tag]

@@ -249,12 +249,14 @@ function updateCharts(data) {
 
 function updateTimeAndSpeed(timeSeconds, speed) {
   const timeElement = document.getElementById("sim-time");
-  if (timeElement && typeof timeSeconds === "number") {
-    timeElement.textContent = timeFormatter.format(timeSeconds / 60.0);
+  const coercedTime = Number(timeSeconds);
+  if (timeElement && Number.isFinite(coercedTime)) {
+    timeElement.textContent = timeFormatter.format(coercedTime / 60.0);
   }
   const speedElement = document.getElementById("speed-factor");
-  if (speedElement && typeof speed === "number") {
-    speedElement.textContent = numberFormatter.format(speed);
+  const coercedSpeed = Number(speed);
+  if (speedElement && Number.isFinite(coercedSpeed)) {
+    speedElement.textContent = numberFormatter.format(coercedSpeed);
   }
 }
 

@@ -82,3 +82,17 @@ python examples/simple_irreversible_system/run_simulation.py
 
 The script simulates 10,000 controller updates, applies a setpoint change
 half-way through, and plots the resulting measurements and controller outputs.
+
+### Real-time dashboard
+
+To launch the interactive dashboard showcased in this repository, execute the
+module version of the dashboard package:
+
+```bash
+python -m examples.simple_irreversible_system.dashboard
+```
+
+Using ``python -m`` ensures Python loads the application from the packaged
+``examples`` namespace without any ad-hoc path manipulation.  Once started, the
+Flask development server will bind to ``http://0.0.0.0:5000`` and stream the
+simulation data in real time.

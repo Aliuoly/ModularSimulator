@@ -33,6 +33,7 @@ dependencies = [
   "pydantic==2.11.7",
   "matplotlib>=3.10.6",
   "astropy>=7.1.0",
+  "flask>=3.1.0",
   "pytest",
 ]
 [dependency-groups]

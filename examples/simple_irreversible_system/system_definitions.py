@@ -5,6 +5,8 @@ from modular_simulation.measurables import States, ControlElements, AlgebraicSta
 from modular_simulation.framework import System
 from astropy.units import Unit
 
+SQRT_L_PER_S = Unit("L") ** 0.5 / Unit("s")
+
 # 1. Define the Data Structures for the System
 # ============================================
 
@@ -25,7 +27,7 @@ class IrreversibleConstants(Constants):
     """"""
 
     k: Annotated[float, Unit("1/s")]
-    Cv: Annotated[float, Unit("(L**0.5)/s")]
+    Cv: Annotated[float, SQRT_L_PER_S]
     CA_in: Annotated[float, Unit("mol/L")]
     
 # 2. Define the System Dynamics

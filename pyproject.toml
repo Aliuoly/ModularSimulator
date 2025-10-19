@@ -36,6 +36,11 @@ dependencies = [
   "flask>=3.1.0",
   "pytest",
 ]
+
+[tool.pytest.ini_options]
+testpaths = [
+  "tests",
+]
 [dependency-groups]
 dev = [
     "ruff>=0.13.1",

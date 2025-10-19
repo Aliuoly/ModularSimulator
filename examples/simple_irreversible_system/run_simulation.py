@@ -17,90 +17,83 @@ from astropy.units import Unit
 if TYPE_CHECKING:
     from modular_simulation.usables import Calculation
 
+# 1. Set up the initial conditions and system components.
+# =======================================================
 
-def make_systems():
+# Initial values for the differential states. Note F_out is now an algebraic state.
+initial_states = IrreversibleStates(V=0.0, A=0.0, B=0.0)
 
-    # 1. Set up the initial conditions and system components.
-    # =======================================================
+# Initial values for the control elements.
+initial_controls = IrreversibleControlElements(F_in=0.0)
 
-    # Initial values for the differential states. Note F_out is now an algebraic state.
-    initial_states = IrreversibleStates(V=0.0, A=0.0, B=0.0)
+# Initial values for algebraic states (can be placeholders, they are calculated).
+initial_algebraic = IrreversibleAlgebraicStates(F_out=0.0)
 
-    # Initial values for the control elements.
-    initial_controls = IrreversibleControlElements(F_in=0.0)
+# Define the system's physical constants and solver params
+system_constants = IrreversibleConstants(
+    k = 1e-3, 
+    Cv = 1e-1, 
+    CA_in = 1.0
+)
+# The MeasurableQuantities object now holds all state-like data.
 
-    # Initial values for algebraic states (can be placeholders, they are calculated).
-    initial_algebraic = IrreversibleAlgebraicStates(F_out=0.0)
 
-    # Define the system's physical constants and solver params
-    system_constants = IrreversibleConstants(
-        k = 1e-3, 
-        Cv = 1e-1, 
-        CA_in = 1.0
+# Define which quantities can be measured by sensors.
+sensors=[
+    SampledDelayedSensor(
+        measurement_tag = "F_out",
+        unit = Unit("L/s"),
+    ),
+    SampledDelayedSensor(
+        measurement_tag = "F_in",
+        unit = Unit("L/s"),
+        coefficient_of_variance=0.05
+    ),
+    SampledDelayedSensor(
+        measurement_tag = "B",
+        unit = Unit("mol/L"),
+        coefficient_of_variance=0.05,
+        sampling_period = 900,
+        deadtime = 900,
+    ),
+    SampledDelayedSensor(
+        measurement_tag = "V",
+        unit = Unit("L"),
+        faulty_probability = 0.01,
+        faulty_aware = True
+    ),
+]
+calculations: List["Calculation"] = []
+
+# Define the controllers that will manipulate the control elements.
+controllers=[
+    PIDController(
+        cv_tag="B",
+        mv_tag="F_in",
+        sp_trajectory=Trajectory(0.5, Unit("mol/L")),
+        Kp=1.0e-1,
+        Ti=100.0,
+        mv_range=(0 * Unit("L/s"), 100 * Unit("L/s")),
     )
-    # The MeasurableQuantities object now holds all state-like data.
+]
+
+# --- 2. Assemble and Initialize the System ---
+dt = 30.0 * Unit("s")
+normal_system = create_system(
+    dt = dt,
+    system_class = IrreversibleSystem,
+    initial_states = initial_states,
+    initial_controls = initial_controls,
+    initial_algebraic = initial_algebraic,
+    sensors = sensors,
+    calculations = calculations,
+    controllers = controllers,
+    system_constants = system_constants,
+    use_numba = False
+)
 
 
-    # Define which quantities can be measured by sensors.
-    sensors=[
-        SampledDelayedSensor(
-            measurement_tag = "F_out",
-            unit = Unit("L/s"),
-        ),
-        SampledDelayedSensor(
-            measurement_tag = "F_in",
-            unit = Unit("L/s"),
-            coefficient_of_variance=0.05
-        ),
-        SampledDelayedSensor(
-            measurement_tag = "B",
-            unit = Unit("mol/L"),
-            coefficient_of_variance=0.05,
-            sampling_period = 900,
-            deadtime = 900,
-        ),
-        SampledDelayedSensor(
-            measurement_tag = "V",
-            unit = Unit("L"),
-            faulty_probability = 0.01,
-            faulty_aware = True
-        ),
-    ]
-    calculations: List["Calculation"] = []
-
-    # Define the controllers that will manipulate the control elements.
-    controllers=[
-        PIDController(
-            cv_tag="B",
-            mv_tag="F_in",
-            sp_trajectory=Trajectory(0.5, Unit("mol/L")),
-            Kp=1.0e-1,
-            Ti=100.0,
-            mv_range=(0 * Unit("L/s"), 100 * Unit("L/s")),
-        )
-    ]
-
-
-
-
-    # --- 2. Assemble and Initialize the System ---
-    dt = 30.0 * Unit("s")
-    normal_system = create_system(
-        dt = dt,
-        system_class = IrreversibleSystem,
-        initial_states = initial_states,
-        initial_controls = initial_controls,
-        initial_algebraic = initial_algebraic,
-        sensors = sensors,
-        calculations = calculations,
-        controllers = controllers,
-        system_constants = system_constants,
-        use_numba = False
-    )
-    return {"normal": normal_system}
-
-
-systems = make_systems()
+systems = {'normal': normal_system}
 normal_system = systems["normal"]
 if __name__ == "__main__":
 
@@ -116,7 +109,6 @@ if __name__ == "__main__":
     
     pv_kwargs = {'linestyle': '-'}
     sp_kwargs = {'linestyle': '--', "alpha": 0.5}
-    systems = make_systems()
     for j, (system_name, system) in enumerate(systems.items()):
         plt.figure(figsize=(12, 8))
         # --- First simulation run ---

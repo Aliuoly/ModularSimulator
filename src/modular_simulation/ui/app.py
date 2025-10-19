@@ -28,7 +28,11 @@ def _controller_to_payload(config) -> Dict[str, Any]:
         "params": config.raw,
         "trajectory": {
             "y0": config.trajectory.y0,
-            "unit": config.trajectory.unit,
+            # ``config.trajectory.unit`` originates from astropy's ``Unit`` class
+            # (or a composite unit).  Flask's ``jsonify`` cannot serialize those
+            # instances directly, so we expose the canonical string representation
+            # instead to keep the API response JSON-safe.
+            "unit": str(config.trajectory.unit),
             "segments": config.trajectory.segments,
         },
         "parent_id": config.parent_id,

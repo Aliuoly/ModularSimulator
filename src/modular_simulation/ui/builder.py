@@ -184,34 +184,14 @@ def _sanitize_number(value: float) -> float | None:
     return number
 
 
-def _unit_metadata(unit: UnitBase | str | None) -> Dict[str, Any]:
-    """Return serialization-friendly metadata for a unit reference."""
+def _equivalent_unit_strings(unit: UnitBase | None) -> List[str]:
+    """Return sorted string representations of units compatible with ``unit``."""
 
-    normalized: UnitBase | None
-    if isinstance(unit, UnitBase):
-        normalized = unit
-    elif isinstance(unit, str):
-        stripped = unit.strip()
-        normalized = Unit(stripped) if stripped else None
-    else:
-        normalized = None
-
-    unit_text = str(normalized) if normalized is not None else ""
-    compatible_units: List[str] = []
-    equivalent_table = ""
-
-    if normalized is not None:
-        equivalents = normalized.find_equivalent_units(include_prefix_units=True)
-        compatible_units = sorted(
-            {str(candidate) for candidate in equivalents} | {unit_text}
-        )
-        equivalent_table = repr(equivalents)
-
-    return {
-        "unit": unit_text,
-        "compatible_units": compatible_units,
-        "equivalent_unit_table": equivalent_table,
-    }
+    if unit is None:
+        return []
+    options = {str(candidate) for candidate in unit.find_equivalent_units(include_prefix_units=True)}
+    options.add(str(unit))
+    return sorted(options)
 
 
 def _serialize_value(value: Any) -> Any:
@@ -337,7 +317,8 @@ class SimulationBuilder:
                 items.append({
                     "tag": tag,
                     "category": category,
-                    **metadata,
+                    "unit": str(unit),
+                    "compatible_units": _equivalent_unit_strings(unit),
                 })
         return items
 
@@ -347,13 +328,19 @@ class SimulationBuilder:
     def control_element_unit_options(self) -> Dict[str, Dict[str, List[str] | str]]:
         options: Dict[str, Dict[str, List[str] | str]] = {}
         for tag, unit in self.base_measurables.control_elements.tag_unit_info.items():
-            options[tag] = _unit_metadata(unit)
+            options[tag] = {
+                "unit": str(unit),
+                "compatible_units": _equivalent_unit_strings(unit),
+            }
         return options
 
     def usable_tag_unit_options(self) -> Dict[str, Dict[str, List[str] | str]]:
         options: Dict[str, Dict[str, List[str] | str]] = {}
         for tag, unit in self.base_measurables.tag_unit_info.items():
-            options[tag] = _unit_metadata(unit)
+            options[tag] = {
+                "unit": str(unit),
+                "compatible_units": _equivalent_unit_strings(unit),
+            }
         for cfg in self.sensor_configs:
             resolved_unit = cfg.args.get("unit")
             measurement_unit = self.base_measurables.tag_unit_info.get(cfg.measurement_tag)
@@ -361,10 +348,16 @@ class SimulationBuilder:
                 resolved_unit = measurement_unit
             if resolved_unit is None:
                 continue
-            options[cfg.alias_tag] = _unit_metadata(resolved_unit)
+            options[cfg.alias_tag] = {
+                "unit": str(resolved_unit),
+                "compatible_units": _equivalent_unit_strings(resolved_unit),
+            }
         for calc in self.calculation_configs.values():
             for tag, unit in calc.output_units.items():
-                options[tag] = _unit_metadata(unit)
+                options[tag] = {
+                    "unit": str(unit),
+                    "compatible_units": _equivalent_unit_strings(unit),
+                }
         return options
 
     def available_sensor_types(self) -> List[Dict[str, Any]]:

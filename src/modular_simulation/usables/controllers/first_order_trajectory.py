@@ -6,7 +6,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 class FirstOrderTrajectoryController(Controller):
-    
+    """Controller that targets user-specified first-order closed-loop dynamics.
+
+    The controller approximates the process as a first-order lag and computes
+    the manipulated variable that will drive the measured CV toward the
+    setpoint with a desired closed-loop time constant.  The open-loop time
+    constant may be provided directly or resolved from a measurement or
+    calculation tag at runtime.
+    """
     closed_loop_time_constant_fraction: float = Field(
         default = 1.0,
         gt = 0.0,
@@ -57,6 +64,12 @@ class FirstOrderTrajectoryController(Controller):
         cv: float,
         sp: float,
         ) -> float:
+        """Compute the MV required to hit the desired next CV sample.
+
+        The algorithm derives the desired CV trajectory based on the requested
+        closed-loop time constant, then uses the open-loop model to solve for
+        the MV that would achieve that point over the sample interval ``dt``.
+        """
         open_loop_tc = self._get_open_loop_tc()
         closed_loop_tc = open_loop_tc * self.closed_loop_time_constant_fraction
         dt = t - self._t

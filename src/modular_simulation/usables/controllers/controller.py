@@ -60,7 +60,15 @@ class ControllerMode(IntEnum):
     CASCADE = 2
 
 class Controller(BaseModel, ABC):
+    """Shared infrastructure for feedback controllers operating on usable tags.
 
+    The base class translates between system measurements, setpoint
+    trajectories, cascade controllers, and manipulated variables.  Subclasses
+    provide the actual control law via :meth:`_control_algorithm`, while this
+    class handles unit conversion, MV range enforcement, first-order setpoint
+    ramping, historization, and automatic mode transitions between AUTO,
+    CASCADE, and TRACKING.
+    """
     mv_tag: str = Field(
         ..., 
         description="The tag of the ControlElement corresponding to the " \
@@ -115,9 +123,7 @@ class Controller(BaseModel, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
 
     def _make_sp_tag_info_and_mv_range(self, tag_infos: List[TagInfo]):
-        """
-        makes sp tag info AND handles mv_range in case it is a Quantity
-        """
+        """Construct SP tag metadata and convert MV limits into system units."""
         for tag_info in tag_infos:
             if tag_info.tag == self.cv_tag:
                 self._sp_tag_info = TagInfo(
@@ -250,10 +256,12 @@ class Controller(BaseModel, ABC):
         control_elements: "ControlElements",
         is_final_control_element: bool = True,
         ) -> None:
-        """
-        Finds the mv and cv for the controller and create cv getters and
-        mv setters (simple callables). Also initializes the control mode
-        to be the highest cascaded & valid configuration. 
+        """Wire the controller into orchestrated quantities and validate modes.
+
+        The container guarantees all referenced tags exist, so this method
+        simply creates the getter/setter callables, configures cascade
+        relationships, and promotes the controller into the highest valid
+        operating mode for the supplied configuration.
         """
         logger.debug(f"Initializing '{self.cv_tag}' controller.")
         
@@ -287,7 +295,14 @@ class Controller(BaseModel, ABC):
         
 
     def update(self, t: float) -> TagData:
+        """Run one control-cycle update and return the applied MV value.
 
+        The routine pulls the latest controlled-variable reading, sources the
+        appropriate setpoint (local trajectory, cascade input, or tracking),
+        evaluates the subclass control law, applies MV ramp limits, and writes
+        the result back into the system if this is the final controller in the
+        cascade chain.
+        """
         # 0. check dt -> if 0, skip all and return _last_output
         if t - self._last_output.time < 1e-12:
             return self._last_output
@@ -349,13 +364,13 @@ class Controller(BaseModel, ABC):
         return self._last_output
 
     def _apply_mv_ramp(
-            self, 
-            t0: float, 
+            self,
+            t0: float,
             mv0: float | NDArray,
-            mv_target: float | NDArray, 
+            mv_target: float | NDArray,
             t_now: float
             ) -> float | NDArray:
-        """Return the ramp-limited mv value for time ``t``."""
+        """Ramp-limit the manipulated variable according to ``ramp_rate``."""
         if self.ramp_rate is None:
             return mv_target
 
@@ -382,6 +397,7 @@ class Controller(BaseModel, ABC):
     
     @property
     def sp_history(self):
+        """Return a mapping of cascade level to historized setpoint samples."""
         # expected behavior:
         # loop 1 <- loop 2 <- loop 3 cascade scheme
         # loop 1 has cascade controller ->

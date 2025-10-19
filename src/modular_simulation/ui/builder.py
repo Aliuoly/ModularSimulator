@@ -189,7 +189,7 @@ def _serialize_value(value: Any) -> Any:
         if magnitude is None:
             return None
         return {"value": magnitude, "unit": str(value.unit)}
-    if isinstance(value, UnitBase):
+    if isinstance(value, UnitBase) or isinstance(value, Unit):
         return str(value)
     if isinstance(value, ControllerMode):
         return value.name
@@ -573,35 +573,16 @@ class SimulationBuilder:
 
         fig, axes = plt.subplots(max_panels, 1, figsize=(8, 3 * max_panels), squeeze=False, sharex=True)
         axes_flat = axes.ravel()
-        plotted_axes: List[int] = []
 
-        for idx, (ax, (tag, series)) in enumerate(zip(axes_flat, series_subset, strict=False)):
-            times, values, ok = _series_to_arrays(series)
-            mask = np.isfinite(times) & np.isfinite(values)
-            if not mask.any():
-                continue
-            ax.plot(times[mask], values[mask], label=tag)
-            if ok is not None:
-                bad_mask = (~ok.astype(bool)) & mask
-                if bad_mask.any():
-                    ax.scatter(times[bad_mask], values[bad_mask], marker="x", color="black", label="_nolegend_", zorder=3)
+        for ax, (tag, series) in zip(axes_flat, series_subset, strict=False):
+            time = series.get("time", [])
+            values = series.get("value", [])
+            ax.plot(time, values, label=tag)
             ax.set_ylabel(tag)
-            plotted_axes.append(idx)
-
-        if not plotted_axes:
-            plt.close(fig)
-            return None
-
-        for idx, ax in enumerate(axes_flat):
-            if not ax.has_data():
-                continue
             ax.grid(True, alpha=0.3)
-            if idx == plotted_axes[-1]:
-                ax.set_xlabel("Time")
-            handles, labels = ax.get_legend_handles_labels()
-            if handles:
-                ax.legend(loc="best")
+            ax.legend(loc="best")
 
+        axes_flat[max_panels - 1].set_xlabel("Time")
         plt.tight_layout()
         return self._finalize_figure(fig)
 

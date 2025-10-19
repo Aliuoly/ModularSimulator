@@ -144,6 +144,7 @@ class Controller(BaseModel, ABC):
                         )
                 self._converted_mv_range_value = tuple(converted_range) #type: ignore
         return self._sp_tag_info
+
         
     def _initialize_cv_getter(
         self,

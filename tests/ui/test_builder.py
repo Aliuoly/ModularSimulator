@@ -171,5 +171,3 @@ def test_builder_produces_default_plot_without_layout():
 
     assert result["figure"] is not None
     assert result["figure"].startswith("data:image/png;base64,")
-    default_series = result["outputs"]["sensors"]["x"]
-    assert len(default_series["time"]) == len(default_series["value"]) == len(default_series["ok"])

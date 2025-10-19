@@ -14,4 +14,4 @@ measurables = MeasurableQuantities(
     control_elements=initial_controls,
     states = initial_states,
 )
-launch_ui(IrreversibleSystem, measurables, dt)
+launch_ui(IrreversibleSystem, measurables, dt, debug = True)

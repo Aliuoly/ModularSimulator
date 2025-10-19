@@ -12,13 +12,69 @@ async function fetchJSON(url, options = {}) {
     ...options,
   });
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed with status ${response.status}`);
+    const contentType = response.headers.get('Content-Type') || '';
+    let message = `Request failed with status ${response.status}`;
+    if (contentType.includes('application/json')) {
+      try {
+        const payload = await response.json();
+        if (payload && payload.error) {
+          message = payload.error;
+        }
+      } catch (error) {
+        // ignore JSON parsing errors and fall back to default message
+      }
+    } else {
+      const text = await response.text();
+      if (text) {
+        message = text;
+      }
+    }
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
   if (response.status === 204) {
     return null;
   }
-  return response.json();
+  const contentType = response.headers.get('Content-Type') || '';
+  if (contentType.includes('application/json')) {
+    return response.json();
+  }
+  return response.text();
+}
+
+function showError(message) {
+  const panel = document.getElementById('error-banner');
+  if (!panel) {
+    alert(message);
+    return;
+  }
+  const safeMessage = message || 'An unexpected configuration error occurred.';
+  panel.innerHTML = `
+    <div class="error-message">Configuration error: ${safeMessage}</div>
+    <button type="button" class="error-dismiss">Dismiss</button>
+  `;
+  panel.classList.remove('hidden');
+  const dismiss = panel.querySelector('.error-dismiss');
+  if (dismiss) {
+    dismiss.addEventListener('click', () => {
+      clearError();
+    });
+  }
+}
+
+function clearError() {
+  const panel = document.getElementById('error-banner');
+  if (panel) {
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
+  }
+}
+
+function handleError(error) {
+  console.error(error);
+  const message = error && error.message ? error.message : 'An unexpected error occurred.';
+  showError(message);
 }
 
 function renderMessages(messages) {
@@ -72,9 +128,14 @@ function renderSensorList() {
   list.querySelectorAll('button[data-action="remove"]').forEach((btn) => {
     btn.addEventListener('click', async (event) => {
       const id = event.currentTarget.dataset.id;
-      await fetchJSON(`/api/sensors/${id}`, { method: 'DELETE' });
-      await refreshSensors();
-      await refreshMetadata();
+      try {
+        await fetchJSON(`/api/sensors/${id}`, { method: 'DELETE' });
+        await refreshSensors();
+        await refreshMetadata();
+        clearError();
+      } catch (error) {
+        handleError(error);
+      }
     });
   });
 
@@ -107,6 +168,7 @@ function renderControllerList() {
       <div>Mode: ${params.mode ?? 'AUTO'}</div>
       <div>Segments: ${trajectory.segments.length}</div>
       <div class="actions">
+        <button data-action="edit-trajectory" data-id="${controller.id}">Edit Trajectory</button>
         <button data-action="cascade" data-id="${controller.id}">Cascade To…</button>
         <button data-action="remove" data-id="${controller.id}">Remove</button>
       </div>
@@ -117,9 +179,22 @@ function renderControllerList() {
   list.querySelectorAll('button[data-action="remove"]').forEach((btn) => {
     btn.addEventListener('click', async (event) => {
       const id = event.currentTarget.dataset.id;
-      await fetchJSON(`/api/controllers/${id}`, { method: 'DELETE' });
-      await refreshControllers();
-      await refreshMetadata();
+      try {
+        await fetchJSON(`/api/controllers/${id}`, { method: 'DELETE' });
+        await refreshControllers();
+        await refreshMetadata();
+        clearError();
+      } catch (error) {
+        handleError(error);
+      }
+    });
+  });
+
+  list.querySelectorAll('button[data-action="edit-trajectory"]').forEach((btn) => {
+    btn.addEventListener('click', (event) => {
+      const controller = state.controllers.find((c) => c.id === event.currentTarget.dataset.id);
+      if (!controller) return;
+      openTrajectoryEditor(controller);
     });
   });
 
@@ -153,9 +228,14 @@ function renderCalculationList() {
   list.querySelectorAll('button[data-action="remove"]').forEach((btn) => {
     btn.addEventListener('click', async (event) => {
       const id = event.currentTarget.dataset.id;
-      await fetchJSON(`/api/calculations/${id}`, { method: 'DELETE' });
-      await refreshCalculations();
-      await refreshMetadata();
+      try {
+        await fetchJSON(`/api/calculations/${id}`, { method: 'DELETE' });
+        await refreshCalculations();
+        await refreshMetadata();
+        clearError();
+      } catch (error) {
+        handleError(error);
+      }
     });
   });
 }
@@ -182,7 +262,12 @@ function renderPlotLayout() {
     btn.addEventListener('click', async (event) => {
       const idx = Number(event.currentTarget.dataset.index);
       const lines = state.plots.lines.filter((_, i) => i !== idx);
-      await updatePlotLayout({ ...state.plots, lines });
+      try {
+        await updatePlotLayout({ ...state.plots, lines });
+        clearError();
+      } catch (error) {
+        handleError(error);
+      }
     });
   });
 }
@@ -229,52 +314,122 @@ function buildFieldInput(field, defaults = {}) {
   const wrapper = document.createElement('label');
   wrapper.dataset.field = field.name;
   wrapper.dataset.type = field.type;
-  wrapper.textContent = field.description ? `${field.name} (${field.description})` : field.name;
+  wrapper.className = 'field-label';
+
+  const header = document.createElement('div');
+  header.className = 'field-label__header';
+  const title = document.createElement('span');
+  title.className = 'field-title';
+  title.textContent = field.name;
+  header.appendChild(title);
+  if (field.description) {
+    const info = document.createElement('span');
+    info.className = 'info-icon';
+    info.textContent = 'i';
+    info.title = field.description;
+    info.tabIndex = 0;
+    header.appendChild(info);
+  }
+  wrapper.appendChild(header);
 
   const defaultValue = defaults[field.name] ?? field.default ?? '';
   const options = choiceOptions(field.type, field.name);
 
+  const buildGroup = (labelText, input) => {
+    const group = document.createElement('div');
+    group.className = 'field-input-group';
+    const caption = document.createElement('span');
+    caption.textContent = labelText;
+    group.appendChild(caption);
+    group.appendChild(input);
+    return group;
+  };
+
   if (field.type === 'quantity') {
-    wrapper.innerHTML += `
-      <div class="row">
-        <label>Value<input type="number" step="any" data-role="value" value="${defaultValue?.value ?? ''}" /></label>
-        <label>Unit<input type="text" data-role="unit" value="${defaultValue?.unit ?? ''}" /></label>
-      </div>
-    `;
+    const row = document.createElement('div');
+    row.className = 'row';
+    const valueInput = document.createElement('input');
+    valueInput.type = 'number';
+    valueInput.step = 'any';
+    valueInput.value = defaultValue?.value ?? '';
+    valueInput.dataset.role = 'value';
+    const unitInput = document.createElement('input');
+    unitInput.type = 'text';
+    unitInput.value = defaultValue?.unit ?? '';
+    unitInput.dataset.role = 'unit';
+    row.appendChild(buildGroup('Value', valueInput));
+    row.appendChild(buildGroup('Unit', unitInput));
+    wrapper.appendChild(row);
     return wrapper;
   }
 
   if (field.type === 'quantity_range') {
-    const lower = defaultValue?.[0] || defaultValue?.lower || {};
-    const upper = defaultValue?.[1] || defaultValue?.upper || {};
-    wrapper.innerHTML += `
-      <div class="row">
-        <label>Lower value<input type="number" step="any" data-role="lower-value" value="${lower.value ?? ''}" /></label>
-        <label>Lower unit<input type="text" data-role="lower-unit" value="${lower.unit ?? ''}" /></label>
-        <label>Upper value<input type="number" step="any" data-role="upper-value" value="${upper.value ?? ''}" /></label>
-        <label>Upper unit<input type="text" data-role="upper-unit" value="${upper.unit ?? ''}" /></label>
-      </div>
-    `;
+    const lower = Array.isArray(defaultValue)
+      ? defaultValue[0] || {}
+      : defaultValue?.lower || {};
+    const upper = Array.isArray(defaultValue)
+      ? defaultValue[1] || {}
+      : defaultValue?.upper || {};
+    const row = document.createElement('div');
+    row.className = 'row';
+    const lowerValueInput = document.createElement('input');
+    lowerValueInput.type = 'number';
+    lowerValueInput.step = 'any';
+    lowerValueInput.value = lower.value ?? '';
+    lowerValueInput.dataset.role = 'lower-value';
+    const lowerUnitInput = document.createElement('input');
+    lowerUnitInput.type = 'text';
+    lowerUnitInput.value = lower.unit ?? '';
+    lowerUnitInput.dataset.role = 'lower-unit';
+    const upperValueInput = document.createElement('input');
+    upperValueInput.type = 'number';
+    upperValueInput.step = 'any';
+    upperValueInput.value = upper.value ?? '';
+    upperValueInput.dataset.role = 'upper-value';
+    const upperUnitInput = document.createElement('input');
+    upperUnitInput.type = 'text';
+    upperUnitInput.value = upper.unit ?? '';
+    upperUnitInput.dataset.role = 'upper-unit';
+    row.appendChild(buildGroup('Lower value', lowerValueInput));
+    row.appendChild(buildGroup('Lower unit', lowerUnitInput));
+    row.appendChild(buildGroup('Upper value', upperValueInput));
+    row.appendChild(buildGroup('Upper unit', upperUnitInput));
+    wrapper.appendChild(row);
     return wrapper;
   }
 
   if (field.type === 'tuple[number]') {
     const current = Array.isArray(defaultValue) ? defaultValue : [];
-    wrapper.innerHTML += `
-      <div class="row">
-        <label>Min<input type="number" step="any" data-role="min" value="${current[0] ?? ''}" /></label>
-        <label>Max<input type="number" step="any" data-role="max" value="${current[1] ?? ''}" /></label>
-      </div>
-    `;
+    const row = document.createElement('div');
+    row.className = 'row';
+    const minInput = document.createElement('input');
+    minInput.type = 'number';
+    minInput.step = 'any';
+    minInput.value = current[0] ?? '';
+    minInput.dataset.role = 'min';
+    const maxInput = document.createElement('input');
+    maxInput.type = 'number';
+    maxInput.step = 'any';
+    maxInput.value = current[1] ?? '';
+    maxInput.dataset.role = 'max';
+    row.appendChild(buildGroup('Min', minInput));
+    row.appendChild(buildGroup('Max', maxInput));
+    wrapper.appendChild(row);
     return wrapper;
   }
 
   if (field.type === 'boolean') {
+    const container = document.createElement('div');
+    container.className = 'field-input-group';
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.checked = Boolean(defaultValue);
     input.dataset.role = 'boolean';
-    wrapper.appendChild(input);
+    container.appendChild(input);
+    const caption = document.createElement('span');
+    caption.textContent = 'Enabled';
+    container.appendChild(caption);
+    wrapper.appendChild(container);
     return wrapper;
   }
 
@@ -391,12 +546,13 @@ function buildDynamicForm(container, typeList, submitHandler, options = {}) {
   cancel.textContent = 'Cancel';
   cancel.addEventListener('click', () => {
     container.classList.add('hidden');
+    container.innerHTML = '';
   });
   footer.appendChild(submit);
   footer.appendChild(cancel);
   form.appendChild(footer);
 
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const values = {};
     fieldsContainer.querySelectorAll('label[data-field]').forEach((label) => {
@@ -405,7 +561,12 @@ function buildDynamicForm(container, typeList, submitHandler, options = {}) {
         values[label.dataset.field] = value;
       }
     });
-    submitHandler({ type: currentType.name, values });
+    try {
+      await submitHandler({ type: currentType.name, values });
+      clearError();
+    } catch (error) {
+      handleError(error);
+    }
   });
 
   container.appendChild(form);
@@ -422,14 +583,18 @@ function openSensorForm() {
       body: JSON.stringify({ type, params: values }),
     });
     container.classList.add('hidden');
+    container.innerHTML = '';
     await refreshSensors();
     await refreshMetadata();
+    clearError();
   });
 }
 
 function buildTrajectoryBuilder(root, defaults = {}) {
   const localState = {
-    segments: defaults.segments ? [...defaults.segments] : [],
+    segments: Array.isArray(defaults.segments)
+      ? defaults.segments.map((segment) => ({ ...segment }))
+      : [],
   };
   const wrapper = document.createElement('div');
   wrapper.className = 'dialog';
@@ -578,7 +743,7 @@ function buildTrajectoryBuilder(root, defaults = {}) {
       return {
         y0: Number(y0Input.value || 0),
         unit: unitInput.value || '',
-        segments: [...localState.segments],
+        segments: localState.segments.map((segment) => ({ ...segment })),
       };
     },
   };
@@ -609,8 +774,10 @@ function openControllerForm({ defaults = {}, parentId = null } = {}) {
       body: JSON.stringify({ type, params: values, trajectory, parent_id: parentId }),
     });
     container.classList.add('hidden');
+    container.innerHTML = '';
     await refreshControllers();
     await refreshMetadata();
+    clearError();
   }, {
     defaults,
     exclude: ['sp_trajectory', 'cascade_controller'],
@@ -625,6 +792,61 @@ function openControllerForm({ defaults = {}, parentId = null } = {}) {
     segments: [],
   });
 
+  container.classList.remove('hidden');
+}
+
+function openTrajectoryEditor(controller) {
+  const container = document.getElementById('controller-form');
+  container.innerHTML = '';
+  const wrapper = document.createElement('div');
+  wrapper.className = 'dialog';
+  const heading = document.createElement('h3');
+  heading.textContent = `Edit ${controller.type} Setpoint`;
+  wrapper.appendChild(heading);
+
+  const trajectoryDefaults = controller.trajectory || { y0: 0, unit: '', segments: [] };
+  const builder = buildTrajectoryBuilder(wrapper, {
+    y0: trajectoryDefaults.y0 ?? 0,
+    unit: trajectoryDefaults.unit ?? '',
+    segments: trajectoryDefaults.segments || [],
+  });
+
+  const footer = document.createElement('div');
+  footer.className = 'row';
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.textContent = 'Save';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.textContent = 'Cancel';
+
+  cancel.addEventListener('click', () => {
+    container.classList.add('hidden');
+    container.innerHTML = '';
+  });
+
+  save.addEventListener('click', async () => {
+    try {
+      const trajectory = builder.getTrajectory();
+      await fetchJSON(`/api/controllers/${controller.id}/trajectory`, {
+        method: 'PATCH',
+        body: JSON.stringify({ trajectory }),
+      });
+      container.classList.add('hidden');
+      container.innerHTML = '';
+      await refreshControllers();
+      await refreshMetadata();
+      clearError();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+  footer.appendChild(save);
+  footer.appendChild(cancel);
+  wrapper.appendChild(footer);
+
+  container.appendChild(wrapper);
   container.classList.remove('hidden');
 }
 
@@ -643,8 +865,10 @@ function openCalculationForm() {
       body: JSON.stringify({ type, params: values }),
     });
     container.classList.add('hidden');
+    container.innerHTML = '';
     await refreshCalculations();
     await refreshMetadata();
+    clearError();
   });
 }
 
@@ -692,7 +916,12 @@ function initEventHandlers() {
     event.preventDefault();
     const rows = Number(event.target.rows.value || 1);
     const cols = Number(event.target.cols.value || 1);
-    await updatePlotLayout({ rows, cols, lines: state.plots ? state.plots.lines : [] });
+    try {
+      await updatePlotLayout({ rows, cols, lines: state.plots ? state.plots.lines : [] });
+      clearError();
+    } catch (error) {
+      handleError(error);
+    }
   });
 
   document.getElementById('add-plot-line').addEventListener('click', async () => {
@@ -704,7 +933,12 @@ function initEventHandlers() {
     const color = prompt('Color (CSS value, optional)') || undefined;
     const style = prompt('Line style (e.g., --, :, -, optional)') || undefined;
     const lines = [...state.plots.lines, { panel: Number(panel), tag, label, color, style }];
-    await updatePlotLayout({ ...state.plots, lines });
+    try {
+      await updatePlotLayout({ ...state.plots, lines });
+      clearError();
+    } catch (error) {
+      handleError(error);
+    }
   });
 
   document.getElementById('run-form').addEventListener('submit', async (event) => {
@@ -715,28 +949,37 @@ function initEventHandlers() {
     if (value) {
       payload.duration = { value: Number(value), unit: unit || 's' };
     }
-    const result = await fetchJSON('/api/run', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    renderRunResult(result);
-    renderMessages(result.messages || []);
-    await refreshMetadata();
+    try {
+      const result = await fetchJSON('/api/run', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      renderRunResult(result);
+      renderMessages(result.messages || []);
+      await refreshMetadata();
+      clearError();
+    } catch (error) {
+      handleError(error);
+    }
   });
 
   document.getElementById('calculation-upload').addEventListener('submit', async (event) => {
     event.preventDefault();
     const formData = new FormData(event.target);
-    const response = await fetch('/api/calculations/upload', {
-      method: 'POST',
-      body: formData,
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      alert(text);
-      return;
+    try {
+      const response = await fetch('/api/calculations/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Upload failed');
+      }
+      await refreshMetadata();
+      clearError();
+    } catch (error) {
+      handleError(error);
     }
-    await refreshMetadata();
   });
 }
 
@@ -747,6 +990,5 @@ async function initialize() {
 
 initEventHandlers();
 initialize().catch((error) => {
-  console.error(error);
-  alert(error.message);
+  handleError(error);
 });

@@ -3,6 +3,7 @@ from typing import List, Optional, Union, Callable
 import bisect
 import math
 import numpy as np
+from astropy.units import UnitBase #type: ignore
 
 Number = Union[int, float]
 
@@ -47,6 +48,11 @@ def _noise_interp(seed: int, x: float) -> float:
 
 @dataclass(frozen=True)
 class Segment:
+    """Base segment describing a portion of a setpoint trajectory timeline.
+
+    Subclasses implement :meth:`eval` to compute the setpoint value at time
+    ``t`` given the setpoint at the beginning of the segment.
+    """
     t0: float  # start time of segment (absolute)
     duration: float  # duration of the segment; np.inf for open-ended
 
@@ -59,6 +65,7 @@ class Segment:
 
 @dataclass(frozen=True)
 class Hold(Segment):
+    """Trajectory segment that maintains a constant output value."""
     value: float
 
     def eval(self, t: float, y0: float) -> float:
@@ -67,6 +74,7 @@ class Hold(Segment):
 
 @dataclass(frozen=True)
 class Step(Segment):
+    """Trajectory segment that applies an instantaneous offset to ``y0``."""
     magnitude: float
 
     def eval(self, t: float, y0: float) -> float:
@@ -75,6 +83,7 @@ class Step(Segment):
 
 @dataclass(frozen=True)
 class Ramp(Segment):
+    """Trajectory segment that linearly interpolates to a new setpoint."""
     magnitude: float  # total change over duration (can be +/-)
 
     def eval(self, t: float, y0: float) -> float:
@@ -88,6 +97,12 @@ class Ramp(Segment):
 
 @dataclass(frozen=True)
 class RandomWalk(Segment):
+    """Trajectory segment that emulates a bounded random walk.
+
+    The segment samples a deterministic pseudo-random field to produce
+    repeatable noise without maintaining state between evaluations.  The
+    resulting value can be clamped to an optional min/max.
+    """
     std: float = 0.1
     dt: float = 1.0  # grid period for the underlying noise field
     clamp_min: Optional[float] = None
@@ -115,7 +130,15 @@ class RandomWalk(Segment):
 
 @dataclass
 class Trajectory:
-    y0: float = 0.0
+    """Composable setpoint profile made of piecewise time segments.
+
+    Trajectories expose fluent builders (``hold``/``step``/``ramp``/``random_walk``)
+    and can be modified on-line via :meth:`set_now`.  History arrays are
+    maintained alongside cached breakpoints and starting values to keep
+    evaluation amortized :math:`O(1)` for monotonic time progression.
+    """
+    y0: float
+    unit: UnitBase
     t0: float = 0.0
     segments: List[Segment] = field(default_factory=list)
 
@@ -242,9 +265,12 @@ class Trajectory:
 
     # O(1) inner-loop retarget: no deletion, just append a Hold at t
     def set_now(self, t: float, value: float) -> "Trajectory":
-        """Hard-set SP from time t onward. This is O(1): we append a Hold at t.
-        Requires t >= current end time to keep evaluation O(1).
-        falls back to trim_future O(n)"""
+        """Append a hold segment starting at ``t`` with the provided value.
+
+        When ``t`` is at or beyond the current end time the operation is O(1).
+        Otherwise the future of the trajectory is trimmed before appending the
+        new hold segment, which is O(n) in the number of retained segments.
+        """
         if not self._can_append_at_end(t):
             self.trim_future(t)
 
@@ -276,7 +302,7 @@ class Trajectory:
 
 
     def trim_future(self, t: float) -> "Trajectory":
-        """Drop segments starting after time t; clip the active one."""
+        """Drop segments starting after time ``t`` and clip any active segment."""
         if not self.segments:
             return self
         new_segments: List[Segment] = []

@@ -53,7 +53,7 @@ illustrate realistic measurements:
 * `B` – lab analyser-style sample with a 900 s sampling period and dead time.
 * `V` – volume sensor with 1% probability of returning a flagged faulty value.
 
-All sensors produce `TimeValueQualityTriplet` outputs that are historized by
+All sensors produce `TagData` outputs that are historized by
 the framework.【F:examples/simple_irreversible_system/run_simulation.py†L33-L60】
 
 No calculated signals are defined in this example.
@@ -82,3 +82,7 @@ python examples/simple_irreversible_system/run_simulation.py
 
 The script simulates 10,000 controller updates, applies a setpoint change
 half-way through, and plots the resulting measurements and controller outputs.
+
+### Real-time dashboard
+
+

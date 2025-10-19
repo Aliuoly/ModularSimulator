@@ -1,8 +1,9 @@
-from typing import  Mapping
+from typing import Annotated, Mapping
 import numpy as np
 from numpy.typing import NDArray
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
 from modular_simulation.framework import System
+from astropy.units import Unit #type: ignore
 
 
 # 1. Define the Data Structures for the System
@@ -13,42 +14,42 @@ from modular_simulation.framework import System
 class EnergyBalanceStates(States):
     """Pydantic model for the differential states of the system."""
 
-    V: float
-    A: float
-    B: float
-    T: float
-    T_J: float
+    V: Annotated[float, Unit("L")]
+    A: Annotated[float, Unit("mol")/Unit("L")]
+    B: Annotated[float, Unit("mol/L")]
+    T: Annotated[float, Unit("K")]
+    T_J: Annotated[float, Unit("K")]
 
 
 class EnergyBalanceControlElements(ControlElements):
     """dataclass for the externally controlled variables."""
 
-    F_in: float  # Inlet flow rate
-    T_J_in: float  # Jacket inlet flow rate
+    F_in: Annotated[float, Unit("L/s")]  # Inlet flow rate
+    T_J_in: Annotated[float, Unit("K")]  # Jacket inlet temperature
 
 
 class EnergyBalanceAlgebraicStates(AlgebraicStates):
     """Pydantic model for algebraic states."""
 
-    F_out: float  # Outlet flow rate, an algebraic function of volume
+    F_out: Annotated[float, Unit("L/s")]  # Outlet flow rate, an algebraic function of volume
 
 
 class EnergyBalanceConstants(Constants):
     """Container for the physical constants used in the model."""
 
-    k0: float
-    activation_energy: float
-    gas_constant: float
-    Cv: float
-    CA_in: float
-    T_in: float
-    reaction_enthalpy: float
-    rho_cp: float
-    overall_heat_transfer_coefficient: float
-    heat_transfer_area: float
-    jacket_volume: float
-    jacket_rho_cp: float
-    jacket_flow: float
+    k0: Annotated[float, Unit("1/s")]
+    activation_energy: Annotated[float, Unit("J/mol")]
+    gas_constant: Annotated[float, Unit("J/(mol*K)")]
+    Cv: Annotated[float, Unit("L")**0.5/Unit("s")]
+    CA_in: Annotated[float, Unit("mol/L")]
+    T_in: Annotated[float, Unit("K")]
+    reaction_enthalpy: Annotated[float, Unit("J/mol")]
+    rho_cp: Annotated[float, Unit("J/(K*L)")]
+    overall_heat_transfer_coefficient: Annotated[float, Unit("J/(s*K*L**2)")]
+    heat_transfer_area: Annotated[float, Unit("L**2")]
+    jacket_volume: Annotated[float, Unit("L")]
+    jacket_rho_cp: Annotated[float, Unit("J/(K*L)")]
+    jacket_flow: Annotated[float, Unit("L/s")]
 
 
 # 2. Define the System Dynamics

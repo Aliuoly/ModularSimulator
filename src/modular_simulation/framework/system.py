@@ -1,6 +1,5 @@
-from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
-from modular_simulation.quantities.usable_quantities import UsableQuantities
-from modular_simulation.quantities.controllable_quantities import ControllableQuantities
+from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
+from modular_simulation.usables.usable_quantities import UsableQuantities
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from numpy.typing import NDArray, ArrayLike
@@ -8,17 +7,18 @@ from typing import Any, Dict, List, Mapping, TYPE_CHECKING, Tuple, Callable
 from scipy.integrate import solve_ivp #type: ignore
 from functools import cached_property
 from operator import attrgetter
-from numba import jit
-from numba.typed.typeddict import Dict as NDict
-from numba import types
+from numba import jit #type: ignore
+from numba.typed.typeddict import Dict as NDict #type: ignore
+from numba import types #type: ignore
 import warnings
-from modular_simulation.control_system.controller import ControllerMode
+from astropy.units import Quantity #type: ignore
+from modular_simulation.usables.controllers.controller import ControllerMode
 from modular_simulation.measurables.base_classes import BaseIndexedModel
 if TYPE_CHECKING:
-    from modular_simulation.usables import TimeValueQualityTriplet
-    from modular_simulation.control_system import Controller, Trajectory
+    from modular_simulation.usables import TagData
+    from modular_simulation.usables import Controller, Trajectory
 import logging
-from tqdm import tqdm
+from tqdm import tqdm #type: ignore
 logger = logging.getLogger(__name__)
 
 class System(BaseModel, ABC):
@@ -48,7 +48,7 @@ class System(BaseModel, ABC):
         _t (float): The current simulation time.
         _history (List[Dict]): A log of the system's state at each time step.
     """
-    dt: float = Field(
+    dt: Quantity = Field(
         default = ...,
         description = (
             "How often the system's sensors, calculations, and controllers update. "
@@ -64,13 +64,7 @@ class System(BaseModel, ABC):
     usable_quantities: "UsableQuantities" = Field(
         ...,
         description = (
-            "Defines how sensors and calculations are used to generate measurements from the system's measurable_quantities."
-        )
-    )
-    controllable_quantities: "ControllableQuantities" = Field(
-        ...,
-        description = (
-            "Defines the controllers that manipulate the system's `ControlElements`."
+            "Defines how sensors and calculations and controllers are used to generate measurements from the system's measurable_quantities."
         )
     )
     solver_options: Dict[str, Any] = Field(
@@ -149,7 +143,7 @@ class System(BaseModel, ABC):
             algebraic_size = self._params["algebraic_size"]
         )
         self.measurable_quantities.algebraic_states.update_from_array(initial_algebraic_array)
-    
+        self.usable_quantities._initialize()
     def _construct_fast_params(self) -> None:
         """
         overwrites System's method of the same name to support numba njit decoration
@@ -220,7 +214,6 @@ class System(BaseModel, ABC):
         array for the solver.
         """
         self.usable_quantities.update(self._t)
-        self.controllable_quantities.update(self._t) # returns results too, but I don't need it here.
         # control elements is already updated here by reference.
         return (
             self.measurable_quantities.states.to_array(),
@@ -330,7 +323,7 @@ class System(BaseModel, ABC):
             algebraic_map = algebraic_map
             )
     
-    def step(self, nsteps: int = 1) -> None:
+    def step(self, duration: Quantity|None = None) -> None:
         """
         The main public method to advance the simulation by one time step.
 
@@ -340,18 +333,23 @@ class System(BaseModel, ABC):
         states with the final, successful result.
         """
         show_progress = False
+        if duration is None:
+            nsteps = 1
+        else:
+            nsteps = round(duration.to(self.dt.unit).value / self.dt.value)
         if nsteps > 1:
             if logger.level == logging.NOTSET:
                 # dont show progress bar if we are logging.
                 show_progress = self.show_progress
-            
-        if not isinstance(nsteps, int):
-            if isinstance(nsteps, float) and nsteps.is_integer():
-                nsteps = int(nsteps)
-                
-            else:
-                raise TypeError("nsteps must be an integer number of steps")
-
+        
+        if show_progress:
+            pbar = tqdm(total = nsteps)
+        for _ in range(int(nsteps)):
+            self._single_step()
+            if show_progress:
+                pbar.update(1)
+        return 
+    def _single_step(self):
         y_map = self._params['y_map']
         u_map = self._params['u_map']
         k_map = self._params['k_map']
@@ -360,41 +358,33 @@ class System(BaseModel, ABC):
         algebraic_values_function = self._params["algebraic_values_function"]
         rhs_function = self._params["rhs_function"]
         algebraic_size = self._params["algebraic_size"]
-        
-        if show_progress:
-            pbar = tqdm(total = nsteps*self.dt)
-        for _ in range(nsteps):
-            y0, u0 = self._pre_integration_step()
-            final_y = y0
-            if self.measurable_quantities.states:
-                result = solve_ivp(
-                    fun = self._rhs_wrapper,
-                    t_span = (self._t, self._t + self.dt),
-                    y0 = y0,
-                    args = (u0, k, y_map, u_map, k_map, algebraic_map, algebraic_values_function, rhs_function, algebraic_size),
-                    **self.solver_options
-                )
-                final_y = result.y[:, -1]
-                self.measurable_quantities.states.update_from_array(final_y)
+        y0, u0 = self._pre_integration_step()
+        final_y = y0
+        if self.measurable_quantities.states:
+            result = solve_ivp(
+                fun = self._rhs_wrapper,
+                t_span = (self._t, self._t + self.dt.value),
+                y0 = y0,
+                args = (u0, k, y_map, u_map, k_map, algebraic_map, algebraic_values_function, rhs_function, algebraic_size),
+                **self.solver_options
+            )
+            final_y = result.y[:, -1]
+            self.measurable_quantities.states.update_from_array(final_y)
 
-            # After the final SUCCESSFUL step, update the actual algebraic_states object.
-            if self.measurable_quantities.algebraic_states:
-                final_algebraic_values = algebraic_values_function(
-                    final_y,u0, k, y_map, u_map, k_map, algebraic_map, algebraic_size
-                )
-                self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
-            
-            self._t += self.dt
-            self._update_history()
-            if show_progress:
-                pbar.update(self.dt)
-        return 
-    
+        # After the final SUCCESSFUL step, update the actual algebraic_states object.
+        if self.measurable_quantities.algebraic_states:
+            final_algebraic_values = algebraic_values_function(
+                final_y,u0, k, y_map, u_map, k_map, algebraic_map, algebraic_size
+            )
+            self.measurable_quantities.algebraic_states.update_from_array(final_algebraic_values)
+        
+        self._t += self.dt.value
+        self._update_history()
     def extend_controller_trajectory(self, cv_tag: str, value: float | None = None) -> "Trajectory":
         """
         used to 'extend' the setpoint trajectory of a controller from the current time onwards.
         If the trajectory has already been defined into the future, the trajectory is trimmed
-        back to the current time. 
+        back to the current time.
 
         cv_tag is used to specify which controller
         
@@ -422,11 +412,22 @@ class System(BaseModel, ABC):
                         "from %(old)0.1e to %(new)0.1e",
                         {'tag': cv_tag, 'time': self._t, 'old': old_value, 'new': new_value})
         return active_trajectory
-        
+
+    def set_controller_mode(self, cv_tag: str, mode: ControllerMode | str) -> ControllerMode:
+        """Change the mode of a controller identified by ``cv_tag``."""
+        if cv_tag not in self.controller_dictionary:
+            raise ValueError(
+                f"Specified cv_tag '{cv_tag}' does not correspond to any defined controllers. "
+                f"Available controller cv_tags are {self.cv_tag_list}."
+            )
+        controller = self.controller_dictionary[cv_tag]
+        controller.change_control_mode(mode)
+        return controller.mode
+
     @cached_property
     def controller_dictionary(self) -> Dict[str, "Controller"]:
         return_dict = {}
-        for controller in self.controllable_quantities.controllers:
+        for controller in self.usable_quantities.controllers:
             return_dict.update({controller.cv_tag : controller})
             while controller.cascade_controller is not None:
                 controller = controller.cascade_controller
@@ -438,11 +439,16 @@ class System(BaseModel, ABC):
         return list(self.controller_dictionary.keys())
 
     @property
+    def time(self) -> float:
+        """Return the current simulation time."""
+        return self._t
+
+    @property
     def measured_history(self) -> Dict[str, Any]:
         """Returns historized measurements and calculations."""
 
-        sensors_detail: Dict[str, List[TimeValueQualityTriplet]] = {}
-        calculations_detail: Dict[str, List[TimeValueQualityTriplet]] = {}
+        sensors_detail: Dict[str, List[TagData]] = {}
+        calculations_detail: Dict[str, List[TagData]] = {}
         history: Dict[str, Any] = {
             "sensors": sensors_detail,
             "calculations": calculations_detail,
@@ -453,7 +459,8 @@ class System(BaseModel, ABC):
             sensors_detail[sensor.alias_tag] = sensor.measurement_history
 
         for calculation in self.usable_quantities.calculations:
-            calculations_detail.update(calculation.history)
+            for output_tag_name, output_tag_info in calculation._output_tag_info_dict.items():
+                calculations_detail[output_tag_name] = (output_tag_info.history)
 
         return history
 
@@ -468,7 +475,7 @@ class System(BaseModel, ABC):
     def setpoint_history(self) -> Dict[str, Dict[str, List]]:
         """Returns historized controller setpoints keyed by ``cv_tag``."""
         history: Dict[str, Dict[str, List]] = {}
-        for controller in self.controllable_quantities.controllers:
+        for controller in self.usable_quantities.controllers:
             history.update(controller.sp_history)
         return history
 

@@ -1,12 +1,19 @@
 from typing import Callable
 from pydantic import Field, PrivateAttr
-from modular_simulation.control_system.controller import Controller
+from modular_simulation.usables.controllers.controller import Controller
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 import logging
 logger = logging.getLogger(__name__)
 
 class FirstOrderTrajectoryController(Controller):
-    
+    """Controller that targets user-specified first-order closed-loop dynamics.
+
+    The controller approximates the process as a first-order lag and computes
+    the manipulated variable that will drive the measured CV toward the
+    setpoint with a desired closed-loop time constant.  The open-loop time
+    constant may be provided directly or resolved from a measurement or
+    calculation tag at runtime.
+    """
     closed_loop_time_constant_fraction: float = Field(
         default = 1.0,
         gt = 0.0,
@@ -29,21 +36,23 @@ class FirstOrderTrajectoryController(Controller):
     _t: float = PrivateAttr(default = 0.)
 
     # ------------------------------------------------------------------------
-    def _initialize(self, usable_quantities, control_elements, is_final_control_element = True):
+    def _initialize(self, tag_infos, usable_quantities, control_elements, is_final_control_element = True):
         # do whatever normal initialization first
-        super()._initialize(usable_quantities, control_elements, is_final_control_element)
+        super()._initialize(tag_infos, usable_quantities, control_elements, is_final_control_element)
         # and then resolve the open_loop_time_constant thing
         if isinstance(self.open_loop_time_constant, str):
             for sensor in usable_quantities.sensors:
                 if sensor.alias_tag == self.open_loop_time_constant:
-                    self._get_open_loop_tc = lambda s = sensor: s._last_value.value
+                    self._get_open_loop_tc = lambda tag_info = sensor._tag_info: tag_info.data.value
                     return
 
             for calculation in usable_quantities.calculations:
-                for output_tag in calculation._output_tags:
-                    if output_tag == self.open_loop_time_constant:
-                        self._get_open_loop_tc = lambda c = calculation: c._last_results[output_tag].value
-                        return
+                available_tags = calculation._output_tag_info_dict.keys()
+                if self.open_loop_time_constant in available_tags:
+                    tag_info = calculation._output_tag_info_dict[self.open_loop_time_constant]
+                    self._get_open_loop_tc = lambda tag_info = tag_info: tag_info.data.value
+                    return
+                        
             # if not found, raise error
             raise ControllerConfigurationError(
                 f"The configured open loop time constant tag '{self.open_loop_time_constant}' "
@@ -55,6 +64,12 @@ class FirstOrderTrajectoryController(Controller):
         cv: float,
         sp: float,
         ) -> float:
+        """Compute the MV required to hit the desired next CV sample.
+
+        The algorithm derives the desired CV trajectory based on the requested
+        closed-loop time constant, then uses the open-loop model to solve for
+        the MV that would achieve that point over the sample interval ``dt``.
+        """
         open_loop_tc = self._get_open_loop_tc()
         closed_loop_tc = open_loop_tc * self.closed_loop_time_constant_fraction
         dt = t - self._t

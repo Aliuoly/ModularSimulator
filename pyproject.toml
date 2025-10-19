@@ -32,9 +32,16 @@ dependencies = [
   "tqdm==4.67.1",
   "pydantic==2.11.7",
   "matplotlib>=3.10.6",
+  "astropy",
+  "flask>=3.1.0",
+  "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+  "tests",
 ]
 [dependency-groups]
 dev = [
     "ruff>=0.13.1",
-    "pytest",
 ]

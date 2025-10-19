@@ -17,7 +17,60 @@ The workflow shall be
 4. When instantiating controllers and defining the cv and mv tags, their units are assumed to be
     the unit specified in the sensors and calculations, so no unit needs to be provided here (for now). 
 
-For these to work well, the TimeValueQualityTriplet should now also have a Unit field, or the Value should be a unit
+For these to work well, the TagData should now also have a Unit field, or the Value should be a unit
     aware data type (e.g., using Pint). 
 
 During validation, (say we are using Pint), the unit convertability will be verified. 
+
+
+Aright, next step in modularization
+
+Inputs to systems should now be their own classes, with all the necessary info for simulation. An example system might be made up of an inlet and an outlet as such
+
+class StateType(IntEnum):
+    DIFFERENTIAL: 0
+    ALGEBRAIC: 1
+    CONTROLLABLE: 2
+    CONSTANT: 3
+
+class StateMetadata:
+    unit: astropy.units.Unit = astropy.units.Unit() # dimensionless unit by default
+    type: StateType = StateType.CONSTANT
+    alias: List[str] = []
+
+class ExistingState:
+    name: str
+
+
+class InletA(Input):
+    F_in: Annotated[float, StateMetadata(Unit("L/s"), StateType.CONTROLLABLE)]
+    Ca_in: Annotated[float, StateMetadata(Unit("mol/L"), StateType.CONSTANT)]
+    T_in: Annotated[float, StateMetadata(Unit("K"), StateType.CONSTANT)]
+class TankInternal(Internal):
+    h: Annotated[float, StateMetadata(Unit("m"), StateType.DIFFERENTIAL)]
+    Ca: Annotated[float, StateMetadata(Unit("m"), StateType.DIFFERENTIAL)]
+    T: Annotated[float, StateMetadata(Unit("K"), StateType.DIFFERENTIAL)]
+class OutletA(Output):
+    F_out: Annotated[float, StateMetadata(Unit("L/s"), StateType.ALGEBRAIC)]
+    Ca_out: Annotated[float, ExistingState("Ca")]
+    T_out: Annotated[float, ExistingState("T")]
+
+these streams would be collected into the good ol BaseIndex objects and into a MeasurableQuantities object. The resulting ControlElements class would look like
+
+class _control_element(ControlElement):
+    F_in: Annotated[float, .....]
+
+and algebraic state would look like
+
+class _algebraic_state(AlgebraicState):
+    F_out: Annotated[float, StateMetadata(Unit("L/s"), StateType.ALGEBRAIC)]
+
+differential state would look like
+
+class _state(State):
+    Ca: Annotated[float, StateMetadata(Unit("m"), StateType.DIFFERENTIAL), alias = ["Ca_out"]]
+    T: Annotated[float, ......]
+
+The alias is used when multiple names could refer to the same state - e.g., when there is an outlet state that refers to an internal state - when the user is defining sensors, the tag would then look through both the defined state names as well as their alias names to find the right match. The alias (might) also is recognizable in the system's rhs and algebraic calc, as long as I make the index_map part correctly such that both normal name and aliases refer to the same slice; sounds very doable. 
+
+

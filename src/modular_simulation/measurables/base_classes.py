@@ -1,9 +1,10 @@
-from pydantic import BaseModel, PrivateAttr, ConfigDict
+from pydantic import BaseModel, PrivateAttr, ConfigDict, model_validator
 from typing import Dict, List
 import numpy as np
 from numpy.typing import NDArray
 from functools import cached_property
-
+from modular_simulation.validation.exceptions import MeasurableConfigurationError
+from astropy.units import Unit, UnitBase
 class BaseIndexedModel(BaseModel):
     """
     Base class for the measurable data containers which are
@@ -13,6 +14,7 @@ class BaseIndexedModel(BaseModel):
     """
 
     _index_map: Dict[str, slice] = PrivateAttr()
+    _tag_unit_info: Dict[str, UnitBase] = PrivateAttr(default_factory = dict)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
     
     def model_post_init(self, context):
@@ -38,6 +40,25 @@ class BaseIndexedModel(BaseModel):
             array_size = max(array_size, slice_of_field.stop)
         self._array_size = array_size
 
+    @model_validator(mode='after')
+    def _ensure_unit_annotated(self):
+        for field_name, field_info in self.__class__.model_fields.items():
+            metadata = field_info.metadata
+            if not metadata:
+                raise MeasurableConfigurationError(
+                    f"Field '{field_name}' of '{self.__class__.__name__}' is missing a unit annotation."
+                )
+            unit = metadata[0]
+            if not isinstance(unit, UnitBase):
+                raise MeasurableConfigurationError(
+                    f"Field '{field_name}' of '{self.__class__.__name__}' must be annotated with a Unit in the first metadata slot."
+                )
+            self._tag_unit_info[field_name] = unit
+        return self
+    @cached_property
+    def tag_unit_info(self) -> Dict[str, UnitBase]:
+        return self._tag_unit_info
+    
     @cached_property
     def tag_list(self) -> List[str]:
         return list(self._index_map.keys())

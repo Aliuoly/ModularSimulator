@@ -1,20 +1,20 @@
-"""Utilities for plotting :class:`TimeValueQualityTriplet` series with Matplotlib."""
+"""Utilities for plotting :class:`TagData` series with Matplotlib."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Iterable, List, Tuple, TYPE_CHECKING
+from typing import Any, Iterable, List, Tuple, TYPE_CHECKING, Callable
 
 import numpy as np
 
-from modular_simulation.usables import TimeValueQualityTriplet
+from modular_simulation.usables import TagData
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from matplotlib.axes import Axes
 else:  # pragma: no cover - fall back when matplotlib is absent
     Axes = Any  # type: ignore
 
-SeriesInput = Sequence[TimeValueQualityTriplet] | Mapping[str, Sequence[Any]]
+SeriesInput = Sequence[TagData] | Mapping[str, Sequence[Any]]
 
 
 def _coerce_scalar(value: Any) -> float:
@@ -27,7 +27,7 @@ def _coerce_scalar(value: Any) -> float:
     return float(arr.item())
 
 
-def triplets_to_arrays(samples: Sequence[TimeValueQualityTriplet]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def triplets_to_arrays(samples: Sequence[TagData]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Convert a sequence of triplets into NumPy arrays of time, value, and quality flags."""
 
     times = np.empty(len(samples), dtype=float)
@@ -35,7 +35,7 @@ def triplets_to_arrays(samples: Sequence[TimeValueQualityTriplet]) -> Tuple[np.n
     ok = np.empty(len(samples), dtype=bool)
 
     for idx, sample in enumerate(samples):
-        times[idx] = float(sample.t)
+        times[idx] = float(sample.time)
         values[idx] = _coerce_scalar(sample.value)
         ok[idx] = bool(sample.ok)
     return times, values, ok
@@ -84,8 +84,9 @@ def plot_triplet_series(
     style: str = "line",
     line_kwargs: Mapping[str, Any] | None = None,
     bad_kwargs: Mapping[str, Any] | None = None,
+    time_converter: Callable = lambda v: v
 ) -> List[Any]:
-    """Plot a :class:`TimeValueQualityTriplet` series on ``ax``.
+    """Plot a :class:`TagData` series on ``ax``.
 
     Parameters
     ----------
@@ -113,6 +114,7 @@ def plot_triplet_series(
     """
 
     times, values, ok = _extract_series(samples)
+    times = time_converter(times)
     artists: List[Any] = []
 
     if times.size == 0:
@@ -139,12 +141,12 @@ def plot_triplet_series(
     return artists
 
 
-def triplets_from_history(history_entry: Mapping[str, Sequence[Any]]) -> List[TimeValueQualityTriplet]:
+def triplets_from_history(history_entry: Mapping[str, Sequence[Any]]) -> List[TagData]:
     """Convert a history mapping (time/value/ok) to triplet objects."""
 
     times, values, ok = _extract_series(history_entry)
     return [
-        TimeValueQualityTriplet(t=float(t), value=float(v), ok=bool(flag))
+        TagData(t=float(t), value=float(v), ok=bool(flag))
         for t, v, flag in zip(times, values, ok, strict=True)
     ]
 

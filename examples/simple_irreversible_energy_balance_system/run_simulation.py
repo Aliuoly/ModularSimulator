@@ -4,10 +4,11 @@ from typing import List, TYPE_CHECKING
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from modular_simulation.control_system import PIDController, Trajectory
+from modular_simulation.usables import PIDController, Trajectory
 from modular_simulation.plotting import plot_triplet_series
 from modular_simulation.framework import create_system
 from modular_simulation.usables import SampledDelayedSensor
+from astropy.units import Unit #type: ignore
 
 
 try:
@@ -40,17 +41,18 @@ def make_systems():
     initial_algebraic = EnergyBalanceAlgebraicStates(F_out=1.0)
 
     sensors = [
-        SampledDelayedSensor(measurement_tag="F_out"),
-        SampledDelayedSensor(measurement_tag="F_in", coefficient_of_variance=0.05),
+        SampledDelayedSensor(measurement_tag="F_out", unit = Unit("cm3/s")),
+        SampledDelayedSensor(measurement_tag="F_in", unit = Unit("cm3/s"), coefficient_of_variance=0.05),
         SampledDelayedSensor(
             measurement_tag="B",
+            unit = Unit("mol/L"),
             coefficient_of_variance=0.05,
             sampling_period=900.0,
             deadtime=900.0,
         ),
-        SampledDelayedSensor(measurement_tag="V"),
-        SampledDelayedSensor(measurement_tag="T"),
-        SampledDelayedSensor(measurement_tag="T_J"),
+        SampledDelayedSensor(measurement_tag="V", unit = Unit("m3")),
+        SampledDelayedSensor(measurement_tag="T", unit = Unit("K")),
+        SampledDelayedSensor(measurement_tag="T_J", unit = Unit("K")),
         SampledDelayedSensor(measurement_tag="T_J_in"),
         SampledDelayedSensor(measurement_tag="jacket_flow"),
     ]
@@ -61,36 +63,36 @@ def make_systems():
         PIDController(
             mv_tag="F_in",
             cv_tag="V",
-            sp_trajectory=Trajectory(1.0e3),
+            sp_trajectory=Trajectory(1.0e3, unit = Unit("L")),
             Kp=1.0e-2,
             Ti=100.0,
-            mv_range=(0.0, 1.0e6),
+            mv_range=(0.0 * Unit("L/s"), 1.0e6 * Unit("L/s")),
             ),
         PIDController(
             mv_tag="T_J_in",
             cv_tag="T_J",
-            sp_trajectory=Trajectory(300),
+            sp_trajectory=Trajectory(300, unit = Unit("K")),
             Kp=1.0e-1,
             Ti=50.0,
-            mv_range=(200, 350),
+            mv_range=(200 * Unit("K"), 350 * Unit("K")),
             cascade_controller = PIDController(
                 mv_tag="T_J",
                 cv_tag="T",
-                sp_trajectory=Trajectory(300),
+                sp_trajectory=Trajectory(300, Unit("K")),
                 Kp=1.0e-1,
                 Ti=100.0,
-                mv_range=(200, 350),
+                mv_range=(200 * Unit("K"), 350 * Unit("K")),
                 cascade_controller = PIDController(
                     mv_tag="T",
                     cv_tag="B",
-                    sp_trajectory=Trajectory().\
-                        hold(duration = 15e3, value = 0.02).\
+                    sp_trajectory=Trajectory(0.02, unit = Unit("mol/L")).\
+                        hold(duration = 15e3).\
                             hold(15e3, 0.05).\
                                 hold(15e3, 0.1).\
                                     hold(15e3, 0.01),
                     Kp=2.0e-1,
                     Ti=5.0,
-                    mv_range=(250.0, 350.0),
+                    mv_range=(250.0 * Unit("K"), 350.0* Unit("K")),
                 ),
             ),
         ),
@@ -114,7 +116,7 @@ def make_systems():
 
 
     # --- 2. Assemble and Initialize the System ---
-    dt = 30.0
+    dt = 30.0 * Unit("second")
     system = create_system(
         dt=dt,
         system_class=EnergyBalanceSystem,
@@ -292,10 +294,12 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     mpl.set_loglevel("warning")
     # --- 3. Run the Simulation ---
-    systems = make_systems()
+    systems = {
+        "normal": normal_system
+    }
 
     for j, (name, system) in enumerate(systems.items()):
-        system.step(nsteps = 2000)
+        system.step(duration = 1 * Unit("day"))
         plot(name, system)
     
     plt.show()

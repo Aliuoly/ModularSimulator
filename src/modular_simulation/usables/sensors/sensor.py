@@ -16,7 +16,18 @@ def make_measurement_getter(object: "BaseIndexedModel", tag: str, converter:Call
 
 
 class Sensor(BaseModel, ABC):
+    """Abstract base class for all sensors in the modular simulation framework.
 
+    Subclasses implement the scheduling and signal conditioning steps while
+    the base class wires the sensor into the orchestrated
+    :class:`~modular_simulation.measurables.base_classes.MeasurableQuantities`
+    instance.  Common responsibilities such as unit conversion, alias tag
+    management, clipping to instrument ranges, first-order dynamics, and the
+    injection of noise/fault models are handled here.  The latest
+    :class:`~modular_simulation.usables.tag_info.TagData` sample is stored on
+    the sensor's :class:`~modular_simulation.usables.tag_info.TagInfo`, which
+    also historizes every emitted measurement for later analysis.
+    """
     measurement_tag: str = Field(
         ...,
         description = "tag of the state or control element to measure."
@@ -93,11 +104,13 @@ class Sensor(BaseModel, ABC):
         )
 
     def _initialize(self, measurable_quantities: "MeasurableQuantities") -> None:
-        """
-        Links the measurable quantities instance and
-        finds the correct attribute to measure and creates a simple callable for it.
-        Also calls the .update method once to populate the sensor's TagData instance. 
-        Validation is already done so no error handling is placed here. 
+        """Resolve the measurement source and prime the sensor state.
+
+        The measurable quantities container has already validated that the
+        requested ``measurement_tag`` exists.  This routine simply locates the
+        owning model, builds a unit-aware getter callable, and performs an
+        initial measurement so ``_tag_info`` contains a populated
+        :class:`TagData` sample before the simulation loop starts.
         """
         search_order = list(measurable_quantities.model_dump())
         
@@ -114,8 +127,12 @@ class Sensor(BaseModel, ABC):
 
     # --- Template Method ---
     def measure(self, t: float) -> TagData:
-        """
-        Public method that defines the complete measurement algorithm. 
+        """Execute the measurement pipeline and return the resulting :class:`TagData`.
+
+        The method enforces initialization, optionally reuses the most recent
+        measurement when no refresh is required, gathers the raw value from the
+        linked model, applies subclass-defined processing, and then runs the
+        shared noise/fault machinery before historizing the result.
         """
         if not self._initialized:
             raise RuntimeError(
@@ -144,6 +161,7 @@ class Sensor(BaseModel, ABC):
         #     If you want to use it though, change it lol. 
         ok = True if not self.faulty_aware else (not is_faulty)
         self._tag_info.data = TagData(time = t, value = final_value, ok = ok)
+        return self._tag_info.data
     
     def _sensor_dynamics(self, new_value: float|NDArray, t: float):
         if self._last_measurement is None:
@@ -162,22 +180,34 @@ class Sensor(BaseModel, ABC):
     @abstractmethod
     def _should_update(self, t: float) -> bool:
         """
-        Subclass logic to determine if a new measurement should be processed.
-        (e.g., for handling sampling periods).
+        Subclass hook that decides whether a fresh measurement is required.
+
+        Typical implementations enforce sampling periods, latency, or
+        dead-band logic.  Returning ``False`` short-circuits ``measure`` and
+        reuses the previous :class:`TagData` sample.
         """
         pass
 
     @abstractmethod
     def _get_processed_value(self, t: float, raw_value: float | NDArray) -> float | NDArray:
         """
-        Takes the true, raw value and applies subclass-specific logic,
-        such as time delays, filtering, etc.
+        Transform the true value into the sensor's processed output.
+
+        Subclasses should perform any latency simulation, biasing, filtering,
+        or other transformations here and return a value with the same shape as
+        ``raw_value``.
         """
         pass
-    
+
     def _apply_noise_and_faults(self, value: float | NDArray) -> tuple[float | NDArray, bool]:
         """
-        Applies common fault and noise models. Returns the final value and a fault flag.
+        Apply the configured stochastic noise and random faults.
+
+        A fault either freezes the value at the last good sample or introduces
+        a random spike.  When no fault occurs, zero-mean Gaussian noise with a
+        standard deviation proportional to the true value is injected.
+        Returns the perturbed value and a ``bool`` indicating whether a fault
+        occurred.
         """
         # Check for a fault
         faulty = False

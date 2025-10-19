@@ -12,12 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 class CalculationModelPath:
-    """
-    Routing between an IMC's internal model and a Calculation's method. 
-    Arguments:
-        1. calculation_name: a Calculation Subclass OR a string corresponding to the 
-                custom name assigned to the calculation at definition time. 
-        2. method_name: the method of the calculation to be used as the IMC's internal model. 
+    """Descriptor pointing an IMC to a ``Calculation`` method to use as its model.
+
+    ``calculation_name`` can be the class/type itself or the custom name used
+    when the calculation was registered with the system.  ``method_name`` is
+    the attribute on that calculation that implements the forward model.
     """
     def __init__(self, calculation_name: Type[Calculation] | str, method_name: str):
         if isinstance(str, calculation_name): #type: ignore
@@ -27,13 +26,23 @@ class CalculationModelPath:
         self.method_name = method_name
 
 class IMCModel(Protocol):
+    """Protocol describing call signature for IMC internal models."""
     def __call__(self, input: Quantity) -> float | NDArray:
         ...
 
 
 
 class InternalModelController(Controller):
-    
+    """Internal Model Control (IMC) implementation for SISO loops.
+
+    ``model`` may be a callable operating directly in system units or a
+    :class:`Calculation` method referenced via :class:`CalculationModelPath`.
+    During initialization the controller resolves the model, builds unit
+    converters between the calculation space and the system's manipulated
+    variable, and caches MV bounds in those units.  Each update solves a
+    scalar optimization problem to minimize the predicted setpoint error while
+    honouring MV constraints and optional setpoint filtering.
+    """
     model: Callable[[float], float] | CalculationModelPath = Field(
         ...,
         description = (
@@ -96,11 +105,13 @@ class InternalModelController(Controller):
         cv: float,
         sp: float,
         ) -> float:
-        """Classic IMC: solve *model(u, meas) = y_set*  for u each cycle.
+        """Solve for the MV that minimizes the squared prediction error.
 
-        *   `meas` supplies disturbances and the current plant state.
-        *   `setpoint` is optionally filtered (first‑order).
-        *   `fsolve` (or Newton, Brent…) finds the root.
+        The requested setpoint is optionally low-pass filtered, then SciPy's
+        :func:`minimize_scalar` searches the pre-converted MV bounds expressed
+        in the internal-model units.  The optimizer works on the squared
+        residual ``(model(u) - sp)**2`` and the final MV is converted back to
+        system units before being returned.
         """
 
         if self._filtered_sp is None:

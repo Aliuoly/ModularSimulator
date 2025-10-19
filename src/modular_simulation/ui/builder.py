@@ -5,11 +5,10 @@ import importlib
 import importlib.util
 import inspect
 import io
-import math
 import pkgutil
 import types
 import uuid
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Type, Union, get_args, get_origin
 
 import matplotlib
@@ -175,43 +174,20 @@ def _parse_quantity_range(value: Mapping[str, Any]) -> Tuple[Quantity, Quantity]
     return (lower, upper)
 
 
-def _sanitize_float(value: float) -> float | str | None:
-    if math.isnan(value):
-        return None
-    if math.isinf(value):
-        return "Infinity" if value > 0 else "-Infinity"
-    return value
-
-
-def sanitize_payload(value: Any) -> Any:
-    """Convert arbitrary objects into JSON-friendly structures."""
-
+def _serialize_value(value: Any) -> Any:
     if isinstance(value, Quantity):
-        magnitude = _sanitize_float(float(value.value))
-        return {"value": magnitude, "unit": str(value.unit)}
+        return {"value": float(value.value), "unit": str(value.unit)}
     if isinstance(value, UnitBase):
         return str(value)
     if isinstance(value, ControllerMode):
         return value.name
-    if isinstance(value, np.generic):
-        return sanitize_payload(value.item())
-    if isinstance(value, np.ndarray):
-        return [sanitize_payload(v) for v in value.tolist()]
-    if isinstance(value, float):
-        return _sanitize_float(value)
-    if isinstance(value, (int, bool, str)) or value is None:
-        return value
-    if is_dataclass(value):
-        return {k: sanitize_payload(v) for k, v in asdict(value).items()}
     if isinstance(value, tuple):
-        return [sanitize_payload(v) for v in value]
+        return [_serialize_value(v) for v in value]
     if isinstance(value, list):
-        return [sanitize_payload(v) for v in value]
+        return [_serialize_value(v) for v in value]
     if isinstance(value, dict):
-        return {k: sanitize_payload(v) for k, v in value.items()}
-    if isinstance(value, set):
-        return [sanitize_payload(v) for v in value]
-    return str(value)
+        return {k: _serialize_value(v) for k, v in value.items()}
+    return value
 
 
 def _serialize_tag_history(series: List[TagData]) -> Dict[str, List[float]]:
@@ -273,7 +249,7 @@ class SimulationBuilder:
                 items.append({
                     "tag": tag,
                     "category": category,
-                    "unit": sanitize_payload(unit),
+                    "unit": str(unit),
                 })
         return items
 
@@ -323,7 +299,7 @@ class SimulationBuilder:
             name=cls.__name__,
             cls=cls,
             args=args,
-            raw=sanitize_payload(self._serialize_model(instance)),
+            raw=self._serialize_model(instance),
         )
         self.sensor_configs.append(config)
         self.invalidate("Sensor definitions changed; system will be rebuilt on next run.")
@@ -357,11 +333,7 @@ class SimulationBuilder:
         )
         instance = cls(sp_trajectory=self._build_trajectory(traj_spec), **args)
         raw = self._serialize_model(instance)
-        raw.pop("sp_trajectory", None)
         raw["trajectory"] = trajectory
-        raw.setdefault("sp_y0", traj_spec.y0)
-        raw.setdefault("sp_unit", traj_spec.unit)
-        raw = sanitize_payload(raw)
 
         controller_id = str(uuid.uuid4())
         config = ControllerConfig(
@@ -397,7 +369,7 @@ class SimulationBuilder:
         cls = self._resolve_calculation_type(calculation_type)
         args = self._convert_arguments(cls, params)
         instance = cls(**args)
-        raw = sanitize_payload(self._serialize_model(instance))
+        raw = self._serialize_model(instance)
         raw["outputs"] = list(instance._output_tag_info_dict.keys())
         config = CalculationConfig(
             id=str(uuid.uuid4()),
@@ -474,12 +446,12 @@ class SimulationBuilder:
         for tag, series in setpoints.items():
             outputs["setpoints"][tag] = _serialize_tag_history(series)
         figure = self._render_plot(system, outputs)
-        return sanitize_payload({
+        return {
             "time": system.time,
             "outputs": outputs,
             "figure": figure,
             "messages": self.messages(),
-        })
+        }
 
     def _render_plot(self, system: System, outputs: Dict[str, Any]) -> Optional[str]:
         if not self.plot_layout.lines:
@@ -538,7 +510,7 @@ class SimulationBuilder:
             field_type = self._field_type_label(field.annotation)
             default_value = None
             if not field.is_required() and field.default is not PydanticUndefined:
-                default_value = sanitize_payload(field.default) if field.default is not None else None
+                default_value = _serialize_value(field.default) if field.default is not None else None
             fields.append(
                 {
                     "name": name,
@@ -655,7 +627,7 @@ class SimulationBuilder:
             if field_name.startswith("_"):
                 continue
             value = getattr(instance, field_name)
-            data[field_name] = sanitize_payload(value)
+            data[field_name] = _serialize_value(value)
         return data
 
     def _resolve_calculation_type(self, calculation_type: str) -> Type[Calculation]:
@@ -724,4 +696,4 @@ class SimulationBuilder:
         return sorted(set(tags))
 
 
-__all__ = ["SimulationBuilder", "sanitize_payload"]
+__all__ = ["SimulationBuilder"]

@@ -160,43 +160,6 @@ button:disabled {
   gap: 0.75rem;
 }
 
-.dynamic-form {
-  display: grid;
-  gap: 0.9rem;
-}
-
-.dynamic-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.field-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-weight: 600;
-}
-
-.help-tooltip {
-  font-size: 0.85rem;
-  color: #1d3557;
-  cursor: help;
-}
-
-.field-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
-}
-
 .tag-pill {
   display: inline-flex;
   align-items: center;

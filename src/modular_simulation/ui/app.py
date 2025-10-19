@@ -1,28 +1,24 @@
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from astropy.units import Quantity  # type: ignore
 from flask import Flask, jsonify, render_template, request
-from pydantic import ValidationError as PydanticValidationError
-from pydantic_core import ValidationError as CoreValidationError
 
 from .builder import (
     SimulationBuilder,
     _parse_quantity,
-    sanitize_payload,
 )
 
 
 def _sensor_to_payload(config) -> Dict[str, Any]:
-    return sanitize_payload({
+    return {
         "id": config.id,
         "type": config.name,
         "params": config.raw,
-    })
+    }
 
 
 def _controller_to_payload(config) -> Dict[str, Any]:
@@ -38,40 +34,16 @@ def _controller_to_payload(config) -> Dict[str, Any]:
         "parent_id": config.parent_id,
         "child_id": config.child_id,
     }
-    return sanitize_payload(payload)
+    return payload
 
 
 def _calculation_to_payload(config) -> Dict[str, Any]:
-    return sanitize_payload({
+    return {
         "id": config.id,
         "type": config.name,
         "params": config.raw,
         "outputs": list(config.output_tags),
-    })
-
-
-ValidationErrorTypes = (PydanticValidationError, CoreValidationError)
-
-
-def _validation_details(exc: Exception) -> Any:
-    if hasattr(exc, "json"):
-        try:
-            return json.loads(exc.json())
-        except Exception:
-            pass
-    if hasattr(exc, "errors"):
-        try:
-            return exc.errors()  # type: ignore[no-any-return]
-        except Exception:
-            pass
-    return str(exc)
-
-
-def _error_response(message: str, *, details: Optional[Any] = None, status: int = 400):
-    payload: Dict[str, Any] = {"error": message}
-    if details is not None:
-        payload["details"] = details
-    return jsonify(payload), status
+    }
 
 
 def create_app(builder: SimulationBuilder) -> Flask:
@@ -88,33 +60,26 @@ def create_app(builder: SimulationBuilder) -> Flask:
     @app.get("/api/metadata")
     def metadata():
         return jsonify(
-            sanitize_payload(
-                {
-                    "measurables": builder.measurable_metadata(),
-                    "control_elements": builder.control_element_tags(),
-                    "sensor_types": builder.available_sensor_types(),
-                    "controller_types": builder.available_controller_types(),
-                    "calculation_types": builder.available_calculation_types(),
-                    "usable_tags": builder.available_usable_tags(),
-                    "setpoint_tags": builder.available_setpoint_tags(),
-                    "messages": builder.messages(),
-                }
-            )
+            {
+                "measurables": builder.measurable_metadata(),
+                "control_elements": builder.control_element_tags(),
+                "sensor_types": builder.available_sensor_types(),
+                "controller_types": builder.available_controller_types(),
+                "calculation_types": builder.available_calculation_types(),
+                "usable_tags": builder.available_usable_tags(),
+                "setpoint_tags": builder.available_setpoint_tags(),
+                "messages": builder.messages(),
+            }
         )
 
     @app.get("/api/sensors")
     def list_sensors():
-        return jsonify(sanitize_payload([_sensor_to_payload(cfg) for cfg in builder.sensor_configs]))
+        return jsonify([_sensor_to_payload(cfg) for cfg in builder.sensor_configs])
 
     @app.post("/api/sensors")
     def add_sensor():
         data = request.get_json(force=True)
-        try:
-            config = builder.add_sensor(data["type"], data.get("params", {}))
-        except ValidationErrorTypes as exc:
-            return _error_response("Invalid sensor configuration.", details=_validation_details(exc))
-        except ValueError as exc:
-            return _error_response(str(exc))
+        config = builder.add_sensor(data["type"], data.get("params", {}))
         return jsonify(_sensor_to_payload(config)), 201
 
     @app.delete("/api/sensors/<sensor_id>")
@@ -124,22 +89,17 @@ def create_app(builder: SimulationBuilder) -> Flask:
 
     @app.get("/api/controllers")
     def list_controllers():
-        return jsonify(sanitize_payload([_controller_to_payload(cfg) for cfg in builder.controller_configs.values()]))
+        return jsonify([_controller_to_payload(cfg) for cfg in builder.controller_configs.values()])
 
     @app.post("/api/controllers")
     def add_controller():
         data = request.get_json(force=True)
-        try:
-            config = builder.add_controller(
-                data["type"],
-                data.get("params", {}),
-                data.get("trajectory", {}),
-                parent_id=data.get("parent_id"),
-            )
-        except ValidationErrorTypes as exc:
-            return _error_response("Invalid controller configuration.", details=_validation_details(exc))
-        except ValueError as exc:
-            return _error_response(str(exc))
+        config = builder.add_controller(
+            data["type"],
+            data.get("params", {}),
+            data.get("trajectory", {}),
+            parent_id=data.get("parent_id"),
+        )
         return jsonify(_controller_to_payload(config)), 201
 
     @app.delete("/api/controllers/<controller_id>")
@@ -149,17 +109,12 @@ def create_app(builder: SimulationBuilder) -> Flask:
 
     @app.get("/api/calculations")
     def list_calculations():
-        return jsonify(sanitize_payload([_calculation_to_payload(cfg) for cfg in builder.calculation_configs.values()]))
+        return jsonify([_calculation_to_payload(cfg) for cfg in builder.calculation_configs.values()])
 
     @app.post("/api/calculations")
     def add_calculation():
         data = request.get_json(force=True)
-        try:
-            config = builder.add_calculation(data["type"], data.get("params", {}))
-        except ValidationErrorTypes as exc:
-            return _error_response("Invalid calculation configuration.", details=_validation_details(exc))
-        except ValueError as exc:
-            return _error_response(str(exc))
+        config = builder.add_calculation(data["type"], data.get("params", {}))
         return jsonify(_calculation_to_payload(config)), 201
 
     @app.delete("/api/calculations/<calc_id>")
@@ -170,16 +125,13 @@ def create_app(builder: SimulationBuilder) -> Flask:
     @app.post("/api/calculations/upload")
     def upload_calculation():
         if "file" not in request.files:
-            return _error_response("No file uploaded.")
+            return jsonify({"error": "No file uploaded"}), 400
         file = request.files["file"]
         if not file.filename.endswith(".py"):
-            return _error_response("Upload a .py file.")
+            return jsonify({"error": "Upload a .py file"}), 400
         with tempfile.NamedTemporaryFile(delete=False, suffix=".py") as tmp:
             file.save(tmp.name)
-            try:
-                module = builder.register_calculation_module(tmp.name)
-            except ValueError as exc:
-                return _error_response(str(exc))
+            module = builder.register_calculation_module(tmp.name)
         payload = {
             "module_id": module.id,
             "classes": [cls.__name__ for cls in module.classes.values()],
@@ -190,52 +142,45 @@ def create_app(builder: SimulationBuilder) -> Flask:
     def get_plots():
         layout = builder.plot_layout
         return jsonify(
-            sanitize_payload(
-                {
-                    "rows": layout.rows,
-                    "cols": layout.cols,
-                    "lines": [
-                        {
-                            "panel": line.panel,
-                            "tag": line.tag,
-                            "label": line.label,
-                            "color": line.color,
-                            "style": line.style,
-                        }
-                        for line in layout.lines
-                    ],
-                }
-            )
+            {
+                "rows": layout.rows,
+                "cols": layout.cols,
+                "lines": [
+                    {
+                        "panel": line.panel,
+                        "tag": line.tag,
+                        "label": line.label,
+                        "color": line.color,
+                        "style": line.style,
+                    }
+                    for line in layout.lines
+                ],
+            }
         )
 
     @app.post("/api/plots")
     def set_plots():
         data = request.get_json(force=True)
-        try:
-            layout = builder.set_plot_layout(
-                int(data.get("rows", 1)),
-                int(data.get("cols", 1)),
-                data.get("lines", []),
-            )
-        except ValueError as exc:
-            return _error_response(str(exc))
+        layout = builder.set_plot_layout(
+            int(data.get("rows", 1)),
+            int(data.get("cols", 1)),
+            data.get("lines", []),
+        )
         return jsonify(
-            sanitize_payload(
-                {
-                    "rows": layout.rows,
-                    "cols": layout.cols,
-                    "lines": [
-                        {
-                            "panel": line.panel,
-                            "tag": line.tag,
-                            "label": line.label,
-                            "color": line.color,
-                            "style": line.style,
-                        }
-                        for line in layout.lines
-                    ],
-                }
-            )
+            {
+                "rows": layout.rows,
+                "cols": layout.cols,
+                "lines": [
+                    {
+                        "panel": line.panel,
+                        "tag": line.tag,
+                        "label": line.label,
+                        "color": line.color,
+                        "style": line.style,
+                    }
+                    for line in layout.lines
+                ],
+            }
         )
 
     @app.post("/api/run")
@@ -244,19 +189,14 @@ def create_app(builder: SimulationBuilder) -> Flask:
         duration: Optional[Quantity] = None
         if data and data.get("duration"):
             duration = _parse_quantity(data["duration"])
-        try:
-            result = builder.run(duration)
-        except ValueError as exc:
-            return _error_response(str(exc))
+        result = builder.run(duration)
         return jsonify(
-            sanitize_payload(
-                {
-                    "time": result["time"],
-                    "outputs": result["outputs"],
-                    "figure": result["figure"],
-                    "messages": result.get("messages", []),
-                }
-            )
+            {
+                "time": result["time"],
+                "outputs": result["outputs"],
+                "figure": result["figure"],
+                "messages": result.get("messages", []),
+            }
         )
 
     return app

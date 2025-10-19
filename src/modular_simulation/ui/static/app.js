@@ -162,10 +162,6 @@ function renderCalculationList() {
 
 function renderPlotLayout() {
   if (!state.plots) return;
-  const formContainer = document.getElementById('plot-line-form');
-  if (formContainer) {
-    formContainer.classList.add('hidden');
-  }
   const form = document.getElementById('plot-form');
   form.rows.value = state.plots.rows;
   form.cols.value = state.plots.cols;
@@ -233,147 +229,43 @@ function buildFieldInput(field, defaults = {}) {
   const wrapper = document.createElement('label');
   wrapper.dataset.field = field.name;
   wrapper.dataset.type = field.type;
-
-  const title = document.createElement('span');
-  title.className = 'field-title';
-  title.textContent = field.name;
-  if (field.description) {
-    const tooltip = document.createElement('span');
-    tooltip.className = 'help-tooltip';
-    tooltip.title = field.description;
-    tooltip.textContent = 'ⓘ';
-    title.appendChild(tooltip);
-  }
-  wrapper.appendChild(title);
+  wrapper.textContent = field.description ? `${field.name} (${field.description})` : field.name;
 
   const defaultValue = defaults[field.name] ?? field.default ?? '';
   const options = choiceOptions(field.type, field.name);
 
   if (field.type === 'quantity') {
-    const row = document.createElement('div');
-    row.className = 'row';
-
-    const valueGroup = document.createElement('div');
-    valueGroup.className = 'field-group';
-    const valueLabel = document.createElement('span');
-    valueLabel.textContent = 'Value';
-    const valueInput = document.createElement('input');
-    valueInput.type = 'number';
-    valueInput.step = 'any';
-    valueInput.dataset.role = 'value';
-    valueInput.value = defaultValue?.value ?? '';
-    valueGroup.appendChild(valueLabel);
-    valueGroup.appendChild(valueInput);
-
-    const unitGroup = document.createElement('div');
-    unitGroup.className = 'field-group';
-    const unitLabel = document.createElement('span');
-    unitLabel.textContent = 'Unit';
-    const unitInput = document.createElement('input');
-    unitInput.type = 'text';
-    unitInput.dataset.role = 'unit';
-    unitInput.value = defaultValue?.unit ?? '';
-    unitGroup.appendChild(unitLabel);
-    unitGroup.appendChild(unitInput);
-
-    row.appendChild(valueGroup);
-    row.appendChild(unitGroup);
-    wrapper.appendChild(row);
+    wrapper.innerHTML += `
+      <div class="row">
+        <label>Value<input type="number" step="any" data-role="value" value="${defaultValue?.value ?? ''}" /></label>
+        <label>Unit<input type="text" data-role="unit" value="${defaultValue?.unit ?? ''}" /></label>
+      </div>
+    `;
     return wrapper;
   }
 
   if (field.type === 'quantity_range') {
     const lower = defaultValue?.[0] || defaultValue?.lower || {};
     const upper = defaultValue?.[1] || defaultValue?.upper || {};
-    const row = document.createElement('div');
-    row.className = 'row';
-
-    const lowerValueGroup = document.createElement('div');
-    lowerValueGroup.className = 'field-group';
-    const lowerValueLabel = document.createElement('span');
-    lowerValueLabel.textContent = 'Lower value';
-    const lowerValueInput = document.createElement('input');
-    lowerValueInput.type = 'number';
-    lowerValueInput.step = 'any';
-    lowerValueInput.dataset.role = 'lower-value';
-    lowerValueInput.value = lower.value ?? '';
-    lowerValueGroup.appendChild(lowerValueLabel);
-    lowerValueGroup.appendChild(lowerValueInput);
-
-    const lowerUnitGroup = document.createElement('div');
-    lowerUnitGroup.className = 'field-group';
-    const lowerUnitLabel = document.createElement('span');
-    lowerUnitLabel.textContent = 'Lower unit';
-    const lowerUnitInput = document.createElement('input');
-    lowerUnitInput.type = 'text';
-    lowerUnitInput.dataset.role = 'lower-unit';
-    lowerUnitInput.value = lower.unit ?? '';
-    lowerUnitGroup.appendChild(lowerUnitLabel);
-    lowerUnitGroup.appendChild(lowerUnitInput);
-
-    const upperValueGroup = document.createElement('div');
-    upperValueGroup.className = 'field-group';
-    const upperValueLabel = document.createElement('span');
-    upperValueLabel.textContent = 'Upper value';
-    const upperValueInput = document.createElement('input');
-    upperValueInput.type = 'number';
-    upperValueInput.step = 'any';
-    upperValueInput.dataset.role = 'upper-value';
-    upperValueInput.value = upper.value ?? '';
-    upperValueGroup.appendChild(upperValueLabel);
-    upperValueGroup.appendChild(upperValueInput);
-
-    const upperUnitGroup = document.createElement('div');
-    upperUnitGroup.className = 'field-group';
-    const upperUnitLabel = document.createElement('span');
-    upperUnitLabel.textContent = 'Upper unit';
-    const upperUnitInput = document.createElement('input');
-    upperUnitInput.type = 'text';
-    upperUnitInput.dataset.role = 'upper-unit';
-    upperUnitInput.value = upper.unit ?? '';
-    upperUnitGroup.appendChild(upperUnitLabel);
-    upperUnitGroup.appendChild(upperUnitInput);
-
-    row.appendChild(lowerValueGroup);
-    row.appendChild(lowerUnitGroup);
-    row.appendChild(upperValueGroup);
-    row.appendChild(upperUnitGroup);
-    wrapper.appendChild(row);
+    wrapper.innerHTML += `
+      <div class="row">
+        <label>Lower value<input type="number" step="any" data-role="lower-value" value="${lower.value ?? ''}" /></label>
+        <label>Lower unit<input type="text" data-role="lower-unit" value="${lower.unit ?? ''}" /></label>
+        <label>Upper value<input type="number" step="any" data-role="upper-value" value="${upper.value ?? ''}" /></label>
+        <label>Upper unit<input type="text" data-role="upper-unit" value="${upper.unit ?? ''}" /></label>
+      </div>
+    `;
     return wrapper;
   }
 
   if (field.type === 'tuple[number]') {
     const current = Array.isArray(defaultValue) ? defaultValue : [];
-    const row = document.createElement('div');
-    row.className = 'row';
-
-    const minGroup = document.createElement('div');
-    minGroup.className = 'field-group';
-    const minLabel = document.createElement('span');
-    minLabel.textContent = 'Min';
-    const minInput = document.createElement('input');
-    minInput.type = 'number';
-    minInput.step = 'any';
-    minInput.dataset.role = 'min';
-    minInput.value = current[0] ?? '';
-    minGroup.appendChild(minLabel);
-    minGroup.appendChild(minInput);
-
-    const maxGroup = document.createElement('div');
-    maxGroup.className = 'field-group';
-    const maxLabel = document.createElement('span');
-    maxLabel.textContent = 'Max';
-    const maxInput = document.createElement('input');
-    maxInput.type = 'number';
-    maxInput.step = 'any';
-    maxInput.dataset.role = 'max';
-    maxInput.value = current[1] ?? '';
-    maxGroup.appendChild(maxLabel);
-    maxGroup.appendChild(maxInput);
-
-    row.appendChild(minGroup);
-    row.appendChild(maxGroup);
-    wrapper.appendChild(row);
+    wrapper.innerHTML += `
+      <div class="row">
+        <label>Min<input type="number" step="any" data-role="min" value="${current[0] ?? ''}" /></label>
+        <label>Max<input type="number" step="any" data-role="max" value="${current[1] ?? ''}" /></label>
+      </div>
+    `;
     return wrapper;
   }
 
@@ -388,12 +280,7 @@ function buildFieldInput(field, defaults = {}) {
 
   if (options && options.length > 0) {
     const select = document.createElement('select');
-    options.forEach((value) => {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = value;
-      select.appendChild(option);
-    });
+    select.innerHTML = options.map((value) => `<option value="${value}">${value}</option>`).join('');
     if (defaultValue) {
       select.value = defaultValue;
     }
@@ -409,164 +296,6 @@ function buildFieldInput(field, defaults = {}) {
   input.value = defaultValue ?? '';
   wrapper.appendChild(input);
   return wrapper;
-}
-
-function openPlotLineForm(defaults = {}) {
-  if (!state.metadata) return;
-  const baseLayout = state.plots || { rows: 1, cols: 1, lines: [] };
-  const container = document.getElementById('plot-line-form');
-  const usableTags = state.metadata.usable_tags || [];
-  const setpointTags = state.metadata.setpoint_tags || [];
-  const availableTags = Array.from(new Set([...usableTags, ...setpointTags]));
-
-  container.innerHTML = '';
-  if (availableTags.length === 0) {
-    container.classList.remove('hidden');
-    container.innerHTML = '<p>No sensors, calculations, or setpoints are available to plot yet.</p>';
-    return;
-  }
-
-  container.classList.remove('hidden');
-
-  const form = document.createElement('form');
-  form.className = 'grid-form';
-
-  const totalPanels = Math.max(baseLayout.rows * baseLayout.cols, 1);
-
-  const panelLabel = document.createElement('label');
-  panelLabel.textContent = 'Panel';
-  const panelSelect = document.createElement('select');
-  for (let i = 0; i < totalPanels; i += 1) {
-    const option = document.createElement('option');
-    option.value = String(i);
-    option.textContent = `Panel ${i + 1}`;
-    panelSelect.appendChild(option);
-  }
-  panelSelect.value = String(defaults.panel ?? 0);
-  panelLabel.appendChild(panelSelect);
-  form.appendChild(panelLabel);
-
-  const tagLabel = document.createElement('label');
-  tagLabel.textContent = 'Tag';
-  const tagSelect = document.createElement('select');
-  tagSelect.required = true;
-
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = 'Select a tag';
-  placeholder.disabled = true;
-  tagSelect.appendChild(placeholder);
-
-  if (usableTags.length > 0) {
-    const group = document.createElement('optgroup');
-    group.label = 'Measurements & Calculations';
-    usableTags.forEach((tag) => {
-      const option = document.createElement('option');
-      option.value = tag;
-      option.textContent = tag;
-      group.appendChild(option);
-    });
-    tagSelect.appendChild(group);
-  }
-
-  if (setpointTags.length > 0) {
-    const group = document.createElement('optgroup');
-    group.label = 'Controller Setpoints';
-    setpointTags.forEach((tag) => {
-      const option = document.createElement('option');
-      option.value = tag;
-      option.textContent = tag;
-      group.appendChild(option);
-    });
-    tagSelect.appendChild(group);
-  }
-
-  if (defaults.tag && availableTags.includes(defaults.tag)) {
-    tagSelect.value = defaults.tag;
-  } else {
-    tagSelect.value = availableTags[0];
-  }
-
-  tagLabel.appendChild(tagSelect);
-  form.appendChild(tagLabel);
-
-  const labelField = document.createElement('label');
-  labelField.textContent = 'Label';
-  const labelInput = document.createElement('input');
-  labelInput.type = 'text';
-  labelInput.placeholder = 'Defaults to tag';
-  labelInput.value = defaults.label ?? '';
-  labelField.appendChild(labelInput);
-  form.appendChild(labelField);
-
-  const colorField = document.createElement('label');
-  colorField.textContent = 'Color';
-  const colorInput = document.createElement('input');
-  colorInput.type = 'text';
-  colorInput.placeholder = 'auto (default)';
-  colorInput.value = defaults.color ?? '';
-  colorField.appendChild(colorInput);
-  form.appendChild(colorField);
-
-  const styleField = document.createElement('label');
-  styleField.textContent = 'Style';
-  const styleSelect = document.createElement('select');
-  [
-    ['', 'Auto'],
-    ['solid', 'Solid'],
-    ['dashed', 'Dashed'],
-    ['dashdot', 'Dash-dot'],
-    ['dotted', 'Dotted'],
-  ].forEach(([value, text]) => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = text;
-    styleSelect.appendChild(option);
-  });
-  const candidateStyle = defaults.style ?? 'solid';
-  styleSelect.value = styleSelect.querySelector(`option[value="${candidateStyle}"]`) ? candidateStyle : 'solid';
-  styleField.appendChild(styleSelect);
-  form.appendChild(styleField);
-
-  const actions = document.createElement('div');
-  actions.className = 'form-actions';
-  const submit = document.createElement('button');
-  submit.type = 'submit';
-  submit.textContent = 'Add Line';
-  const cancel = document.createElement('button');
-  cancel.type = 'button';
-  cancel.textContent = 'Cancel';
-  actions.appendChild(submit);
-  actions.appendChild(cancel);
-  form.appendChild(actions);
-
-  container.appendChild(form);
-
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (!tagSelect.value) return;
-    const panel = Number(panelSelect.value);
-    const selectedTag = tagSelect.value;
-    const label = labelInput.value.trim();
-    const color = colorInput.value.trim();
-    const style = styleSelect.value;
-
-    const line = {
-      panel,
-      tag: selectedTag,
-      label: label || undefined,
-      color: color || undefined,
-      style: style || undefined,
-    };
-
-    const lines = [...baseLayout.lines, line];
-    await updatePlotLayout({ ...baseLayout, lines });
-    container.classList.add('hidden');
-  });
-
-  cancel.addEventListener('click', () => {
-    container.classList.add('hidden');
-  });
 }
 
 function extractFieldValue(label) {
@@ -606,14 +335,7 @@ function extractFieldValue(label) {
   if (!input) return null;
   if (input.value === '') return null;
   if (type === 'number' || type === 'integer') {
-    if (input.value === 'Infinity' || input.value === '-Infinity') {
-      return input.value;
-    }
-    const numeric = Number(input.value);
-    if (Number.isNaN(numeric)) {
-      return null;
-    }
-    return numeric;
+    return Number(input.value);
   }
   return input.value;
 }
@@ -973,8 +695,16 @@ function initEventHandlers() {
     await updatePlotLayout({ rows, cols, lines: state.plots ? state.plots.lines : [] });
   });
 
-  document.getElementById('add-plot-line').addEventListener('click', () => {
-    openPlotLineForm();
+  document.getElementById('add-plot-line').addEventListener('click', async () => {
+    if (!state.metadata || !state.plots) return;
+    const panel = prompt(`Panel index (0 to ${state.plots.rows * state.plots.cols - 1})`, '0');
+    const tag = prompt('Tag to plot (sensor alias, calculation output, or controller setpoint)');
+    if (panel === null || tag === null) return;
+    const label = prompt('Label (optional)') || undefined;
+    const color = prompt('Color (CSS value, optional)') || undefined;
+    const style = prompt('Line style (e.g., --, :, -, optional)') || undefined;
+    const lines = [...state.plots.lines, { panel: Number(panel), tag, label, color, style }];
+    await updatePlotLayout({ ...state.plots, lines });
   });
 
   document.getElementById('run-form').addEventListener('submit', async (event) => {

@@ -188,7 +188,7 @@ def _serialize_value(value: Any) -> Any:
         if magnitude is None:
             return None
         return {"value": magnitude, "unit": str(value.unit)}
-    if isinstance(value, UnitBase):
+    if isinstance(value, UnitBase) or isinstance(value, Unit):
         return str(value)
     if isinstance(value, ControllerMode):
         return value.name

@@ -24,6 +24,9 @@ def _sensor_to_payload(config) -> Dict[str, Any]:
 
 def _controller_to_payload(config) -> Dict[str, Any]:
     params = _serialize_value(config.raw)
+    print(params)
+    # remove the unserializable trajectory which is handled specifically
+    del params['sp_trajectory']
     segments = _serialize_value(config.trajectory.segments)
     payload = {
         "id": config.id,

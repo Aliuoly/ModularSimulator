@@ -5,6 +5,7 @@ import importlib
 import importlib.util
 import inspect
 import io
+import math
 import pkgutil
 import types
 import uuid
@@ -174,13 +175,32 @@ def _parse_quantity_range(value: Mapping[str, Any]) -> Tuple[Quantity, Quantity]
     return (lower, upper)
 
 
+def _sanitize_number(value: float) -> float | None:
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return number
+
+
 def _serialize_value(value: Any) -> Any:
     if isinstance(value, Quantity):
-        return {"value": float(value.value), "unit": str(value.unit)}
+        magnitude = _sanitize_number(value.value)
+        if magnitude is None:
+            return None
+        return {"value": magnitude, "unit": str(value.unit)}
     if isinstance(value, UnitBase):
         return str(value)
     if isinstance(value, ControllerMode):
         return value.name
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (np.floating, float)):
+        sanitized = _sanitize_number(value)
+        return sanitized
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    if isinstance(value, np.generic):
+        return _serialize_value(value.item())
     if isinstance(value, tuple):
         return [_serialize_value(v) for v in value]
     if isinstance(value, list):

@@ -135,6 +135,9 @@ def test_builder_adds_components_and_runs():
 
     assert result["time"] > 0
     assert "x_meas" in result["outputs"]["sensors"]
+    series = result["outputs"]["sensors"]["x_meas"]
+    assert "ok" in series
+    assert len(series["time"]) == len(series["value"]) == len(series["ok"])
     assert result["figure"] is not None
     assert result["figure"].startswith("data:image/png;base64,")
 

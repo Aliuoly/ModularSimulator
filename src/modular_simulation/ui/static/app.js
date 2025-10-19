@@ -43,6 +43,174 @@ async function fetchJSON(url, options = {}) {
   return response.text();
 }
 
+function populateSelect(select, options, preferred) {
+  if (!select) return;
+  const currentValue = select.value;
+  const values = [];
+  const addValue = (value) => {
+    if (typeof value !== 'string') return;
+    const normalized = value.trim();
+    if (!normalized) return;
+    if (!values.includes(normalized)) {
+      values.push(normalized);
+    }
+  };
+
+  (options || []).forEach((value) => addValue(value));
+  if (typeof preferred === 'string') {
+    addValue(preferred);
+  }
+
+  select.innerHTML = '';
+  if (values.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'Select unit';
+    select.appendChild(option);
+    select.value = '';
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
+  values.forEach((value) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
+  });
+
+  const desired = (() => {
+    if (typeof preferred === 'string') {
+      const normalized = preferred.trim();
+      if (normalized && values.includes(normalized)) {
+        return normalized;
+      }
+    }
+    if (currentValue && values.includes(currentValue)) {
+      return currentValue;
+    }
+    return values[0];
+  })();
+
+  select.value = desired;
+}
+
+function getMeasurableInfo(tag) {
+  if (!state.metadata || !Array.isArray(state.metadata.measurables)) return null;
+  return state.metadata.measurables.find((item) => item.tag === tag) || null;
+}
+
+function getControlElementInfo(tag) {
+  if (!state.metadata || !state.metadata.control_element_units) return null;
+  return state.metadata.control_element_units[tag] || null;
+}
+
+function getUsableTagInfo(tag) {
+  if (!state.metadata || !state.metadata.usable_tag_units) return null;
+  return state.metadata.usable_tag_units[tag] || null;
+}
+
+function getCompatibleUnitList(info) {
+  if (!info) return [];
+  if (Array.isArray(info.compatible_units) && info.compatible_units.length > 0) {
+    return info.compatible_units;
+  }
+  if (typeof info.unit === 'string' && info.unit.trim() !== '') {
+    return [info.unit];
+  }
+  return [];
+}
+
+function readQuantityRangeUnits(value) {
+  if (!value) return { lower: '', upper: '' };
+  if (Array.isArray(value)) {
+    const lower = value[0] && typeof value[0] === 'object' ? value[0].unit || '' : '';
+    const upper = value[1] && typeof value[1] === 'object' ? value[1].unit || '' : '';
+    return { lower, upper };
+  }
+  if (typeof value === 'object') {
+    const lower = value.lower && typeof value.lower === 'object' ? value.lower.unit || '' : '';
+    const upper = value.upper && typeof value.upper === 'object' ? value.upper.unit || '' : '';
+    return { lower, upper };
+  }
+  return { lower: '', upper: '' };
+}
+
+function setupSensorUnitOptions(container, defaults = {}) {
+  const measurementLabel = container.querySelector('label[data-field="measurement_tag"]');
+  const unitLabel = container.querySelector('label[data-field="unit"]');
+  if (!measurementLabel || !unitLabel) return;
+  const measurementSelect = measurementLabel.querySelector('select');
+  const measurementInput = measurementLabel.querySelector('input');
+  const unitSelect = unitLabel.querySelector('select');
+  if (!unitSelect) return;
+
+  const updateUnits = (preferred) => {
+    let tag = '';
+    if (measurementSelect) {
+      tag = measurementSelect.value;
+    } else if (measurementInput) {
+      tag = measurementInput.value;
+    } else if (typeof defaults.measurement_tag === 'string') {
+      tag = defaults.measurement_tag;
+    }
+    const info = getMeasurableInfo(tag);
+    const options = getCompatibleUnitList(info);
+    const baseUnit = info?.unit || '';
+    const target = typeof preferred === 'string' && preferred.trim() !== '' ? preferred : baseUnit;
+    populateSelect(unitSelect, options, target);
+  };
+
+  updateUnits(typeof defaults.unit === 'string' ? defaults.unit : '');
+
+  if (measurementSelect) {
+    measurementSelect.addEventListener('change', () => updateUnits(null));
+  } else if (measurementInput) {
+    measurementInput.addEventListener('blur', () => updateUnits(null));
+  }
+}
+
+function setupMvRangeUnits(container, defaults = {}) {
+  const rangeLabel = container.querySelector('label[data-field="mv_range"]');
+  if (!rangeLabel) return () => {};
+  const lowerSelect = rangeLabel.querySelector('[data-role="lower-unit"]');
+  const upperSelect = rangeLabel.querySelector('[data-role="upper-unit"]');
+  if (!lowerSelect || !upperSelect) return () => {};
+  const mvTagLabel = container.querySelector('label[data-field="mv_tag"]');
+  const mvTagSelect = mvTagLabel ? mvTagLabel.querySelector('select') : null;
+  const mvTagInput = mvTagLabel ? mvTagLabel.querySelector('input') : null;
+  const rangeDefaults = readQuantityRangeUnits(defaults.mv_range);
+
+  const applyUnits = (preferredLower, preferredUpper) => {
+    let tag = '';
+    if (mvTagSelect) {
+      tag = mvTagSelect.value;
+    } else if (mvTagInput) {
+      tag = mvTagInput.value;
+    } else if (typeof defaults.mv_tag === 'string') {
+      tag = defaults.mv_tag;
+    }
+    const info = getControlElementInfo(tag);
+    const options = getCompatibleUnitList(info);
+    const baseUnit = info?.unit || '';
+    const lowerPreferred = typeof preferredLower === 'string' && preferredLower.trim() !== '' ? preferredLower : baseUnit;
+    const upperPreferred = typeof preferredUpper === 'string' && preferredUpper.trim() !== '' ? preferredUpper : baseUnit;
+    populateSelect(lowerSelect, options, lowerPreferred);
+    populateSelect(upperSelect, options, upperPreferred);
+  };
+
+  applyUnits(rangeDefaults.lower, rangeDefaults.upper);
+
+  if (mvTagSelect) {
+    mvTagSelect.addEventListener('change', () => applyUnits(null, null));
+  } else if (mvTagInput) {
+    mvTagInput.addEventListener('blur', () => applyUnits(null, null));
+  }
+
+  return applyUnits;
+}
+
 function showError(message) {
   const panel = document.getElementById('error-banner');
   if (!panel) {
@@ -526,6 +694,14 @@ function buildFieldInput(field, defaults = {}) {
     return wrapper;
   }
 
+  if (field.type === 'unit') {
+    const select = document.createElement('select');
+    select.dataset.role = 'unit';
+    populateSelect(select, defaultValue ? [defaultValue] : [], defaultValue || '');
+    wrapper.appendChild(select);
+    return wrapper;
+  }
+
   if (field.type === 'quantity_range') {
     const lower = Array.isArray(defaultValue)
       ? defaultValue[0] || {}
@@ -540,19 +716,17 @@ function buildFieldInput(field, defaults = {}) {
     lowerValueInput.step = 'any';
     lowerValueInput.value = lower.value ?? '';
     lowerValueInput.dataset.role = 'lower-value';
-    const lowerUnitInput = document.createElement('input');
-    lowerUnitInput.type = 'text';
-    lowerUnitInput.value = lower.unit ?? '';
+    const lowerUnitInput = document.createElement('select');
     lowerUnitInput.dataset.role = 'lower-unit';
+    populateSelect(lowerUnitInput, lower.unit ? [lower.unit] : [], lower.unit || '');
     const upperValueInput = document.createElement('input');
     upperValueInput.type = 'number';
     upperValueInput.step = 'any';
     upperValueInput.value = upper.value ?? '';
     upperValueInput.dataset.role = 'upper-value';
-    const upperUnitInput = document.createElement('input');
-    upperUnitInput.type = 'text';
-    upperUnitInput.value = upper.unit ?? '';
+    const upperUnitInput = document.createElement('select');
     upperUnitInput.dataset.role = 'upper-unit';
+    populateSelect(upperUnitInput, upper.unit ? [upper.unit] : [], upper.unit || '');
     row.appendChild(buildGroup('Lower value', lowerValueInput));
     row.appendChild(buildGroup('Lower unit', lowerUnitInput));
     row.appendChild(buildGroup('Upper value', upperValueInput));
@@ -627,9 +801,11 @@ function extractFieldValue(label) {
   }
   if (type === 'quantity_range') {
     const lowerValue = label.querySelector('input[data-role="lower-value"]').value;
-    const lowerUnit = label.querySelector('input[data-role="lower-unit"]').value;
+    const lowerUnitElement = label.querySelector('[data-role="lower-unit"]');
+    const lowerUnit = lowerUnitElement ? lowerUnitElement.value : '';
     const upperValue = label.querySelector('input[data-role="upper-value"]').value;
-    const upperUnit = label.querySelector('input[data-role="upper-unit"]').value;
+    const upperUnitElement = label.querySelector('[data-role="upper-unit"]');
+    const upperUnit = upperUnitElement ? upperUnitElement.value : '';
     if (lowerValue === '' || upperValue === '') return null;
     return {
       lower: { value: Number(lowerValue), unit: lowerUnit },
@@ -697,6 +873,9 @@ function buildDynamicForm(container, typeList, submitHandler, options = {}) {
       const label = buildFieldInput(field, defaults);
       fieldsContainer.appendChild(label);
     });
+    if (typeof options.onFieldsRendered === 'function') {
+      options.onFieldsRendered({ container: fieldsContainer, type: currentType, defaults });
+    }
   }
 
   renderFields(options.defaults || {});
@@ -750,17 +929,26 @@ function openSensorForm() {
   if (!state.metadata) return;
   const container = document.getElementById('sensor-form');
   const types = state.metadata.sensor_types || [];
-  buildDynamicForm(container, types, async ({ type, values }) => {
-    await fetchJSON('/api/sensors', {
-      method: 'POST',
-      body: JSON.stringify({ type, params: values }),
-    });
-    container.classList.add('hidden');
-    container.innerHTML = '';
-    await refreshSensors();
-    await refreshMetadata();
-    clearError();
-  });
+  buildDynamicForm(
+    container,
+    types,
+    async ({ type, values }) => {
+      await fetchJSON('/api/sensors', {
+        method: 'POST',
+        body: JSON.stringify({ type, params: values }),
+      });
+      container.classList.add('hidden');
+      container.innerHTML = '';
+      await refreshSensors();
+      await refreshMetadata();
+      clearError();
+    },
+    {
+      onFieldsRendered: ({ container: fieldsContainer, defaults }) => {
+        setupSensorUnitOptions(fieldsContainer, defaults || {});
+      },
+    }
+  );
 }
 
 function buildTrajectoryBuilder(root, defaults = {}) {
@@ -775,9 +963,9 @@ function buildTrajectoryBuilder(root, defaults = {}) {
   y0Input.type = 'number';
   y0Input.step = 'any';
   y0Input.value = defaults.y0 ?? 0;
-  const unitInput = document.createElement('input');
-  unitInput.type = 'text';
-  unitInput.value = defaults.unit ?? '';
+  const unitSelect = document.createElement('select');
+  unitSelect.dataset.role = 'unit';
+  populateSelect(unitSelect, defaults.unit ? [defaults.unit] : [], defaults.unit ?? '');
   wrapper.innerHTML = '<h3>Setpoint Trajectory</h3>';
   const row = document.createElement('div');
   row.className = 'row';
@@ -786,7 +974,7 @@ function buildTrajectoryBuilder(root, defaults = {}) {
   yLabel.appendChild(y0Input);
   const uLabel = document.createElement('label');
   uLabel.textContent = 'Unit';
-  uLabel.appendChild(unitInput);
+  uLabel.appendChild(unitSelect);
   row.appendChild(yLabel);
   row.appendChild(uLabel);
   wrapper.appendChild(row);
@@ -919,9 +1107,13 @@ function buildTrajectoryBuilder(root, defaults = {}) {
     getTrajectory() {
       return {
         y0: Number(y0Input.value || 0),
-        unit: unitInput.value || '',
+        unit: unitSelect.value || '',
         segments: localState.segments.map((segment) => ({ ...segment })),
       };
+    },
+    setUnitOptions(options, preferredUnit) {
+      const fallback = typeof preferredUnit === 'string' ? preferredUnit : defaults.unit ?? '';
+      populateSelect(unitSelect, options, fallback);
     },
   };
 }
@@ -935,6 +1127,13 @@ function openControllerForm({ defaults = {}, parentId = null } = {}) {
     container.classList.remove('hidden');
     return;
   }
+  const defaultsWithUnits = { ...defaults };
+  if (defaultsWithUnits.cv_tag && !defaultsWithUnits.sp_unit) {
+    const info = getUsableTagInfo(defaultsWithUnits.cv_tag);
+    if (info && typeof info.unit === 'string') {
+      defaultsWithUnits.sp_unit = info.unit;
+    }
+  }
   container.innerHTML = '';
   const wrapper = document.createElement('div');
   wrapper.className = 'dialog';
@@ -943,6 +1142,7 @@ function openControllerForm({ defaults = {}, parentId = null } = {}) {
   container.appendChild(wrapper);
 
   let trajectoryBuilder = null;
+  let pendingTrajectoryUnits = null;
 
   const { form, select } = buildDynamicForm(inner, types, async ({ type, values }) => {
     const trajectory = trajectoryBuilder ? trajectoryBuilder.getTrajectory() : { y0: 0, unit: '', segments: [] };
@@ -956,18 +1156,57 @@ function openControllerForm({ defaults = {}, parentId = null } = {}) {
     await refreshMetadata();
     clearError();
   }, {
-    defaults,
+    defaults: defaultsWithUnits,
     exclude: ['sp_trajectory', 'cascade_controller'],
     onTypeChange: () => {
       // no-op; trajectory unaffected
     },
+    onFieldsRendered: ({ container: fieldsContainer }) => {
+      setupMvRangeUnits(fieldsContainer, defaultsWithUnits);
+      const cvTagLabel = fieldsContainer.querySelector('label[data-field="cv_tag"]');
+      const cvSelect = cvTagLabel ? cvTagLabel.querySelector('select') : null;
+      const cvInput = cvTagLabel ? cvTagLabel.querySelector('input') : null;
+
+      const updateTrajectoryUnits = (preferredUnit) => {
+        let tag = '';
+        if (cvSelect) {
+          tag = cvSelect.value;
+        } else if (cvInput) {
+          tag = cvInput.value;
+        } else if (typeof defaultsWithUnits.cv_tag === 'string') {
+          tag = defaultsWithUnits.cv_tag;
+        }
+        const info = getUsableTagInfo(tag);
+        const options = getCompatibleUnitList(info);
+        const baseUnit = info?.unit || '';
+        const desired = typeof preferredUnit === 'string' && preferredUnit.trim() !== '' ? preferredUnit : baseUnit;
+        if (trajectoryBuilder) {
+          trajectoryBuilder.setUnitOptions(options, desired);
+        } else {
+          pendingTrajectoryUnits = { options, preferred: desired };
+        }
+      };
+
+      updateTrajectoryUnits(defaultsWithUnits.sp_unit || '');
+
+      if (cvSelect) {
+        cvSelect.addEventListener('change', () => updateTrajectoryUnits(null));
+      } else if (cvInput) {
+        cvInput.addEventListener('blur', () => updateTrajectoryUnits(null));
+      }
+    },
   });
 
   trajectoryBuilder = buildTrajectoryBuilder(wrapper, {
-    y0: defaults.sp_y0 ?? 0,
-    unit: defaults.sp_unit ?? '',
+    y0: defaultsWithUnits.sp_y0 ?? 0,
+    unit: defaultsWithUnits.sp_unit ?? '',
     segments: [],
   });
+
+  if (pendingTrajectoryUnits) {
+    trajectoryBuilder.setUnitOptions(pendingTrajectoryUnits.options, pendingTrajectoryUnits.preferred);
+    pendingTrajectoryUnits = null;
+  }
 
   container.classList.remove('hidden');
 }
@@ -988,7 +1227,7 @@ function openControllerEditor(controller) {
     return;
   }
 
-  const defaults = controller.params || {};
+  const defaults = { ...(controller.params || {}) };
   const { form } = buildDynamicForm(
     container,
     types,
@@ -1008,6 +1247,9 @@ function openControllerEditor(controller) {
       exclude: ['sp_trajectory', 'cascade_controller'],
       initialTypeName: controller.type,
       lockType: true,
+      onFieldsRendered: ({ container: fieldsContainer }) => {
+        setupMvRangeUnits(fieldsContainer, defaults);
+      },
     }
   );
 
@@ -1031,6 +1273,12 @@ function openTrajectoryEditor(controller) {
     unit: trajectoryDefaults.unit ?? '',
     segments: trajectoryDefaults.segments || [],
   });
+
+  const cvTag = controller.params?.cv_tag;
+  const cvInfo = getUsableTagInfo(typeof cvTag === 'string' ? cvTag : '');
+  const unitOptions = getCompatibleUnitList(cvInfo);
+  const baseUnit = cvInfo?.unit || '';
+  builder.setUnitOptions(unitOptions, trajectoryDefaults.unit ?? baseUnit);
 
   const footer = document.createElement('div');
   footer.className = 'row';

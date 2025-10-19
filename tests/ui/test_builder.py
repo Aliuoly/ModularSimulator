@@ -135,4 +135,41 @@ def test_builder_adds_components_and_runs():
 
     assert result["time"] > 0
     assert "x_meas" in result["outputs"]["sensors"]
+    series = result["outputs"]["sensors"]["x_meas"]
+    assert "ok" in series
+    assert len(series["time"]) == len(series["value"]) == len(series["ok"])
     assert result["figure"] is not None
+    assert result["figure"].startswith("data:image/png;base64,")
+
+
+def test_builder_produces_default_plot_without_layout():
+    measurables = MeasurableQuantities(
+        states=SimpleStates(x=1.0),
+        control_elements=SimpleControls(u=0.0),
+        algebraic_states=SimpleAlgebraic(a=0.0),
+        constants=SimpleConstants(k=1.0),
+    )
+
+    builder = SimulationBuilder(
+        system_class=SimpleSystem,
+        measurable_quantities=measurables,
+        dt=1.0 * Unit("s"),
+        use_numba=False,
+    )
+
+    builder.add_sensor(
+        SampledDelayedSensor.__name__,
+        {
+            "measurement_tag": "x",
+            "unit": "1",
+            "sampling_period": 0.0,
+            "deadtime": 0.0,
+        },
+    )
+
+    result = builder.run(1.0 * Unit("s"))
+
+    assert result["figure"] is not None
+    assert result["figure"].startswith("data:image/png;base64,")
+    default_series = result["outputs"]["sensors"]["x"]
+    assert len(default_series["time"]) == len(default_series["value"]) == len(default_series["ok"])

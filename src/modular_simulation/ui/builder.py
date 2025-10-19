@@ -16,6 +16,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import numpy as np
 from astropy.units import Quantity, Unit, UnitBase  # type: ignore
 from pydantic_core import PydanticUndefined
@@ -211,16 +212,51 @@ def _serialize_value(value: Any) -> Any:
 
 
 def _serialize_tag_history(series: List[TagData]) -> Dict[str, List[float]]:
-    time = [sample.time for sample in series]
-    values = []
+    times: List[float] = []
+    values: List[float] = []
+    ok_flags: List[bool] = []
+
     for sample in series:
+        times.append(float(sample.time))
+        ok_flags.append(bool(getattr(sample, "ok", True)))
+
         value = sample.value
+        sanitized: Optional[float]
         if isinstance(value, (np.ndarray, np.generic, list, tuple)):
             arr = np.asarray(value).reshape(-1)
-            values.append(float(arr[0]))
+            sanitized = _sanitize_number(float(arr[0]))
         else:
-            values.append(float(value))
-    return {"time": time, "value": values}
+            sanitized = _sanitize_number(float(value))
+
+        if sanitized is None:
+            values.append(float("nan"))
+        else:
+            values.append(sanitized)
+
+    return {"time": times, "value": values, "ok": ok_flags}
+
+
+def _series_to_arrays(series: Mapping[str, Any]) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    """Convert a serialized history mapping into NumPy arrays."""
+
+    times = np.asarray(series.get("time", []), dtype=float).reshape(-1)
+    values = np.asarray(series.get("value", []), dtype=float).reshape(-1)
+
+    if times.shape != values.shape:
+        length = min(times.shape[0], values.shape[0])
+        times = times[:length]
+        values = values[:length]
+
+    ok_like = series.get("ok")
+    ok: Optional[np.ndarray]
+    if ok_like is None:
+        ok = None
+    else:
+        ok = np.asarray(ok_like, dtype=bool).reshape(-1)
+        if ok.shape != times.shape:
+            ok = ok[: times.shape[0]]
+
+    return times, values, ok
 
 
 class SimulationBuilder:
@@ -475,7 +511,7 @@ class SimulationBuilder:
 
     def _render_plot(self, system: System, outputs: Dict[str, Any]) -> Optional[str]:
         if not self.plot_layout.lines:
-            return None
+            return self._render_default_plot(outputs)
         rows = max(self.plot_layout.rows, 1)
         cols = max(self.plot_layout.cols, 1)
         fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4 * rows), squeeze=False)
@@ -487,13 +523,90 @@ class SimulationBuilder:
             series = self._resolve_plot_series(line.tag, outputs)
             if series is None:
                 continue
+            times, values, ok = _series_to_arrays(series)
+            mask = np.isfinite(times) & np.isfinite(values)
+            if not mask.any():
+                continue
+            line_kwargs: Dict[str, Any] = {}
+            if line.color:
+                line_kwargs["color"] = line.color
+            if line.style:
+                line_kwargs["linestyle"] = line.style
             label = line.label or line.tag
-            ax.plot(series["time"], series["value"], label=label, color=line.color, linestyle=line.style)
-            ax.set_xlabel("Time")
-            ax.set_ylabel(line.tag)
+            ax.plot(times[mask], values[mask], label=label, **line_kwargs)
+            if ok is not None:
+                bad_mask = (~ok.astype(bool)) & mask
+                if bad_mask.any():
+                    ax.scatter(times[bad_mask], values[bad_mask], marker="x", color="black", label="_nolegend_", zorder=3)
+            if not ax.get_ylabel():
+                ax.set_ylabel(label)
+
+        for ax in axes_flat:
+            if not ax.has_data():
+                continue
             ax.grid(True)
-            ax.legend(loc="best")
+            ax.set_xlabel("Time")
+            handles, labels = ax.get_legend_handles_labels()
+            if handles:
+                ax.legend(loc="best")
+
         plt.tight_layout()
+        return self._finalize_figure(fig)
+
+    def _render_default_plot(self, outputs: Dict[str, Any]) -> Optional[str]:
+        sensor_series = list(outputs["sensors"].items())
+        calculation_series = list(outputs["calculations"].items())
+        setpoint_series = list(outputs["setpoints"].items())
+
+        if sensor_series:
+            series_to_plot = sensor_series
+        elif calculation_series:
+            series_to_plot = calculation_series
+        else:
+            series_to_plot = setpoint_series
+
+        if not series_to_plot:
+            return None
+
+        max_panels = max(1, min(len(series_to_plot), 6))
+        series_subset = series_to_plot[:max_panels]
+
+        fig, axes = plt.subplots(max_panels, 1, figsize=(8, 3 * max_panels), squeeze=False, sharex=True)
+        axes_flat = axes.ravel()
+        plotted_axes: List[int] = []
+
+        for idx, (ax, (tag, series)) in enumerate(zip(axes_flat, series_subset, strict=False)):
+            times, values, ok = _series_to_arrays(series)
+            mask = np.isfinite(times) & np.isfinite(values)
+            if not mask.any():
+                continue
+            ax.plot(times[mask], values[mask], label=tag)
+            if ok is not None:
+                bad_mask = (~ok.astype(bool)) & mask
+                if bad_mask.any():
+                    ax.scatter(times[bad_mask], values[bad_mask], marker="x", color="black", label="_nolegend_", zorder=3)
+            ax.set_ylabel(tag)
+            plotted_axes.append(idx)
+
+        if not plotted_axes:
+            plt.close(fig)
+            return None
+
+        for idx, ax in enumerate(axes_flat):
+            if not ax.has_data():
+                continue
+            ax.grid(True, alpha=0.3)
+            if idx == plotted_axes[-1]:
+                ax.set_xlabel("Time")
+            handles, labels = ax.get_legend_handles_labels()
+            if handles:
+                ax.legend(loc="best")
+
+        plt.tight_layout()
+        return self._finalize_figure(fig)
+
+    @staticmethod
+    def _finalize_figure(fig: Figure) -> str:
         buffer = io.BytesIO()
         fig.savefig(buffer, format="png")
         plt.close(fig)

@@ -16,6 +16,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import numpy as np
 from astropy.units import Quantity, Unit, UnitBase  # type: ignore
 from pydantic_core import PydanticUndefined
@@ -475,7 +476,7 @@ class SimulationBuilder:
 
     def _render_plot(self, system: System, outputs: Dict[str, Any]) -> Optional[str]:
         if not self.plot_layout.lines:
-            return None
+            return self._render_default_plot(outputs)
         rows = max(self.plot_layout.rows, 1)
         cols = max(self.plot_layout.cols, 1)
         fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4 * rows), squeeze=False)
@@ -494,6 +495,43 @@ class SimulationBuilder:
             ax.grid(True)
             ax.legend(loc="best")
         plt.tight_layout()
+        return self._finalize_figure(fig)
+
+    def _render_default_plot(self, outputs: Dict[str, Any]) -> Optional[str]:
+        sensor_series = list(outputs["sensors"].items())
+        calculation_series = list(outputs["calculations"].items())
+        setpoint_series = list(outputs["setpoints"].items())
+
+        if sensor_series:
+            series_to_plot = sensor_series
+        elif calculation_series:
+            series_to_plot = calculation_series
+        else:
+            series_to_plot = setpoint_series
+
+        if not series_to_plot:
+            return None
+
+        max_panels = max(1, min(len(series_to_plot), 6))
+        series_subset = series_to_plot[:max_panels]
+
+        fig, axes = plt.subplots(max_panels, 1, figsize=(8, 3 * max_panels), squeeze=False, sharex=True)
+        axes_flat = axes.ravel()
+
+        for ax, (tag, series) in zip(axes_flat, series_subset, strict=False):
+            time = series.get("time", [])
+            values = series.get("value", [])
+            ax.plot(time, values, label=tag)
+            ax.set_ylabel(tag)
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc="best")
+
+        axes_flat[max_panels - 1].set_xlabel("Time")
+        plt.tight_layout()
+        return self._finalize_figure(fig)
+
+    @staticmethod
+    def _finalize_figure(fig: Figure) -> str:
         buffer = io.BytesIO()
         fig.savefig(buffer, format="png")
         plt.close(fig)

@@ -41,7 +41,7 @@ for name, system in systems.items():
     profiler.disable()
     s = io.StringIO()
     ps = pstats.Stats(profiler, stream=s)
-    ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats("modular_simulation|simple_Irreversible_system")
+    ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats("modular_simulation|examples|scipy")
     print(s.getvalue())
 
     print(f"System '{name}' profiling complete. ")

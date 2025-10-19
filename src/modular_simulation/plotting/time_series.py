@@ -84,7 +84,7 @@ def plot_triplet_series(
     style: str = "line",
     line_kwargs: Mapping[str, Any] | None = None,
     bad_kwargs: Mapping[str, Any] | None = None,
-    time_converter: Callable
+    time_converter: Callable = lambda v: v
 ) -> List[Any]:
     """Plot a :class:`TagData` series on ``ax``.
 

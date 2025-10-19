@@ -335,14 +335,7 @@ function extractFieldValue(label) {
   if (!input) return null;
   if (input.value === '') return null;
   if (type === 'number' || type === 'integer') {
-    if (input.value === 'Infinity' || input.value === '-Infinity') {
-      return input.value;
-    }
-    const numeric = Number(input.value);
-    if (Number.isNaN(numeric)) {
-      return null;
-    }
-    return numeric;
+    return Number(input.value);
   }
   return input.value;
 }

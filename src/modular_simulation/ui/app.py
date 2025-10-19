@@ -78,10 +78,12 @@ def create_app(builder: SimulationBuilder) -> Flask:
             {
                 "measurables": builder.measurable_metadata(),
                 "control_elements": builder.control_element_tags(),
+                "control_element_units": builder.control_element_unit_options(),
                 "sensor_types": builder.available_sensor_types(),
                 "controller_types": builder.available_controller_types(),
                 "calculation_types": builder.available_calculation_types(),
                 "usable_tags": builder.available_usable_tags(),
+                "usable_tag_units": builder.usable_tag_unit_options(),
                 "setpoint_tags": builder.available_setpoint_tags(),
                 "time_unit": str(builder.dt.unit),
                 "messages": builder.messages(),

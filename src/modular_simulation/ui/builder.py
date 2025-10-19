@@ -99,6 +99,7 @@ class CalculationConfig:
     cls: Type[Calculation]
     args: Dict[str, Any]
     raw: Dict[str, Any]
+    output_units: Dict[str, UnitBase] = field(default_factory=dict)
 
     @property
     def output_tags(self) -> Iterable[str]:
@@ -181,6 +182,16 @@ def _sanitize_number(value: float) -> float | None:
     if not math.isfinite(number):
         return None
     return number
+
+
+def _equivalent_unit_strings(unit: UnitBase | None) -> List[str]:
+    """Return sorted string representations of units compatible with ``unit``."""
+
+    if unit is None:
+        return []
+    options = {str(candidate) for candidate in unit.find_equivalent_units(include_prefix_units=True)}
+    options.add(str(unit))
+    return sorted(options)
 
 
 def _serialize_value(value: Any) -> Any:
@@ -306,11 +317,47 @@ class SimulationBuilder:
                     "tag": tag,
                     "category": category,
                     "unit": str(unit),
+                    "compatible_units": _equivalent_unit_strings(unit),
                 })
         return items
 
     def control_element_tags(self) -> List[str]:
         return list(self.base_measurables.control_elements.tag_list)
+
+    def control_element_unit_options(self) -> Dict[str, Dict[str, List[str] | str]]:
+        options: Dict[str, Dict[str, List[str] | str]] = {}
+        for tag, unit in self.base_measurables.control_elements.tag_unit_info.items():
+            options[tag] = {
+                "unit": str(unit),
+                "compatible_units": _equivalent_unit_strings(unit),
+            }
+        return options
+
+    def usable_tag_unit_options(self) -> Dict[str, Dict[str, List[str] | str]]:
+        options: Dict[str, Dict[str, List[str] | str]] = {}
+        for tag, unit in self.base_measurables.tag_unit_info.items():
+            options[tag] = {
+                "unit": str(unit),
+                "compatible_units": _equivalent_unit_strings(unit),
+            }
+        for cfg in self.sensor_configs:
+            resolved_unit = cfg.args.get("unit")
+            measurement_unit = self.base_measurables.tag_unit_info.get(cfg.measurement_tag)
+            if resolved_unit is None:
+                resolved_unit = measurement_unit
+            if resolved_unit is None:
+                continue
+            options[cfg.alias_tag] = {
+                "unit": str(resolved_unit),
+                "compatible_units": _equivalent_unit_strings(resolved_unit),
+            }
+        for calc in self.calculation_configs.values():
+            for tag, unit in calc.output_units.items():
+                options[tag] = {
+                    "unit": str(unit),
+                    "compatible_units": _equivalent_unit_strings(unit),
+                }
+        return options
 
     def available_sensor_types(self) -> List[Dict[str, Any]]:
         return [self._describe_model(cls) for cls in self.sensor_types.values()]
@@ -349,6 +396,22 @@ class SimulationBuilder:
         if cls is None:
             raise ValueError(f"Unknown sensor type '{sensor_type}'.")
         args = self._convert_arguments(cls, params)
+        measurement_tag = args.get("measurement_tag")
+        if measurement_tag is None:
+            raise ValueError("Sensor configuration requires a 'measurement_tag'.")
+        measurement_unit = self.base_measurables.tag_unit_info.get(measurement_tag)
+        if measurement_unit is None:
+            raise ValueError(
+                f"Measurement tag '{measurement_tag}' is not defined in the measurable quantities."
+            )
+        sensor_unit = args.get("unit")
+        if sensor_unit is None:
+            args["unit"] = measurement_unit
+        elif not sensor_unit.is_equivalent(measurement_unit):
+            raise ValueError(
+                "Sensor unit must be compatible with the measurement tag's unit. "
+                f"Received '{sensor_unit}' for tag '{measurement_tag}' ({measurement_unit})."
+            )
         instance = cls(**args)
         config = SensorConfig(
             id=str(uuid.uuid4()),
@@ -492,12 +555,16 @@ class SimulationBuilder:
         instance = cls(**args)
         raw = self._serialize_model(instance)
         raw["outputs"] = list(instance._output_tag_info_dict.keys())
+        output_units = {
+            tag: info.unit for tag, info in instance._output_tag_info_dict.items()
+        }
         config = CalculationConfig(
             id=str(uuid.uuid4()),
             name=cls.__name__,
             cls=cls,
             args=args,
             raw=raw,
+            output_units=output_units,
         )
         self.calculation_configs[config.id] = config
         self.invalidate("Calculation definitions changed; system will be rebuilt on next run.")

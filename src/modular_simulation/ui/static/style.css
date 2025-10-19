@@ -208,6 +208,22 @@ button:disabled {
   gap: 0.5rem;
 }
 
+.unit-input-row input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.field-label > .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.field-label > .row .field-input-group {
+  flex: 1 1 12rem;
+  min-width: 12rem;
+}
+
 .unit-hint {
   display: inline-flex;
   align-items: center;

@@ -181,3 +181,23 @@ def test_controller_payload_is_json_serializable():
     controller = payload[0]
     assert "sp_trajectory" not in controller["params"]
     assert controller["trajectory"]["segments"][0]["magnitude"] == 1.0
+
+
+def test_controller_validation_error_returns_json():
+    builder = build_configured_builder()
+    app = create_app(builder)
+    client = app.test_client()
+
+    response = client.post(
+        "/api/controllers",
+        json={
+            "type": PIDController.__name__,
+            "params": {},
+            "trajectory": {"y0": 0.0, "unit": "1", "segments": []},
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error"] == "Invalid controller configuration."
+    assert any(error["loc"][-1] == "mv_tag" for error in payload["details"])

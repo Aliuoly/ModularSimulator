@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from astropy.units import Quantity  # type: ignore
 from flask import Flask, jsonify, render_template, request
+from pydantic import ValidationError as PydanticValidationError
+from pydantic_core import ValidationError as CoreValidationError
 
 from .builder import (
     SimulationBuilder,
@@ -46,6 +49,30 @@ def _calculation_to_payload(config) -> Dict[str, Any]:
     }
 
 
+ValidationErrorTypes = (PydanticValidationError, CoreValidationError)
+
+
+def _validation_details(exc: Exception) -> Any:
+    if hasattr(exc, "json"):
+        try:
+            return json.loads(exc.json())
+        except Exception:
+            pass
+    if hasattr(exc, "errors"):
+        try:
+            return exc.errors()  # type: ignore[no-any-return]
+        except Exception:
+            pass
+    return str(exc)
+
+
+def _error_response(message: str, *, details: Optional[Any] = None, status: int = 400):
+    payload: Dict[str, Any] = {"error": message}
+    if details is not None:
+        payload["details"] = details
+    return jsonify(payload), status
+
+
 def create_app(builder: SimulationBuilder) -> Flask:
     app = Flask(
         __name__,
@@ -79,7 +106,12 @@ def create_app(builder: SimulationBuilder) -> Flask:
     @app.post("/api/sensors")
     def add_sensor():
         data = request.get_json(force=True)
-        config = builder.add_sensor(data["type"], data.get("params", {}))
+        try:
+            config = builder.add_sensor(data["type"], data.get("params", {}))
+        except ValidationErrorTypes as exc:
+            return _error_response("Invalid sensor configuration.", details=_validation_details(exc))
+        except ValueError as exc:
+            return _error_response(str(exc))
         return jsonify(_sensor_to_payload(config)), 201
 
     @app.delete("/api/sensors/<sensor_id>")
@@ -94,12 +126,17 @@ def create_app(builder: SimulationBuilder) -> Flask:
     @app.post("/api/controllers")
     def add_controller():
         data = request.get_json(force=True)
-        config = builder.add_controller(
-            data["type"],
-            data.get("params", {}),
-            data.get("trajectory", {}),
-            parent_id=data.get("parent_id"),
-        )
+        try:
+            config = builder.add_controller(
+                data["type"],
+                data.get("params", {}),
+                data.get("trajectory", {}),
+                parent_id=data.get("parent_id"),
+            )
+        except ValidationErrorTypes as exc:
+            return _error_response("Invalid controller configuration.", details=_validation_details(exc))
+        except ValueError as exc:
+            return _error_response(str(exc))
         return jsonify(_controller_to_payload(config)), 201
 
     @app.delete("/api/controllers/<controller_id>")
@@ -114,7 +151,12 @@ def create_app(builder: SimulationBuilder) -> Flask:
     @app.post("/api/calculations")
     def add_calculation():
         data = request.get_json(force=True)
-        config = builder.add_calculation(data["type"], data.get("params", {}))
+        try:
+            config = builder.add_calculation(data["type"], data.get("params", {}))
+        except ValidationErrorTypes as exc:
+            return _error_response("Invalid calculation configuration.", details=_validation_details(exc))
+        except ValueError as exc:
+            return _error_response(str(exc))
         return jsonify(_calculation_to_payload(config)), 201
 
     @app.delete("/api/calculations/<calc_id>")
@@ -125,13 +167,16 @@ def create_app(builder: SimulationBuilder) -> Flask:
     @app.post("/api/calculations/upload")
     def upload_calculation():
         if "file" not in request.files:
-            return jsonify({"error": "No file uploaded"}), 400
+            return _error_response("No file uploaded.")
         file = request.files["file"]
         if not file.filename.endswith(".py"):
-            return jsonify({"error": "Upload a .py file"}), 400
+            return _error_response("Upload a .py file.")
         with tempfile.NamedTemporaryFile(delete=False, suffix=".py") as tmp:
             file.save(tmp.name)
-            module = builder.register_calculation_module(tmp.name)
+            try:
+                module = builder.register_calculation_module(tmp.name)
+            except ValueError as exc:
+                return _error_response(str(exc))
         payload = {
             "module_id": module.id,
             "classes": [cls.__name__ for cls in module.classes.values()],
@@ -161,11 +206,14 @@ def create_app(builder: SimulationBuilder) -> Flask:
     @app.post("/api/plots")
     def set_plots():
         data = request.get_json(force=True)
-        layout = builder.set_plot_layout(
-            int(data.get("rows", 1)),
-            int(data.get("cols", 1)),
-            data.get("lines", []),
-        )
+        try:
+            layout = builder.set_plot_layout(
+                int(data.get("rows", 1)),
+                int(data.get("cols", 1)),
+                data.get("lines", []),
+            )
+        except ValueError as exc:
+            return _error_response(str(exc))
         return jsonify(
             {
                 "rows": layout.rows,
@@ -189,7 +237,10 @@ def create_app(builder: SimulationBuilder) -> Flask:
         duration: Optional[Quantity] = None
         if data and data.get("duration"):
             duration = _parse_quantity(data["duration"])
-        result = builder.run(duration)
+        try:
+            result = builder.run(duration)
+        except ValueError as exc:
+            return _error_response(str(exc))
         return jsonify(
             {
                 "time": result["time"],

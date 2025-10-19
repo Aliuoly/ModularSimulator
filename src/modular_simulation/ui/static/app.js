@@ -759,15 +759,13 @@ function buildFieldInput(field, defaults = {}) {
   }
 
   if (field.type === 'unit') {
-    const row = document.createElement('div');
-    row.className = 'unit-input-row';
     const input = document.createElement('input');
     input.type = 'text';
     input.dataset.role = 'unit';
     input.value = defaultValue ?? '';
-    row.appendChild(input);
-    row.appendChild(createUnitHint());
-    wrapper.appendChild(row);
+    const group = buildGroup('Unit', input);
+    group.appendChild(createUnitHint());
+    wrapper.appendChild(group);
     return wrapper;
   }
 

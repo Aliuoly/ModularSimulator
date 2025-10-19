@@ -193,7 +193,34 @@ def _equivalent_unit_strings(unit: UnitBase | None) -> List[str]:
     options.add(str(unit))
     return sorted(options)
 
+def _unit_metadata(unit: UnitBase | str | None) -> Dict[str, Any]:
+    """Return serialization-friendly metadata for a unit reference."""
 
+    normalized: UnitBase | None
+    if isinstance(unit, UnitBase):
+        normalized = unit
+    elif isinstance(unit, str):
+        stripped = unit.strip()
+        normalized = Unit(stripped) if stripped else None
+    else:
+        normalized = None
+
+    unit_text = str(normalized) if normalized is not None else ""
+    compatible_units: List[str] = []
+    equivalent_table = ""
+
+    if normalized is not None:
+        equivalents = normalized.find_equivalent_units(include_prefix_units=True)
+        compatible_units = sorted(
+            {str(candidate) for candidate in equivalents} | {unit_text}
+        )
+        equivalent_table = repr(equivalents)
+
+    return {
+        "unit": unit_text,
+        "compatible_units": compatible_units,
+        "equivalent_unit_table": equivalent_table,
+    }
 def _serialize_value(value: Any) -> Any:
     if isinstance(value, Quantity):
         magnitude = _sanitize_number(value.value)

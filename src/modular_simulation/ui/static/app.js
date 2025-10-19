@@ -96,6 +96,78 @@ function populateSelect(select, options, preferred) {
   select.value = desired;
 }
 
+function normalizeUnitMetadata(info) {
+  if (!info || typeof info !== 'object') {
+    return { unit: '', aliases: [] };
+  }
+  const unit = typeof info.unit === 'string' ? info.unit : '';
+  const aliases = Array.isArray(info.unit_aliases)
+    ? info.unit_aliases.filter((alias) => typeof alias === 'string' && alias.trim() !== '')
+    : [];
+  return { unit, aliases };
+}
+
+function createUnitHint(role = 'unit-hint') {
+  const hint = document.createElement('div');
+  hint.className = 'unit-hint';
+  hint.dataset.role = role;
+
+  const label = document.createElement('span');
+  label.className = 'unit-hint__label';
+  label.textContent = 'Reference unit';
+  hint.appendChild(label);
+
+  const unitText = document.createElement('code');
+  unitText.dataset.role = 'unit-hint-text';
+  unitText.textContent = '—';
+  hint.appendChild(unitText);
+
+  const aliasIcon = document.createElement('span');
+  aliasIcon.className = 'info-icon';
+  aliasIcon.dataset.role = 'unit-hint-alias';
+  aliasIcon.textContent = 'i';
+  aliasIcon.title = 'Aliases: —';
+  hint.appendChild(aliasIcon);
+
+  return hint;
+}
+
+function updateUnitHintElement(hintElement, unit, aliases = []) {
+  if (!hintElement) return;
+  const unitText = hintElement.querySelector('[data-role="unit-hint-text"]');
+  const aliasIcon = hintElement.querySelector('[data-role="unit-hint-alias"]');
+  const normalizedUnit = typeof unit === 'string' && unit.trim() !== '' ? unit : '—';
+  if (unitText) {
+    unitText.textContent = normalizedUnit;
+  }
+  if (aliasIcon) {
+    const aliasList = Array.isArray(aliases) ? aliases.filter((alias) => alias && alias.trim()) : [];
+    if (aliasList.length > 0) {
+      aliasIcon.title = `Aliases: ${aliasList.join(', ')}`;
+      aliasIcon.classList.remove('hidden');
+    } else {
+      aliasIcon.title = 'No aliases for this unit';
+      aliasIcon.classList.remove('hidden');
+    }
+  }
+}
+
+function applyUnitMetadataToInput(input, hint, metadata, preferred, forceBase = false) {
+  const unitValue = typeof metadata.unit === 'string' ? metadata.unit : '';
+  const preferredValue = typeof preferred === 'string' ? preferred.trim() : '';
+  if (input) {
+    if (forceBase) {
+      input.value = unitValue;
+    } else if (preferredValue) {
+      input.value = preferredValue;
+    } else if (!input.value && unitValue) {
+      input.value = unitValue;
+    }
+    input.placeholder = unitValue;
+  }
+  updateUnitHintElement(hint, unitValue, metadata.aliases || []);
+}
+
 function getMeasurableInfo(tag) {
   if (!state.metadata || !Array.isArray(state.metadata.measurables)) return null;
   return state.metadata.measurables.find((item) => item.tag === tag) || null;
@@ -109,17 +181,6 @@ function getControlElementInfo(tag) {
 function getUsableTagInfo(tag) {
   if (!state.metadata || !state.metadata.usable_tag_units) return null;
   return state.metadata.usable_tag_units[tag] || null;
-}
-
-function getCompatibleUnitList(info) {
-  if (!info) return [];
-  if (Array.isArray(info.compatible_units) && info.compatible_units.length > 0) {
-    return info.compatible_units;
-  }
-  if (typeof info.unit === 'string' && info.unit.trim() !== '') {
-    return [info.unit];
-  }
-  return [];
 }
 
 function readQuantityRangeUnits(value) {
@@ -143,8 +204,9 @@ function setupSensorUnitOptions(container, defaults = {}) {
   if (!measurementLabel || !unitLabel) return;
   const measurementSelect = measurementLabel.querySelector('select');
   const measurementInput = measurementLabel.querySelector('input');
-  const unitSelect = unitLabel.querySelector('select');
-  if (!unitSelect) return;
+  const unitInput = unitLabel.querySelector('input[data-role="unit"]');
+  const unitHint = unitLabel.querySelector('[data-role="unit-hint"]');
+  if (!unitInput) return;
 
   const updateUnits = (preferred) => {
     let tag = '';
@@ -156,10 +218,9 @@ function setupSensorUnitOptions(container, defaults = {}) {
       tag = defaults.measurement_tag;
     }
     const info = getMeasurableInfo(tag);
-    const options = getCompatibleUnitList(info);
-    const baseUnit = info?.unit || '';
-    const target = typeof preferred === 'string' && preferred.trim() !== '' ? preferred : baseUnit;
-    populateSelect(unitSelect, options, target);
+    const metadata = normalizeUnitMetadata(info);
+    const forceBase = preferred === null;
+    applyUnitMetadataToInput(unitInput, unitHint, metadata, preferred, forceBase);
   };
 
   updateUnits(typeof defaults.unit === 'string' ? defaults.unit : '');
@@ -174,9 +235,11 @@ function setupSensorUnitOptions(container, defaults = {}) {
 function setupMvRangeUnits(container, defaults = {}) {
   const rangeLabel = container.querySelector('label[data-field="mv_range"]');
   if (!rangeLabel) return () => {};
-  const lowerSelect = rangeLabel.querySelector('[data-role="lower-unit"]');
-  const upperSelect = rangeLabel.querySelector('[data-role="upper-unit"]');
-  if (!lowerSelect || !upperSelect) return () => {};
+  const lowerInput = rangeLabel.querySelector('input[data-role="lower-unit"]');
+  const upperInput = rangeLabel.querySelector('input[data-role="upper-unit"]');
+  const lowerHint = rangeLabel.querySelector('[data-role="lower-unit-hint"]');
+  const upperHint = rangeLabel.querySelector('[data-role="upper-unit-hint"]');
+  if (!lowerInput || !upperInput) return () => {};
   const mvTagLabel = container.querySelector('label[data-field="mv_tag"]');
   const mvTagSelect = mvTagLabel ? mvTagLabel.querySelector('select') : null;
   const mvTagInput = mvTagLabel ? mvTagLabel.querySelector('input') : null;
@@ -192,12 +255,11 @@ function setupMvRangeUnits(container, defaults = {}) {
       tag = defaults.mv_tag;
     }
     const info = getControlElementInfo(tag);
-    const options = getCompatibleUnitList(info);
-    const baseUnit = info?.unit || '';
-    const lowerPreferred = typeof preferredLower === 'string' && preferredLower.trim() !== '' ? preferredLower : baseUnit;
-    const upperPreferred = typeof preferredUpper === 'string' && preferredUpper.trim() !== '' ? preferredUpper : baseUnit;
-    populateSelect(lowerSelect, options, lowerPreferred);
-    populateSelect(upperSelect, options, upperPreferred);
+    const metadata = normalizeUnitMetadata(info);
+    const lowerForce = preferredLower === null;
+    const upperForce = preferredUpper === null;
+    applyUnitMetadataToInput(lowerInput, lowerHint, metadata, preferredLower, lowerForce);
+    applyUnitMetadataToInput(upperInput, upperHint, metadata, preferredUpper, upperForce);
   };
 
   applyUnits(rangeDefaults.lower, rangeDefaults.upper);
@@ -689,16 +751,21 @@ function buildFieldInput(field, defaults = {}) {
     unitInput.value = defaultValue?.unit ?? '';
     unitInput.dataset.role = 'unit';
     row.appendChild(buildGroup('Value', valueInput));
-    row.appendChild(buildGroup('Unit', unitInput));
+    const unitGroup = buildGroup('Unit', unitInput);
+    unitGroup.appendChild(createUnitHint());
+    row.appendChild(unitGroup);
     wrapper.appendChild(row);
     return wrapper;
   }
 
   if (field.type === 'unit') {
-    const select = document.createElement('select');
-    select.dataset.role = 'unit';
-    populateSelect(select, defaultValue ? [defaultValue] : [], defaultValue || '');
-    wrapper.appendChild(select);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.dataset.role = 'unit';
+    input.value = defaultValue ?? '';
+    const group = buildGroup('Unit', input);
+    group.appendChild(createUnitHint());
+    wrapper.appendChild(group);
     return wrapper;
   }
 
@@ -716,21 +783,27 @@ function buildFieldInput(field, defaults = {}) {
     lowerValueInput.step = 'any';
     lowerValueInput.value = lower.value ?? '';
     lowerValueInput.dataset.role = 'lower-value';
-    const lowerUnitInput = document.createElement('select');
+    const lowerUnitInput = document.createElement('input');
+    lowerUnitInput.type = 'text';
     lowerUnitInput.dataset.role = 'lower-unit';
-    populateSelect(lowerUnitInput, lower.unit ? [lower.unit] : [], lower.unit || '');
+    lowerUnitInput.value = lower.unit ?? '';
     const upperValueInput = document.createElement('input');
     upperValueInput.type = 'number';
     upperValueInput.step = 'any';
     upperValueInput.value = upper.value ?? '';
     upperValueInput.dataset.role = 'upper-value';
-    const upperUnitInput = document.createElement('select');
+    const upperUnitInput = document.createElement('input');
+    upperUnitInput.type = 'text';
     upperUnitInput.dataset.role = 'upper-unit';
-    populateSelect(upperUnitInput, upper.unit ? [upper.unit] : [], upper.unit || '');
+    upperUnitInput.value = upper.unit ?? '';
     row.appendChild(buildGroup('Lower value', lowerValueInput));
-    row.appendChild(buildGroup('Lower unit', lowerUnitInput));
+    const lowerUnitGroup = buildGroup('Lower unit', lowerUnitInput);
+    lowerUnitGroup.appendChild(createUnitHint('lower-unit-hint'));
+    row.appendChild(lowerUnitGroup);
     row.appendChild(buildGroup('Upper value', upperValueInput));
-    row.appendChild(buildGroup('Upper unit', upperUnitInput));
+    const upperUnitGroup = buildGroup('Upper unit', upperUnitInput);
+    upperUnitGroup.appendChild(createUnitHint('upper-unit-hint'));
+    row.appendChild(upperUnitGroup);
     wrapper.appendChild(row);
     return wrapper;
   }
@@ -963,9 +1036,10 @@ function buildTrajectoryBuilder(root, defaults = {}) {
   y0Input.type = 'number';
   y0Input.step = 'any';
   y0Input.value = defaults.y0 ?? 0;
-  const unitSelect = document.createElement('select');
-  unitSelect.dataset.role = 'unit';
-  populateSelect(unitSelect, defaults.unit ? [defaults.unit] : [], defaults.unit ?? '');
+  const unitInput = document.createElement('input');
+  unitInput.type = 'text';
+  unitInput.dataset.role = 'unit';
+  unitInput.value = defaults.unit ?? '';
   wrapper.innerHTML = '<h3>Setpoint Trajectory</h3>';
   const row = document.createElement('div');
   row.className = 'row';
@@ -974,7 +1048,9 @@ function buildTrajectoryBuilder(root, defaults = {}) {
   yLabel.appendChild(y0Input);
   const uLabel = document.createElement('label');
   uLabel.textContent = 'Unit';
-  uLabel.appendChild(unitSelect);
+  uLabel.appendChild(unitInput);
+  const unitHint = createUnitHint();
+  uLabel.appendChild(unitHint);
   row.appendChild(yLabel);
   row.appendChild(uLabel);
   wrapper.appendChild(row);
@@ -1102,20 +1178,27 @@ function buildTrajectoryBuilder(root, defaults = {}) {
   wrapper.appendChild(addButton);
 
   root.appendChild(wrapper);
-
-  updateUnitHintElement(unitHint, defaults.unit ?? '', '');
+  applyUnitMetadataToInput(
+    unitInput,
+    unitHint,
+    normalizeUnitMetadata({ unit: defaults.unit ?? '', unit_aliases: [] }),
+    defaults.unit ?? '',
+    false
+  );
 
   return {
     getTrajectory() {
       return {
         y0: Number(y0Input.value || 0),
-        unit: unitSelect.value || '',
+        unit: unitInput.value || '',
         segments: localState.segments.map((segment) => ({ ...segment })),
       };
     },
-    setUnitOptions(options, preferredUnit) {
-      const fallback = typeof preferredUnit === 'string' ? preferredUnit : defaults.unit ?? '';
-      populateSelect(unitSelect, options, fallback);
+    setUnitReference(metadata, preferredUnit, forceBase = false) {
+      const normalized = normalizeUnitMetadata(metadata);
+      const fallback =
+        typeof preferredUnit === 'string' ? preferredUnit : defaults.unit ?? normalized.unit;
+      applyUnitMetadataToInput(unitInput, unitHint, normalized, fallback, forceBase);
     },
   };
 }
@@ -1179,13 +1262,13 @@ function openControllerForm({ defaults = {}, parentId = null } = {}) {
           tag = defaultsWithUnits.cv_tag;
         }
         const info = getUsableTagInfo(tag);
-        const options = getCompatibleUnitList(info);
-        const baseUnit = info?.unit || '';
-        const desired = typeof preferredUnit === 'string' && preferredUnit.trim() !== '' ? preferredUnit : baseUnit;
+        const metadata = normalizeUnitMetadata(info);
+        const desired = typeof preferredUnit === 'string' ? preferredUnit : '';
+        const forceBase = preferredUnit === null;
         if (trajectoryBuilder) {
-          trajectoryBuilder.setUnitOptions(options, desired);
+          trajectoryBuilder.setUnitReference(metadata, desired, forceBase);
         } else {
-          pendingTrajectoryUnits = { options, preferred: desired };
+          pendingTrajectoryUnits = { metadata, preferred: desired, forceBase };
         }
       };
 
@@ -1206,7 +1289,11 @@ function openControllerForm({ defaults = {}, parentId = null } = {}) {
   });
 
   if (pendingTrajectoryUnits) {
-    trajectoryBuilder.setUnitOptions(pendingTrajectoryUnits.options, pendingTrajectoryUnits.preferred);
+    trajectoryBuilder.setUnitReference(
+      pendingTrajectoryUnits.metadata,
+      pendingTrajectoryUnits.preferred,
+      pendingTrajectoryUnits.forceBase
+    );
     pendingTrajectoryUnits = null;
   }
 
@@ -1278,9 +1365,12 @@ function openTrajectoryEditor(controller) {
 
   const cvTag = controller.params?.cv_tag;
   const cvInfo = getUsableTagInfo(typeof cvTag === 'string' ? cvTag : '');
-  const unitOptions = getCompatibleUnitList(cvInfo);
-  const baseUnit = cvInfo?.unit || '';
-  builder.setUnitOptions(unitOptions, trajectoryDefaults.unit ?? baseUnit);
+  const metadata = normalizeUnitMetadata(cvInfo);
+  const preferredUnit =
+    typeof trajectoryDefaults.unit === 'string' && trajectoryDefaults.unit.trim() !== ''
+      ? trajectoryDefaults.unit
+      : metadata.unit;
+  builder.setUnitReference(metadata, preferredUnit, false);
 
   const footer = document.createElement('div');
   footer.className = 'row';

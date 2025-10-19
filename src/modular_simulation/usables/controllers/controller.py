@@ -6,12 +6,12 @@ import numpy as np
 from enum import IntEnum
 from pydantic import BaseModel, PrivateAttr, Field, ConfigDict
 from modular_simulation.usables.tag_info import TagData, TagInfo
-from modular_simulation.control_system.trajectory import Trajectory
+from modular_simulation.usables.controllers.trajectory import Trajectory
 from modular_simulation.validation.exceptions import ControllerConfigurationError
-from astropy.units import Quantity, UnitBase, UnitConversionError
+from astropy.units import Quantity, UnitBase, UnitConversionError #type: ignore
 if TYPE_CHECKING:
     from modular_simulation.measurables import ControlElements
-    from modular_simulation.quantities import UsableQuantities
+    from modular_simulation.usables import UsableQuantities
 import logging
 logger = logging.getLogger(__name__)
 

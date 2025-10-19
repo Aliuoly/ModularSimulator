@@ -4,11 +4,11 @@ from typing import List, TYPE_CHECKING
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from modular_simulation.control_system import PIDController, Trajectory
+from modular_simulation.usables import PIDController, Trajectory
 from modular_simulation.plotting import plot_triplet_series
 from modular_simulation.framework import create_system
 from modular_simulation.usables import SampledDelayedSensor
-from astropy.units import Unit, UnitBase
+from astropy.units import Unit #type: ignore
 
 
 try:

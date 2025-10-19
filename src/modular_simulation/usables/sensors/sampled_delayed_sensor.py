@@ -1,5 +1,5 @@
 import numpy as np
-from modular_simulation.usables.sensor import Sensor, TagData
+from modular_simulation.usables.sensors.sensor import Sensor, TagData
 import collections
 from numpy.typing import NDArray
 from pydantic import Field, PrivateAttr

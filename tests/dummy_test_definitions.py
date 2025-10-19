@@ -1,5 +1,5 @@
 
-from modular_simulation.control_system.controller import Controller
+from modular_simulation.usables.controllers.controller import Controller
 from modular_simulation.measurables import ControlElements, States
 from modular_simulation.usables import (
     Sensor,

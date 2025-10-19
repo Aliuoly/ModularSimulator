@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from modular_simulation.framework import create_system
 from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.plotting import plot_triplet_series
-from modular_simulation.control_system import PIDController, Trajectory
+from modular_simulation.usables import PIDController, Trajectory
 
 from system_definitions import (
     HeatDutyCalculation,

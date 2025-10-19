@@ -1,6 +1,6 @@
 from typing import Callable
 from pydantic import Field, PrivateAttr
-from modular_simulation.control_system.controller import Controller
+from modular_simulation.usables.controllers.controller import Controller
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 import logging
 logger = logging.getLogger(__name__)

@@ -3,14 +3,12 @@ from pydantic import  PrivateAttr, BaseModel, ConfigDict, Field, model_validator
 from modular_simulation.validation.exceptions import SensorConfigurationError, CalculationConfigurationError, ControllerConfigurationError
 from modular_simulation.usables.tag_info import TagInfo
 from functools import cached_property
-import warnings
 import logging
-from textwrap import dedent
 if TYPE_CHECKING:
-    from modular_simulation.usables.sensor import Sensor
-    from modular_simulation.usables.calculation import Calculation
-    from modular_simulation.control_system.controller import Controller
-    from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
+    from modular_simulation.usables.sensors.sensor import Sensor
+    from modular_simulation.usables.calculations.calculation import Calculation
+    from modular_simulation.usables.controllers.controller import Controller
+    from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
     from modular_simulation.usables.tag_info import TagData
 
 logger = logging.getLogger(__name__)
@@ -37,7 +35,6 @@ class UsableQuantities(BaseModel):
         ...
     )
 
-    _usable_results: Dict[str, "TagData"] = PrivateAttr(default_factory=dict)
     _tag_infos: List[TagInfo] = PrivateAttr(default_factory=list)
     _initialized: bool = PrivateAttr(default = False)
 

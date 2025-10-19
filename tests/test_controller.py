@@ -3,11 +3,10 @@ import pytest
 
 pytest.importorskip("numpy")
 
-from modular_simulation.control_system.controller import Controller, ControllerMode
-from modular_simulation.control_system.trajectory import Trajectory
-from modular_simulation.measurables import ControlElements, States
-from modular_simulation.quantities import MeasurableQuantities, UsableQuantities, ControllableQuantities
-from modular_simulation.usables import Sensor
+from modular_simulation.usables.controllers.controller import Controller, ControllerMode
+from modular_simulation.usables.controllers.trajectory import Trajectory
+from modular_simulation.measurables import MeasurableQuantities, ControlElements, States
+from modular_simulation.usables import Sensor, UsableQuantities
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 
 

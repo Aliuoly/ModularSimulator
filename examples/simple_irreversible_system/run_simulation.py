@@ -1,26 +1,18 @@
-try:
-    from .system_definitions import (
-        IrreversibleStates,
-        IrreversibleControlElements,
-        IrreversibleAlgebraicStates,
-        IrreversibleConstants,
-        IrreversibleSystem,
-    )
-except ImportError:  # pragma: no cover - support direct script execution
-    from system_definitions import (  # type: ignore
-        IrreversibleStates,
-        IrreversibleControlElements,
-        IrreversibleAlgebraicStates,
-        IrreversibleConstants,
-        IrreversibleSystem,
-    )
+from system_definitions import (
+    IrreversibleStates,
+    IrreversibleControlElements,
+    IrreversibleAlgebraicStates,
+    IrreversibleConstants,
+    IrreversibleSystem,
+)
+
 from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.plotting import plot_triplet_series
 from modular_simulation.framework import create_system
-from modular_simulation.control_system import Trajectory, PIDController
+from modular_simulation.usables import Trajectory, PIDController
 from typing import List, TYPE_CHECKING
 import logging
-from astropy.units import Unit, UnitBase
+from astropy.units import Unit
 
 if TYPE_CHECKING:
     from modular_simulation.usables import Calculation
@@ -105,25 +97,10 @@ def make_systems():
         system_constants = system_constants,
         use_numba = False
     )
-
-    fast_system = create_system(
-        dt=dt,
-        system_class=IrreversibleSystem,
-        initial_states=initial_states,
-        initial_controls=initial_controls,
-        initial_algebraic=initial_algebraic,
-        sensors=sensors,
-        calculations=calculations,
-        controllers=controllers,
-        system_constants=system_constants,
-        use_numba = True
-    )
-
-    return {"fast": fast_system, "normal": normal_system}
+    return {"normal": normal_system}
 
 
 systems = make_systems()
-fast_system = systems["fast"]
 normal_system = systems["normal"]
 if __name__ == "__main__":
 
@@ -143,10 +120,10 @@ if __name__ == "__main__":
     for j, (system_name, system) in enumerate(systems.items()):
         plt.figure(figsize=(12, 8))
         # --- First simulation run ---
-        system.step(5000 * dt)
+        system.step(5 * Unit("day"))
         # --- Change the setpoint and continue the simulation ---
         system.extend_controller_trajectory(cv_tag="B", value=0.2)
-        system.step(5000 * dt)
+        system.step(5 * Unit("day"))
             
 
         # 3. Plot the results.

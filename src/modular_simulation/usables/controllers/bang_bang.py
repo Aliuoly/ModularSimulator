@@ -1,7 +1,7 @@
 from pydantic import Field, PrivateAttr
-from modular_simulation.control_system.controller import Controller
+from modular_simulation.usables.controllers.controller import Controller
 from typing import Tuple
-from astropy.units import Quantity
+from astropy.units import Quantity #type: ignore
 import logging
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,5 @@
-from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
-from modular_simulation.quantities.usable_quantities import UsableQuantities
+from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
+from modular_simulation.usables.usable_quantities import UsableQuantities
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from numpy.typing import NDArray, ArrayLike
@@ -7,18 +7,18 @@ from typing import Any, Dict, List, Mapping, TYPE_CHECKING, Tuple, Callable
 from scipy.integrate import solve_ivp #type: ignore
 from functools import cached_property
 from operator import attrgetter
-from numba import jit
-from numba.typed.typeddict import Dict as NDict
-from numba import types
+from numba import jit #type: ignore
+from numba.typed.typeddict import Dict as NDict #type: ignore
+from numba import types #type: ignore
 import warnings
-from astropy.units import Quantity
-from modular_simulation.control_system.controller import ControllerMode
+from astropy.units import Quantity #type: ignore
+from modular_simulation.usables.controllers.controller import ControllerMode
 from modular_simulation.measurables.base_classes import BaseIndexedModel
 if TYPE_CHECKING:
     from modular_simulation.usables import TagData
-    from modular_simulation.control_system import Controller, Trajectory
+    from modular_simulation.usables import Controller, Trajectory
 import logging
-from tqdm import tqdm
+from tqdm import tqdm #type: ignore
 logger = logging.getLogger(__name__)
 
 class System(BaseModel, ABC):

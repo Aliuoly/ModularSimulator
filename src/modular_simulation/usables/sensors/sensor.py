@@ -7,8 +7,7 @@ from astropy.units import UnitBase
 from modular_simulation.usables.tag_info import TagData, TagInfo
 
 if TYPE_CHECKING:
-    from modular_simulation.quantities import MeasurableQuantities
-    from modular_simulation.measurables.base_classes import BaseIndexedModel
+    from modular_simulation.measurables.base_classes import MeasurableQuantities, BaseIndexedModel
 
 def make_measurement_getter(object: "BaseIndexedModel", tag: str, converter:Callable) -> Callable[[], float|NDArray]:
     def measurement_getter() -> float | NDArray:

@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("numpy")
 
-from modular_simulation.control_system.trajectory import Trajectory
+from modular_simulation.usables.controllers.trajectory import Trajectory
 
 
 def test_set_now_prunes_segments_and_records_history():

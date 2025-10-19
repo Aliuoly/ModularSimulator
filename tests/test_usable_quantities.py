@@ -1,7 +1,7 @@
 import pytest
 from modular_simulation.validation.exceptions import SensorConfigurationError, CalculationConfigurationError
-from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
-from modular_simulation.quantities.usable_quantities import UsableQuantities
+from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
+from modular_simulation.usables.usable_quantities import UsableQuantities
 from dummy_test_definitions import DummyControlElements, DummySensor, DummyStates, AddAllCalculation
 
 def _make_proper_sensors():

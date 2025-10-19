@@ -1,7 +1,7 @@
 from typing import List
 import numpy as np
 from astropy.units import Unit, Quantity #type:ignore
-from modular_simulation.control_system import (
+from modular_simulation.usables import (
     PIDController,
     Trajectory,
     InternalModelController,
@@ -9,7 +9,7 @@ from modular_simulation.control_system import (
     FirstOrderTrajectoryController,
     BangBangController,
 )
-from modular_simulation.control_system.controller import Controller
+from modular_simulation.usables.controllers.controller import Controller
 from calculations.misc_calculations import CatInventoryEstimator, AlTiRatioEstimator
 from calculations.property_estimator import PropertyEstimator
 

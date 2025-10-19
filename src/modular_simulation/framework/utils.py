@@ -1,14 +1,13 @@
-from modular_simulation.quantities.measurable_quantities import MeasurableQuantities
-from modular_simulation.quantities.usable_quantities import UsableQuantities
+from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
+from modular_simulation.usables.usable_quantities import UsableQuantities
 from typing import Any, Dict, List, TYPE_CHECKING, Type
 from modular_simulation.framework.system import System
 if TYPE_CHECKING:
     from modular_simulation.measurables import States, AlgebraicStates, ControlElements, Constants
     from modular_simulation.usables import Sensor, Calculation
-    from modular_simulation.control_system import Controller
-from copy import deepcopy
+    from modular_simulation.usables import Controller
 import logging
-from astropy.units import Quantity
+from astropy.units import Quantity #type: ignore
 logger = logging.getLogger(__name__)
 
 def create_system(

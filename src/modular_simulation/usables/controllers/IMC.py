@@ -1,9 +1,9 @@
 from typing import Callable, Dict, Any, Type, Protocol
 from numpy.typing import NDArray
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize_scalar #type: ignore
 from pydantic import Field, PrivateAttr
-from astropy.units import Quantity
-from modular_simulation.control_system.controller import Controller
+from astropy.units import Quantity #type: ignore
+from modular_simulation.usables.controllers.controller import Controller
 from modular_simulation.usables import Calculation
 from modular_simulation.usables.tag_info import TagInfo
 from modular_simulation.validation.exceptions import ControllerConfigurationError
@@ -20,10 +20,10 @@ class CalculationModelPath:
         2. method_name: the method of the calculation to be used as the IMC's internal model. 
     """
     def __init__(self, calculation_name: Type[Calculation] | str, method_name: str):
-        if isinstance(str, calculation_name):
+        if isinstance(str, calculation_name): #type: ignore
             self.calculation_name = calculation_name
         else:
-            self.calculation_name = calculation_name.__name__
+            self.calculation_name = calculation_name.__name__ #type: ignore
         self.method_name = method_name
 
 class IMCModel(Protocol):

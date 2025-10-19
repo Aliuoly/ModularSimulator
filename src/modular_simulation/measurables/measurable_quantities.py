@@ -38,7 +38,6 @@ class MeasurableQuantities(BaseModel):
                 "the consumption rate of a species due to multiple reactions taking place."
         )
     )
-    _unit_info: Dict[str, UnitBase] = PrivateAttr()
     model_config = ConfigDict(extra = 'forbid')
     
     @model_validator(mode = 'after')

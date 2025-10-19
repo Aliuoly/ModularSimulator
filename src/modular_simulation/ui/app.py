@@ -10,6 +10,7 @@ from flask import Flask, jsonify, render_template, request
 from .builder import (
     SimulationBuilder,
     _parse_quantity,
+    _serialize_value,
 )
 
 
@@ -22,10 +23,12 @@ def _sensor_to_payload(config) -> Dict[str, Any]:
 
 
 def _controller_to_payload(config) -> Dict[str, Any]:
+    params = _serialize_value(config.raw)
+    segments = _serialize_value(config.trajectory.segments)
     payload = {
         "id": config.id,
         "type": config.name,
-        "params": config.raw,
+        "params": params,
         "trajectory": {
             "y0": config.trajectory.y0,
             # ``config.trajectory.unit`` originates from astropy's ``Unit`` class
@@ -33,7 +36,7 @@ def _controller_to_payload(config) -> Dict[str, Any]:
             # instances directly, so we expose the canonical string representation
             # instead to keep the API response JSON-safe.
             "unit": str(config.trajectory.unit),
-            "segments": config.trajectory.segments,
+            "segments": segments,
         },
         "parent_id": config.parent_id,
         "child_id": config.child_id,

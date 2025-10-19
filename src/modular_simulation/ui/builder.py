@@ -418,6 +418,38 @@ class SimulationBuilder:
                 parent.child_id = None
         self.invalidate("Controller removed; system will restart on next run.")
 
+    def update_controller(
+        self, controller_id: str, params: Optional[Dict[str, Any]]
+    ) -> ControllerConfig:
+        config = self.controller_configs.get(controller_id)
+        if config is None:
+            raise ValueError(f"Unknown controller id '{controller_id}'.")
+        if params is None:
+            raise ValueError("Controller update requires a 'params' mapping.")
+
+        updates = self._convert_arguments(
+            config.cls, params, exclude={"sp_trajectory", "cascade_controller"}
+        )
+        new_args = dict(config.args)
+        new_args.update(updates)
+
+        instance = config.cls(
+            sp_trajectory=self._build_trajectory(config.trajectory), **new_args
+        )
+        raw = self._serialize_model(instance)
+        raw["trajectory"] = {
+            "y0": config.trajectory.y0,
+            "unit": config.trajectory.unit,
+            "segments": [dict(segment) for segment in config.trajectory.segments],
+        }
+
+        config.args = new_args
+        config.raw = raw
+        self.invalidate(
+            "Controller parameters updated; system will be rebuilt on next run."
+        )
+        return config
+
     def update_controller_trajectory(
         self, controller_id: str, trajectory: Optional[Dict[str, Any]]
     ) -> ControllerConfig:
@@ -496,6 +528,9 @@ class SimulationBuilder:
     # Plot configuration
     # ------------------------------------------------------------------
     def set_plot_layout(self, rows: int, cols: int, lines: List[Dict[str, Any]]) -> PlotLayout:
+        allowed_tags = set(self.available_usable_tags()) | set(
+            self.available_setpoint_tags()
+        )
         parsed_lines = [
             PlotLine(
                 panel=int(line.get("panel", 0)),
@@ -506,6 +541,11 @@ class SimulationBuilder:
             )
             for line in lines
         ]
+        for parsed in parsed_lines:
+            if parsed.tag not in allowed_tags:
+                raise ValueError(
+                    f"Plot tag '{parsed.tag}' is not available from sensors, calculations, or controller setpoints."
+                )
         self.plot_layout = PlotLayout(rows=max(rows, 1), cols=max(cols, 1), lines=parsed_lines)
         return self.plot_layout
 

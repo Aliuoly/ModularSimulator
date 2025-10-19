@@ -83,6 +83,7 @@ def create_app(builder: SimulationBuilder) -> Flask:
                 "calculation_types": builder.available_calculation_types(),
                 "usable_tags": builder.available_usable_tags(),
                 "setpoint_tags": builder.available_setpoint_tags(),
+                "time_unit": str(builder.dt.unit),
                 "messages": builder.messages(),
             }
         )
@@ -123,6 +124,17 @@ def create_app(builder: SimulationBuilder) -> Flask:
                     )
                 ),
                 201,
+            )
+        )
+
+    @app.patch("/api/controllers/<controller_id>")
+    def update_controller(controller_id: str):
+        data = request.get_json(force=True)
+        return _handle_config_errors(
+            lambda: jsonify(
+                _controller_to_payload(
+                    builder.update_controller(controller_id, data.get("params"))
+                )
             )
         )
 

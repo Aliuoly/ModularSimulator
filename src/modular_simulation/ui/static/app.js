@@ -168,6 +168,7 @@ function renderControllerList() {
       <div>Mode: ${params.mode ?? 'AUTO'}</div>
       <div>Segments: ${trajectory.segments.length}</div>
       <div class="actions">
+        <button data-action="edit-controller" data-id="${controller.id}">Edit Settings</button>
         <button data-action="edit-trajectory" data-id="${controller.id}">Edit Trajectory</button>
         <button data-action="cascade" data-id="${controller.id}">Cascade To…</button>
         <button data-action="remove" data-id="${controller.id}">Remove</button>
@@ -195,6 +196,14 @@ function renderControllerList() {
       const controller = state.controllers.find((c) => c.id === event.currentTarget.dataset.id);
       if (!controller) return;
       openTrajectoryEditor(controller);
+    });
+  });
+
+  list.querySelectorAll('button[data-action="edit-controller"]').forEach((btn) => {
+    btn.addEventListener('click', (event) => {
+      const controller = state.controllers.find((c) => c.id === event.currentTarget.dataset.id);
+      if (!controller) return;
+      openControllerEditor(controller);
     });
   });
 
@@ -254,11 +263,14 @@ function renderPlotLayout() {
       <header><h3>Panel ${line.panel + 1}</h3></header>
       <div>Tag: <span class="tag-pill">${line.tag}</span></div>
       <div>Label: ${line.label || '—'} | Color: ${line.color || 'auto'} | Style: ${line.style || 'solid'}</div>
-      <div class="actions"><button data-index="${index}" type="button">Remove</button></div>
+      <div class="actions">
+        <button data-action="edit" data-index="${index}" type="button">Edit</button>
+        <button data-action="remove" data-index="${index}" type="button">Remove</button>
+      </div>
     `;
     container.appendChild(card);
   });
-  container.querySelectorAll('button').forEach((btn) => {
+  container.querySelectorAll('button[data-action="remove"]').forEach((btn) => {
     btn.addEventListener('click', async (event) => {
       const idx = Number(event.currentTarget.dataset.index);
       const lines = state.plots.lines.filter((_, i) => i !== idx);
@@ -270,6 +282,157 @@ function renderPlotLayout() {
       }
     });
   });
+  container.querySelectorAll('button[data-action="edit"]').forEach((btn) => {
+    btn.addEventListener('click', (event) => {
+      const idx = Number(event.currentTarget.dataset.index);
+      const line = state.plots.lines[idx];
+      if (!line) return;
+      openPlotLineDialog({ index: idx, defaults: { ...line } });
+    });
+  });
+}
+
+function openPlotLineDialog({ index = null, defaults = {} } = {}) {
+  if (!state.metadata || !state.plots) return;
+  const container = document.getElementById('plot-line-form');
+  container.innerHTML = '';
+  container.classList.remove('hidden');
+
+  const totalPanels = Math.max(1, state.plots.rows * state.plots.cols);
+  const maxPanelIndex = totalPanels - 1;
+  const heading = document.createElement('h3');
+  heading.textContent = index === null ? 'Add Plot Line' : 'Edit Plot Line';
+  container.appendChild(heading);
+
+  const form = document.createElement('form');
+  form.className = 'grid-form';
+
+  const panelLabel = document.createElement('label');
+  panelLabel.textContent = `Panel index (0-${maxPanelIndex})`;
+  const panelInput = document.createElement('input');
+  panelInput.type = 'number';
+  panelInput.min = '0';
+  panelInput.max = String(maxPanelIndex);
+  const defaultPanelRaw =
+    typeof defaults.panel === 'number' ? defaults.panel : Number(defaults.panel ?? 0);
+  const defaultPanel = Number.isFinite(defaultPanelRaw)
+    ? Math.min(maxPanelIndex, Math.max(0, Math.floor(defaultPanelRaw)))
+    : 0;
+  panelInput.value = defaultPanel;
+  panelLabel.appendChild(panelInput);
+  form.appendChild(panelLabel);
+
+  const tagLabel = document.createElement('label');
+  tagLabel.textContent = 'Tag';
+  const tagSelect = document.createElement('select');
+  const tagOptions = Array.from(
+    new Set([...(state.metadata.usable_tags || []), ...(state.metadata.setpoint_tags || [])])
+  ).sort((a, b) => a.localeCompare(b));
+  const hasTags = tagOptions.length > 0;
+  if (hasTags) {
+    tagOptions.forEach((tag) => {
+      const option = document.createElement('option');
+      option.value = tag;
+      option.textContent = tag;
+      tagSelect.appendChild(option);
+    });
+    const defaultTag = defaults.tag && tagOptions.includes(defaults.tag) ? defaults.tag : tagOptions[0];
+    tagSelect.value = defaultTag;
+  } else {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No tags available';
+    tagSelect.appendChild(option);
+    tagSelect.disabled = true;
+  }
+  tagLabel.appendChild(tagSelect);
+  form.appendChild(tagLabel);
+
+  const labelLabel = document.createElement('label');
+  labelLabel.textContent = 'Label (optional)';
+  const labelInput = document.createElement('input');
+  labelInput.type = 'text';
+  labelInput.value = defaults.label ?? '';
+  labelLabel.appendChild(labelInput);
+  form.appendChild(labelLabel);
+
+  const colorLabel = document.createElement('label');
+  colorLabel.textContent = 'Color (optional)';
+  const colorInput = document.createElement('input');
+  colorInput.type = 'text';
+  colorInput.value = defaults.color ?? '';
+  colorLabel.appendChild(colorInput);
+  form.appendChild(colorLabel);
+
+  const styleLabel = document.createElement('label');
+  styleLabel.textContent = 'Line style (optional)';
+  const styleInput = document.createElement('input');
+  styleInput.type = 'text';
+  styleInput.value = defaults.style ?? '';
+  styleLabel.appendChild(styleInput);
+  form.appendChild(styleLabel);
+
+  const controls = document.createElement('div');
+  controls.className = 'row';
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.textContent = 'Save';
+  if (!hasTags) {
+    submit.disabled = true;
+  }
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', () => {
+    container.classList.add('hidden');
+    container.innerHTML = '';
+  });
+  controls.appendChild(submit);
+  controls.appendChild(cancel);
+  form.appendChild(controls);
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!tagSelect.value) {
+      showError('Select a tag for the plot line.');
+      return;
+    }
+    const parsedPanel = Number(panelInput.value);
+    const safePanel = Number.isFinite(parsedPanel) ? Math.floor(parsedPanel) : 0;
+    const panelIndex = Math.min(maxPanelIndex, Math.max(0, safePanel));
+    const line = {
+      panel: panelIndex,
+      tag: tagSelect.value,
+    };
+    const label = labelInput.value.trim();
+    const color = colorInput.value.trim();
+    const style = styleInput.value.trim();
+    if (label) line.label = label;
+    if (color) line.color = color;
+    if (style) line.style = style;
+
+    const updatedLines =
+      index === null
+        ? [...state.plots.lines, line]
+        : state.plots.lines.map((existing, i) => (i === index ? line : existing));
+
+    try {
+      await updatePlotLayout({ ...state.plots, lines: updatedLines });
+      container.classList.add('hidden');
+      container.innerHTML = '';
+      clearError();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+  if (!hasTags) {
+    const helper = document.createElement('p');
+    helper.textContent = 'No plot tags are available. Add sensors, calculations, or controllers first.';
+    form.insertBefore(helper, controls);
+  }
+
+  container.appendChild(form);
 }
 
 function renderRunResult(result) {
@@ -515,6 +678,16 @@ function buildDynamicForm(container, typeList, submitHandler, options = {}) {
   form.appendChild(fieldsContainer);
 
   let currentType = typeList[0];
+  if (options.initialTypeName) {
+    const selected = typeList.find((item) => item.name === options.initialTypeName);
+    if (selected) {
+      currentType = selected;
+    }
+  }
+  select.value = currentType.name;
+  if (options.lockType) {
+    select.disabled = true;
+  }
 
   function renderFields(defaults = {}) {
     fieldsContainer.innerHTML = '';
@@ -622,6 +795,10 @@ function buildTrajectoryBuilder(root, defaults = {}) {
   segmentsContainer.className = 'item-list';
   wrapper.appendChild(segmentsContainer);
 
+  const timeUnit = state.metadata?.time_unit || '';
+  const durationLabel = `Duration${timeUnit ? ` (${timeUnit})` : ''}`;
+  const dtLabel = `dt${timeUnit ? ` (${timeUnit})` : ''}`;
+
   function refreshSegments() {
     segmentsContainer.innerHTML = '';
     if (localState.segments.length === 0) {
@@ -680,7 +857,7 @@ function buildTrajectoryBuilder(root, defaults = {}) {
       const type = select.value;
       if (type === 'hold') {
         valueInputs.innerHTML = `
-          <label>Duration<input name="duration" type="number" step="any" value="0" /></label>
+          <label>${durationLabel}<input name="duration" type="number" step="any" value="0" /></label>
           <label>Value<input name="value" type="number" step="any" /></label>
         `;
       } else if (type === 'step') {
@@ -688,13 +865,13 @@ function buildTrajectoryBuilder(root, defaults = {}) {
       } else if (type === 'ramp') {
         valueInputs.innerHTML = `
           <label>Magnitude<input name="magnitude" type="number" step="any" value="0" /></label>
-          <label>Duration<input name="duration" type="number" step="any" value="0" /></label>
+          <label>${durationLabel}<input name="duration" type="number" step="any" value="0" /></label>
         `;
       } else {
         valueInputs.innerHTML = `
           <label>Std<input name="std" type="number" step="any" value="0.1" /></label>
-          <label>Duration<input name="duration" type="number" step="any" value="1" /></label>
-          <label>dt<input name="dt" type="number" step="any" value="1" /></label>
+          <label>${durationLabel}<input name="duration" type="number" step="any" value="1" /></label>
+          <label>${dtLabel}<input name="dt" type="number" step="any" value="1" /></label>
         `;
       }
     }
@@ -793,6 +970,50 @@ function openControllerForm({ defaults = {}, parentId = null } = {}) {
   });
 
   container.classList.remove('hidden');
+}
+
+function openControllerEditor(controller) {
+  if (!state.metadata) return;
+  const container = document.getElementById('controller-form');
+  const types = state.metadata.controller_types || [];
+  if (types.length === 0) {
+    container.innerHTML = '<div class="dialog"><p>No controller types available.</p></div>';
+    container.classList.remove('hidden');
+    return;
+  }
+  const availableType = types.find((item) => item.name === controller.type);
+  if (!availableType) {
+    container.innerHTML = `<div class="dialog"><p>The controller type <strong>${controller.type}</strong> is no longer available.</p></div>`;
+    container.classList.remove('hidden');
+    return;
+  }
+
+  const defaults = controller.params || {};
+  const { form } = buildDynamicForm(
+    container,
+    types,
+    async ({ values }) => {
+      await fetchJSON(`/api/controllers/${controller.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ params: values }),
+      });
+      container.classList.add('hidden');
+      container.innerHTML = '';
+      await refreshControllers();
+      await refreshMetadata();
+      clearError();
+    },
+    {
+      defaults,
+      exclude: ['sp_trajectory', 'cascade_controller'],
+      initialTypeName: controller.type,
+      lockType: true,
+    }
+  );
+
+  const heading = document.createElement('h3');
+  heading.textContent = `Edit ${controller.type} Settings`;
+  form.parentElement?.insertBefore(heading, form);
 }
 
 function openTrajectoryEditor(controller) {
@@ -924,21 +1145,8 @@ function initEventHandlers() {
     }
   });
 
-  document.getElementById('add-plot-line').addEventListener('click', async () => {
-    if (!state.metadata || !state.plots) return;
-    const panel = prompt(`Panel index (0 to ${state.plots.rows * state.plots.cols - 1})`, '0');
-    const tag = prompt('Tag to plot (sensor alias, calculation output, or controller setpoint)');
-    if (panel === null || tag === null) return;
-    const label = prompt('Label (optional)') || undefined;
-    const color = prompt('Color (CSS value, optional)') || undefined;
-    const style = prompt('Line style (e.g., --, :, -, optional)') || undefined;
-    const lines = [...state.plots.lines, { panel: Number(panel), tag, label, color, style }];
-    try {
-      await updatePlotLayout({ ...state.plots, lines });
-      clearError();
-    } catch (error) {
-      handleError(error);
-    }
+  document.getElementById('add-plot-line').addEventListener('click', () => {
+    openPlotLineDialog();
   });
 
   document.getElementById('run-form').addEventListener('submit', async (event) => {

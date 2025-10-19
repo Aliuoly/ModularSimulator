@@ -5,7 +5,6 @@ import importlib
 import importlib.util
 import inspect
 import io
-import math
 import pkgutil
 import types
 import uuid
@@ -182,18 +181,6 @@ def _serialize_value(value: Any) -> Any:
         return str(value)
     if isinstance(value, ControllerMode):
         return value.name
-    if isinstance(value, np.generic):
-        return _serialize_value(value.item())
-    if isinstance(value, np.ndarray):
-        return [_serialize_value(v) for v in value.tolist()]
-    if isinstance(value, float):
-        if math.isnan(value):
-            return None
-        if math.isinf(value):
-            return "Infinity" if value > 0 else "-Infinity"
-        return value
-    if isinstance(value, (int, bool)):
-        return value
     if isinstance(value, tuple):
         return [_serialize_value(v) for v in value]
     if isinstance(value, list):

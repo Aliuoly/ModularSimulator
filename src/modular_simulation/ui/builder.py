@@ -418,6 +418,39 @@ class SimulationBuilder:
                 parent.child_id = None
         self.invalidate("Controller removed; system will restart on next run.")
 
+    def update_controller_trajectory(
+        self, controller_id: str, trajectory: Optional[Dict[str, Any]]
+    ) -> ControllerConfig:
+        config = self.controller_configs.get(controller_id)
+        if config is None:
+            raise ValueError(f"Unknown controller id '{controller_id}'.")
+        if trajectory is None:
+            raise ValueError("Trajectory payload is required.")
+
+        try:
+            y0 = float(trajectory.get("y0", config.trajectory.y0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Trajectory requires a numeric 'y0' value.") from exc
+        unit = str(trajectory.get("unit", config.trajectory.unit))
+        segments_payload = trajectory.get("segments", [])
+        if not isinstance(segments_payload, list):
+            raise ValueError("Trajectory 'segments' must be a list.")
+
+        segments = [dict(segment) for segment in segments_payload]
+        traj_spec = TrajectorySpec(y0=y0, unit=unit, segments=segments)
+        instance = config.cls(sp_trajectory=self._build_trajectory(traj_spec), **config.args)
+        raw = self._serialize_model(instance)
+        raw["trajectory"] = {
+            "y0": traj_spec.y0,
+            "unit": traj_spec.unit,
+            "segments": [dict(segment) for segment in traj_spec.segments],
+        }
+
+        config.trajectory = traj_spec
+        config.raw = raw
+        self.invalidate("Controller trajectory updated; system will be rebuilt on next run.")
+        return config
+
     # ------------------------------------------------------------------
     # CRUD for calculations
     # ------------------------------------------------------------------

@@ -154,6 +154,53 @@ button:disabled {
   gap: 0.8rem;
 }
 
+.field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.field-label__header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  color: #1d3557;
+}
+
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  background-color: #e3f2fd;
+  color: #1d3557;
+  font-size: 0.75rem;
+  font-style: normal;
+  border: 1px solid #1d3557;
+  cursor: help;
+}
+
+.info-icon:focus {
+  outline: 2px solid #1d3557;
+  outline-offset: 2px;
+}
+
+.field-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #424242;
+}
+
+.field-input-group input,
+.field-input-group select {
+  width: 100%;
+}
+
 .dialog form .row {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -190,6 +237,32 @@ button:disabled {
 #messages ul {
   margin: 0;
   padding-left: 1.2rem;
+}
+
+#error-banner {
+  border-left: 4px solid #b00020;
+  background-color: #ffebee;
+  color: #b00020;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+#error-banner .error-message {
+  font-weight: 600;
+}
+
+#error-banner button {
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(176, 0, 32, 0.2);
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+}
+
+#error-banner button:hover {
+  background-color: rgba(176, 0, 32, 0.1);
 }
 
 @media (max-width: 768px) {

@@ -24,9 +24,8 @@ def _sensor_to_payload(config) -> Dict[str, Any]:
 
 def _controller_to_payload(config) -> Dict[str, Any]:
     params = _serialize_value(config.raw)
-    print(params)
     # remove the unserializable trajectory which is handled specifically
-    del params['sp_trajectory']
+    del params["sp_trajectory"]
     segments = _serialize_value(config.trajectory.segments)
     payload = {
         "id": config.id,
@@ -67,6 +66,12 @@ def create_app(builder: SimulationBuilder) -> Flask:
     def index():
         return render_template("index.html")
 
+    def _handle_config_errors(operation):
+        try:
+            return operation()
+        except (ValueError, RuntimeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+
     @app.get("/api/metadata")
     def metadata():
         return jsonify(
@@ -89,8 +94,9 @@ def create_app(builder: SimulationBuilder) -> Flask:
     @app.post("/api/sensors")
     def add_sensor():
         data = request.get_json(force=True)
-        config = builder.add_sensor(data["type"], data.get("params", {}))
-        return jsonify(_sensor_to_payload(config)), 201
+        return _handle_config_errors(
+            lambda: (jsonify(_sensor_to_payload(builder.add_sensor(data["type"], data.get("params", {})))), 201)
+        )
 
     @app.delete("/api/sensors/<sensor_id>")
     def delete_sensor(sensor_id: str):
@@ -104,13 +110,29 @@ def create_app(builder: SimulationBuilder) -> Flask:
     @app.post("/api/controllers")
     def add_controller():
         data = request.get_json(force=True)
-        config = builder.add_controller(
-            data["type"],
-            data.get("params", {}),
-            data.get("trajectory", {}),
-            parent_id=data.get("parent_id"),
+        return _handle_config_errors(
+            lambda: (
+                jsonify(
+                    _controller_to_payload(
+                        builder.add_controller(
+                            data["type"],
+                            data.get("params", {}),
+                            data.get("trajectory", {}),
+                            parent_id=data.get("parent_id"),
+                        )
+                    )
+                ),
+                201,
+            )
         )
-        return jsonify(_controller_to_payload(config)), 201
+
+    @app.patch("/api/controllers/<controller_id>/trajectory")
+    def update_controller_trajectory(controller_id: str):
+        data = request.get_json(force=True)
+        trajectory = data.get("trajectory")
+        return _handle_config_errors(
+            lambda: jsonify(_controller_to_payload(builder.update_controller_trajectory(controller_id, trajectory)))
+        )
 
     @app.delete("/api/controllers/<controller_id>")
     def delete_controller(controller_id: str):
@@ -124,8 +146,12 @@ def create_app(builder: SimulationBuilder) -> Flask:
     @app.post("/api/calculations")
     def add_calculation():
         data = request.get_json(force=True)
-        config = builder.add_calculation(data["type"], data.get("params", {}))
-        return jsonify(_calculation_to_payload(config)), 201
+        return _handle_config_errors(
+            lambda: (
+                jsonify(_calculation_to_payload(builder.add_calculation(data["type"], data.get("params", {})))),
+                201,
+            )
+        )
 
     @app.delete("/api/calculations/<calc_id>")
     def delete_calculation(calc_id: str):
@@ -171,27 +197,31 @@ def create_app(builder: SimulationBuilder) -> Flask:
     @app.post("/api/plots")
     def set_plots():
         data = request.get_json(force=True)
-        layout = builder.set_plot_layout(
-            int(data.get("rows", 1)),
-            int(data.get("cols", 1)),
-            data.get("lines", []),
-        )
-        return jsonify(
-            {
-                "rows": layout.rows,
-                "cols": layout.cols,
-                "lines": [
-                    {
-                        "panel": line.panel,
-                        "tag": line.tag,
-                        "label": line.label,
-                        "color": line.color,
-                        "style": line.style,
-                    }
-                    for line in layout.lines
-                ],
-            }
-        )
+
+        def apply_layout():
+            layout = builder.set_plot_layout(
+                int(data.get("rows", 1)),
+                int(data.get("cols", 1)),
+                data.get("lines", []),
+            )
+            return jsonify(
+                {
+                    "rows": layout.rows,
+                    "cols": layout.cols,
+                    "lines": [
+                        {
+                            "panel": line.panel,
+                            "tag": line.tag,
+                            "label": line.label,
+                            "color": line.color,
+                            "style": line.style,
+                        }
+                        for line in layout.lines
+                    ],
+                }
+            )
+
+        return _handle_config_errors(apply_layout)
 
     @app.post("/api/run")
     def run_simulation():
@@ -199,15 +229,18 @@ def create_app(builder: SimulationBuilder) -> Flask:
         duration: Optional[Quantity] = None
         if data and data.get("duration"):
             duration = _parse_quantity(data["duration"])
-        result = builder.run(duration)
-        return jsonify(
-            {
-                "time": result["time"],
-                "outputs": result["outputs"],
-                "figure": result["figure"],
-                "messages": result.get("messages", []),
-            }
-        )
+        def execute():
+            result = builder.run(duration)
+            return jsonify(
+                {
+                    "time": result["time"],
+                    "outputs": result["outputs"],
+                    "figure": result["figure"],
+                    "messages": result.get("messages", []),
+                }
+            )
+
+        return _handle_config_errors(execute)
 
     return app
 

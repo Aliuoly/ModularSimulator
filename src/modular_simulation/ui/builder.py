@@ -313,6 +313,7 @@ class SimulationBuilder:
             model = getattr(self.base_measurables, category)
             for tag in model.tag_list:
                 unit = model.tag_unit_info[tag]
+                metadata = _unit_metadata(unit)
                 items.append({
                     "tag": tag,
                     "category": category,

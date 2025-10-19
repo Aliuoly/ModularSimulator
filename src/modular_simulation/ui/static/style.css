@@ -201,6 +201,31 @@ button:disabled {
   width: 100%;
 }
 
+.unit-input-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.unit-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: #424242;
+}
+
+.unit-hint__label {
+  font-weight: 500;
+}
+
+.unit-hint code {
+  background-color: #f1f5fb;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
 .dialog form .row {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

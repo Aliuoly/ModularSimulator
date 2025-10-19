@@ -1103,6 +1103,8 @@ function buildTrajectoryBuilder(root, defaults = {}) {
 
   root.appendChild(wrapper);
 
+  updateUnitHintElement(unitHint, defaults.unit ?? '', '');
+
   return {
     getTrajectory() {
       return {

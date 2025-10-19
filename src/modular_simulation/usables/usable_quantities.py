@@ -63,6 +63,7 @@ class UsableQuantities(BaseModel):
         exception_group.extend(self._validate_duplicate_tag())
         exception_group.extend(self._validate_sensors_resolvable())
         exception_group.extend(self._validate_calculations_resolvable())
+        exception_group.extend(self._validate_controllers_resolvable())
         
         if len(exception_group) > 0:
             raise ExceptionGroup(
@@ -107,7 +108,7 @@ class UsableQuantities(BaseModel):
             if tag in seen_tags:
                 duplicate_tags.append(tag)
             else:
-                seen_tags.append(duplicate_tags)
+                seen_tags.append(tag)
         if len(duplicate_tags) > 0:
             exception_group.append(
                 SensorConfigurationError(

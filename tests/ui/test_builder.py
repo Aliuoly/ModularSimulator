@@ -5,6 +5,8 @@ from astropy.units import Unit
 from typing import Annotated
 
 from modular_simulation.measurables.base_classes import AlgebraicStates, Constants, ControlElements, States
+from textwrap import dedent
+
 from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
 from modular_simulation.ui import SimulationBuilder
 from modular_simulation.usables.sensors.sampled_delayed_sensor import SampledDelayedSensor
@@ -171,3 +173,202 @@ def test_builder_produces_default_plot_without_layout():
 
     assert result["figure"] is not None
     assert result["figure"].startswith("data:image/png;base64,")
+
+
+def test_register_sensor_module_allows_custom_sensor(tmp_path):
+    module_path = tmp_path / "uploaded_sensor.py"
+    module_path.write_text(
+        dedent(
+            """
+            from modular_simulation.usables.sensors.sensor import Sensor
+
+
+            class UploadedSensor(Sensor):
+                def _should_update(self, t: float) -> bool:
+                    return True
+
+                def _get_processed_value(self, t: float, raw_value):
+                    return raw_value
+            """
+        )
+    )
+
+    measurables = MeasurableQuantities(
+        states=SimpleStates(x=1.0),
+        control_elements=SimpleControls(u=0.0),
+        algebraic_states=SimpleAlgebraic(a=0.0),
+        constants=SimpleConstants(k=1.0),
+    )
+
+    builder = SimulationBuilder(
+        system_class=SimpleSystem,
+        measurable_quantities=measurables,
+        dt=1.0 * Unit("s"),
+        use_numba=False,
+    )
+
+    module = builder.register_sensor_module(str(module_path))
+    assert "UploadedSensor" in module.classes
+    available = {item["name"] for item in builder.available_sensor_types()}
+    assert "UploadedSensor" in available
+
+    builder.add_sensor(
+        "UploadedSensor",
+        {
+            "measurement_tag": "x",
+            "alias_tag": "x_custom",
+            "unit": "1",
+        },
+    )
+
+    assert any(cfg.name == "UploadedSensor" for cfg in builder.sensor_configs)
+
+
+def test_register_controller_module_allows_custom_controller(tmp_path):
+    module_path = tmp_path / "uploaded_controller.py"
+    module_path.write_text(
+        dedent(
+            """
+            from modular_simulation.usables.controllers.controller import Controller
+
+
+            class UploadedController(Controller):
+                def _control_algorithm(self, t: float, cv, sp):
+                    return sp
+            """
+        )
+    )
+
+    measurables = MeasurableQuantities(
+        states=SimpleStates(x=1.0),
+        control_elements=SimpleControls(u=0.0),
+        algebraic_states=SimpleAlgebraic(a=0.0),
+        constants=SimpleConstants(k=1.0),
+    )
+
+    builder = SimulationBuilder(
+        system_class=SimpleSystem,
+        measurable_quantities=measurables,
+        dt=1.0 * Unit("s"),
+        use_numba=False,
+    )
+
+    builder.add_sensor(
+        SampledDelayedSensor.__name__,
+        {
+            "measurement_tag": "x",
+            "alias_tag": "x_meas",
+            "unit": "1",
+            "sampling_period": 0.0,
+            "deadtime": 0.0,
+        },
+    )
+
+    module = builder.register_controller_module(str(module_path))
+    assert "UploadedController" in module.classes
+    available = {item["name"] for item in builder.available_controller_types()}
+    assert "UploadedController" in available
+
+    controller = builder.add_controller(
+        "UploadedController",
+        {
+            "mv_tag": "u",
+            "cv_tag": "x_meas",
+            "mv_range": {
+                "lower": {"value": 0.0, "unit": "1"},
+                "upper": {"value": 10.0, "unit": "1"},
+            },
+        },
+        trajectory={
+            "y0": 0.0,
+            "unit": "1",
+            "segments": [],
+        },
+    )
+
+    assert controller.name == "UploadedController"
+
+
+def test_configuration_round_trip(tmp_path):
+    measurables = MeasurableQuantities(
+        states=SimpleStates(x=1.0),
+        control_elements=SimpleControls(u=0.0),
+        algebraic_states=SimpleAlgebraic(a=0.0),
+        constants=SimpleConstants(k=1.0),
+    )
+
+    builder = SimulationBuilder(
+        system_class=SimpleSystem,
+        measurable_quantities=measurables,
+        dt=1.0 * Unit("s"),
+        use_numba=False,
+    )
+
+    builder.add_sensor(
+        SampledDelayedSensor.__name__,
+        {
+            "measurement_tag": "x",
+            "alias_tag": "x_meas",
+            "unit": "1",
+            "sampling_period": 0.0,
+            "deadtime": 0.0,
+        },
+    )
+
+    builder.add_controller(
+        PIDController.__name__,
+        {
+            "mv_tag": "u",
+            "cv_tag": "x_meas",
+            "mv_range": {
+                "lower": {"value": 0.0, "unit": "1"},
+                "upper": {"value": 10.0, "unit": "1"},
+            },
+            "Kp": 1.0,
+            "Ti": 5.0,
+            "Td": 0.0,
+        },
+        trajectory={
+            "y0": 0.0,
+            "unit": "1",
+            "segments": [{"type": "step", "magnitude": 1.0}],
+        },
+    )
+
+    builder.add_calculation(
+        "FirstOrderFilter",
+        {
+            "raw_signal_tag": "x_meas",
+            "filtered_signal_tag": "x_filtered",
+            "time_constant": 1.0,
+        },
+    )
+
+    builder.set_plot_layout(
+        2,
+        1,
+        [
+            {"panel": 0, "tag": "x_meas", "label": "Measured"},
+            {"panel": 1, "tag": "x_filtered", "label": "Filtered"},
+        ],
+    )
+    builder.update_time_axis(0.0, 10.0)
+
+    exported = builder.export_configuration()
+
+    new_builder = SimulationBuilder(
+        system_class=SimpleSystem,
+        measurable_quantities=measurables,
+        dt=1.0 * Unit("s"),
+        use_numba=False,
+    )
+
+    new_builder.load_configuration(exported)
+
+    assert len(new_builder.sensor_configs) == len(exported["sensors"])
+    assert len(new_builder.controller_configs) == len(exported["controllers"])
+    assert len(new_builder.calculation_configs) == len(exported["calculations"])
+    assert new_builder.plot_layout.rows == exported["plot"]["rows"]
+    assert new_builder.plot_layout.cols == exported["plot"]["cols"]
+    assert new_builder.time_axis_limits() == exported["time_axis"]
+

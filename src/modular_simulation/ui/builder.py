@@ -11,7 +11,7 @@ import pkgutil
 import types
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Type, Union, get_args, get_origin
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Type, Union, get_args, get_origin
 
 import matplotlib
 
@@ -84,6 +84,20 @@ class ControllerConfig:
         if not cv:
             return ""
         return f"{cv}.sp"
+
+
+@dataclass
+class SensorModule:
+    id: str
+    module: types.ModuleType
+    classes: Dict[str, Type[Sensor]]
+
+
+@dataclass
+class ControllerModule:
+    id: str
+    module: types.ModuleType
+    classes: Dict[str, Type[Controller]]
 
 
 @dataclass
@@ -310,6 +324,8 @@ class SimulationBuilder:
         self.controller_types = _discover_subclasses(Controller, "modular_simulation.usables.controllers")
         self.calculation_types = _discover_subclasses(Calculation, "modular_simulation.usables.calculations")
 
+        self.sensor_modules: Dict[str, SensorModule] = {}
+        self.controller_modules: Dict[str, ControllerModule] = {}
         self.sensor_configs: List[SensorConfig] = []
         self.controller_configs: Dict[str, ControllerConfig] = {}
         self.calculation_configs: Dict[str, CalculationConfig] = {}
@@ -317,6 +333,8 @@ class SimulationBuilder:
         self.plot_layout = PlotLayout()
         self.system: Optional[System] = None
         self._messages: List[str] = []
+        self._suppress_invalidations = False
+        self._suppressed_messages: List[str] = []
         self._history_cache = self._empty_history_structure()
         self._history_lengths = self._empty_length_structure()
         self._elapsed_time = 0.0
@@ -380,15 +398,30 @@ class SimulationBuilder:
         return options
 
     def available_sensor_types(self) -> List[Dict[str, Any]]:
-        return [self._describe_model(cls) for cls in self.sensor_types.values()]
+        items: List[Dict[str, Any]] = []
+        for cls in self.sensor_types.values():
+            if cls is Sensor:
+                continue
+            items.append(self._describe_model(cls))
+        for module in self.sensor_modules.values():
+            for cls in module.classes.values():
+                items.append(self._describe_model(cls))
+        return items
 
     def available_controller_types(self) -> List[Dict[str, Any]]:
-        items = []
+        items: List[Dict[str, Any]] = []
         for cls in self.controller_types.values():
             if cls is Controller:
                 continue
             info = self._describe_model(cls, exclude_fields={"sp_trajectory", "cascade_controller"})
             items.append(info)
+        for module in self.controller_modules.values():
+            for cls in module.classes.values():
+                info = self._describe_model(
+                    cls,
+                    exclude_fields={"sp_trajectory", "cascade_controller"},
+                )
+                items.append(info)
         return items
 
     def available_calculation_types(self) -> List[Dict[str, Any]]:
@@ -412,9 +445,7 @@ class SimulationBuilder:
     # CRUD for sensors
     # ------------------------------------------------------------------
     def add_sensor(self, sensor_type: str, params: Dict[str, Any]) -> SensorConfig:
-        cls = self.sensor_types.get(sensor_type)
-        if cls is None:
-            raise ValueError(f"Unknown sensor type '{sensor_type}'.")
+        cls = self._resolve_sensor_type(sensor_type)
         args = self._convert_arguments(cls, params)
         measurement_tag = args.get("measurement_tag")
         if measurement_tag is None:
@@ -461,9 +492,7 @@ class SimulationBuilder:
         *,
         parent_id: Optional[str] = None,
     ) -> ControllerConfig:
-        cls = self.controller_types.get(controller_type)
-        if cls is None:
-            raise ValueError(f"Unknown controller type '{controller_type}'.")
+        cls = self._resolve_controller_type(controller_type)
         args = self._convert_arguments(cls, params, exclude={"sp_trajectory", "cascade_controller"})
         traj_spec = TrajectorySpec(
             y0=float(trajectory["y0"]),
@@ -594,6 +623,42 @@ class SimulationBuilder:
         if calculation_id in self.calculation_configs:
             del self.calculation_configs[calculation_id]
             self.invalidate("Calculation removed; system will restart on next run.")
+
+    def register_sensor_module(self, file_path: str) -> SensorModule:
+        module_id = str(uuid.uuid4())
+        spec = importlib.util.spec_from_file_location(f"user_sensor_{module_id}", file_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("Unable to load sensor module.")
+        module = importlib.util.module_from_spec(spec)
+        loader = spec.loader
+        loader.exec_module(module)  # type: ignore[call-arg]
+        classes: Dict[str, Type[Sensor]] = {}
+        for _, cls in inspect.getmembers(module, inspect.isclass):
+            if issubclass(cls, Sensor) and cls is not Sensor:
+                classes[cls.__name__] = cls
+        self._replace_uploaded_sensor_classes(classes)
+        sensor_module = SensorModule(id=module_id, module=module, classes=classes)
+        if classes:
+            self.sensor_modules[module_id] = sensor_module
+        return sensor_module
+
+    def register_controller_module(self, file_path: str) -> ControllerModule:
+        module_id = str(uuid.uuid4())
+        spec = importlib.util.spec_from_file_location(f"user_controller_{module_id}", file_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("Unable to load controller module.")
+        module = importlib.util.module_from_spec(spec)
+        loader = spec.loader
+        loader.exec_module(module)  # type: ignore[call-arg]
+        classes: Dict[str, Type[Controller]] = {}
+        for _, cls in inspect.getmembers(module, inspect.isclass):
+            if issubclass(cls, Controller) and cls is not Controller:
+                classes[cls.__name__] = cls
+        self._replace_uploaded_controller_classes(classes)
+        controller_module = ControllerModule(id=module_id, module=module, classes=classes)
+        if classes:
+            self.controller_modules[module_id] = controller_module
+        return controller_module
 
     def register_calculation_module(self, file_path: str) -> CalculationModule:
         module_id = str(uuid.uuid4())
@@ -887,7 +952,10 @@ class SimulationBuilder:
 
     def invalidate(self, message: str) -> None:
         self.system = None
-        self._messages.append(message)
+        if self._suppress_invalidations:
+            self._suppressed_messages.append(message)
+        else:
+            self._messages.append(message)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -936,6 +1004,52 @@ class SimulationBuilder:
                 }
         return None
 
+    def _replace_uploaded_sensor_classes(self, classes: Mapping[str, Type[Sensor]]) -> None:
+        if not classes:
+            return
+        existing_map: Dict[str, str] = {}
+        for module_id, module in list(self.sensor_modules.items()):
+            for class_name in list(module.classes.keys()):
+                existing_map[class_name] = module_id
+
+        for class_name, cls in classes.items():
+            module_id = existing_map.get(class_name)
+            if module_id is None:
+                continue
+            module = self.sensor_modules.get(module_id)
+            if module is None:
+                continue
+            module.classes.pop(class_name, None)
+            if not module.classes:
+                self.sensor_modules.pop(module_id, None)
+            self._reload_existing_sensor_configs(class_name, cls)
+        if classes:
+            self.invalidate("Sensor modules updated; system will be rebuilt on next run.")
+
+    def _replace_uploaded_controller_classes(
+        self, classes: Mapping[str, Type[Controller]]
+    ) -> None:
+        if not classes:
+            return
+        existing_map: Dict[str, str] = {}
+        for module_id, module in list(self.controller_modules.items()):
+            for class_name in list(module.classes.keys()):
+                existing_map[class_name] = module_id
+
+        for class_name, cls in classes.items():
+            module_id = existing_map.get(class_name)
+            if module_id is None:
+                continue
+            module = self.controller_modules.get(module_id)
+            if module is None:
+                continue
+            module.classes.pop(class_name, None)
+            if not module.classes:
+                self.controller_modules.pop(module_id, None)
+            self._reload_existing_controller_configs(class_name, cls)
+        if classes:
+            self.invalidate("Controller modules updated; system will be rebuilt on next run.")
+
     def _replace_uploaded_calculation_classes(self, classes: Mapping[str, Type[Calculation]]) -> None:
         if not classes:
             return
@@ -958,6 +1072,183 @@ class SimulationBuilder:
         if classes:
             self.invalidate("Calculation modules updated; system will be rebuilt on next run.")
 
+    def _ordered_controller_configs(self) -> List[ControllerConfig]:
+        ordered: List[ControllerConfig] = []
+        visited: Set[str] = set()
+
+        def traverse(config: ControllerConfig) -> None:
+            if config.id in visited:
+                return
+            visited.add(config.id)
+            ordered.append(config)
+            if config.child_id and config.child_id in self.controller_configs:
+                traverse(self.controller_configs[config.child_id])
+
+        for config in self.controller_configs.values():
+            if config.parent_id is None:
+                traverse(config)
+        for config in self.controller_configs.values():
+            if config.id not in visited:
+                ordered.append(config)
+        return ordered
+
+    def export_configuration(self) -> Dict[str, Any]:
+        sensors = [
+            {
+                "id": cfg.id,
+                "type": cfg.name,
+                "params": _serialize_value(cfg.raw),
+            }
+            for cfg in self.sensor_configs
+        ]
+
+        controllers: List[Dict[str, Any]] = []
+        for cfg in self._ordered_controller_configs():
+            params = _serialize_value(cfg.raw)
+            params.pop("sp_trajectory", None)
+            controllers.append(
+                {
+                    "id": cfg.id,
+                    "type": cfg.name,
+                    "params": params,
+                    "trajectory": {
+                        "y0": cfg.trajectory.y0,
+                        "unit": cfg.trajectory.unit,
+                        "segments": [dict(segment) for segment in cfg.trajectory.segments],
+                    },
+                    "parent_id": cfg.parent_id,
+                    "child_id": cfg.child_id,
+                }
+            )
+
+        calculations = [
+            {
+                "id": cfg.id,
+                "type": cfg.name,
+                "params": {
+                    key: value
+                    for key, value in _serialize_value(cfg.raw).items()
+                    if key != "outputs"
+                },
+                "outputs": list(cfg.output_tags),
+            }
+            for cfg in self.calculation_configs.values()
+        ]
+
+        plot = {
+            "rows": self.plot_layout.rows,
+            "cols": self.plot_layout.cols,
+            "lines": [
+                {
+                    "panel": line.panel,
+                    "tag": line.tag,
+                    "label": line.label,
+                    "color": line.color,
+                    "style": line.style,
+                }
+                for line in self.plot_layout.lines
+            ],
+        }
+
+        return {
+            "sensors": sensors,
+            "controllers": controllers,
+            "calculations": calculations,
+            "plot": plot,
+            "time_axis": self.time_axis_limits(),
+        }
+
+    def load_configuration(self, payload: Mapping[str, Any]) -> None:
+        self.sensor_configs = []
+        self.controller_configs = {}
+        self.calculation_configs = {}
+        self.plot_layout = PlotLayout()
+        self.system = None
+        self._history_cache = self._empty_history_structure()
+        self._history_lengths = self._empty_length_structure()
+        self._elapsed_time = 0.0
+        self._time_offset = 0.0
+        self._history_bounds = {"min": None, "max": None}
+        self._time_axis_limits = (None, None)
+
+        sensors = payload.get("sensors", []) or []
+        controllers = payload.get("controllers", []) or []
+        calculations = payload.get("calculations", []) or []
+        plot = payload.get("plot") or None
+        time_axis = payload.get("time_axis") or None
+
+        self._suppress_invalidations = True
+        self._suppressed_messages.clear()
+        try:
+            for sensor in sensors:
+                sensor_type = sensor.get("type")
+                if not sensor_type:
+                    raise ValueError("Sensor configuration entries require a 'type'.")
+                params = sensor.get("params") or {}
+                self.add_sensor(sensor_type, params)
+
+            controller_id_map: Dict[str, str] = {}
+            remaining = list(controllers)
+            while remaining:
+                pending: List[Mapping[str, Any]] = []
+                progress = False
+                for controller in remaining:
+                    controller_type = controller.get("type")
+                    if not controller_type:
+                        raise ValueError("Controller configuration entries require a 'type'.")
+                    parent_old = controller.get("parent_id")
+                    if parent_old is not None and parent_old not in controller_id_map:
+                        pending.append(controller)
+                        continue
+                    params = controller.get("params") or {}
+                    trajectory = controller.get("trajectory") or {"y0": 0.0, "unit": "", "segments": []}
+                    parent_new = controller_id_map.get(parent_old) if parent_old is not None else None
+                    config = self.add_controller(
+                        controller_type,
+                        params,
+                        trajectory,
+                        parent_id=parent_new,
+                    )
+                    original_id = controller.get("id")
+                    if original_id:
+                        controller_id_map[str(original_id)] = config.id
+                    progress = True
+                if not progress and pending:
+                    raise ValueError("Unable to resolve controller parent relationships in configuration.")
+                remaining = pending
+
+            for calculation in calculations:
+                calculation_type = calculation.get("type")
+                if not calculation_type:
+                    raise ValueError("Calculation configuration entries require a 'type'.")
+                params = dict(calculation.get("params") or {})
+                params.pop("outputs", None)
+                self.add_calculation(calculation_type, params)
+
+            if plot:
+                rows = int(plot.get("rows", 1))
+                cols = int(plot.get("cols", 1))
+                lines = plot.get("lines", []) or []
+                self.set_plot_layout(rows, cols, lines)
+        finally:
+            self._suppress_invalidations = False
+            self._suppressed_messages.clear()
+
+        if time_axis:
+            lower = time_axis.get("min")
+            upper = time_axis.get("max")
+
+            def _normalize(value: Any) -> Optional[float]:
+                if value is None:
+                    return None
+                if isinstance(value, str) and value.strip() == "":
+                    return None
+                return float(value)
+
+            self._time_axis_limits = (_normalize(lower), _normalize(upper))
+
+        self._messages.append("Configuration loaded; system will be rebuilt on next run.")
+
     def _reload_existing_calculation_configs(self, class_name: str, cls: Type[Calculation]) -> None:
         for config in self.calculation_configs.values():
             if config.name != class_name:
@@ -976,6 +1267,47 @@ class SimulationBuilder:
             config.name = cls.__name__
             config.raw = raw
             config.output_units = output_units
+
+    def _reload_existing_sensor_configs(self, class_name: str, cls: Type[Sensor]) -> None:
+        for config in self.sensor_configs:
+            if config.name != class_name:
+                continue
+            try:
+                instance = cls(**config.args)
+            except Exception as exc:  # pragma: no cover - defensive
+                self._messages.append(
+                    f"Failed to reload sensor '{class_name}' with uploaded version: {exc}"
+                )
+                continue
+            config.cls = cls
+            config.name = cls.__name__
+            config.raw = self._serialize_model(instance)
+
+    def _reload_existing_controller_configs(
+        self, class_name: str, cls: Type[Controller]
+    ) -> None:
+        for config in self.controller_configs.values():
+            if config.name != class_name:
+                continue
+            try:
+                instance = cls(
+                    sp_trajectory=self._build_trajectory(config.trajectory),
+                    **config.args,
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                self._messages.append(
+                    f"Failed to reload controller '{class_name}' with uploaded version: {exc}"
+                )
+                continue
+            raw = self._serialize_model(instance)
+            raw["trajectory"] = {
+                "y0": config.trajectory.y0,
+                "unit": config.trajectory.unit,
+                "segments": [dict(segment) for segment in config.trajectory.segments],
+            }
+            config.cls = cls
+            config.name = cls.__name__
+            config.raw = raw
 
     def _field_type_label(self, annotation: Any) -> str:
         annotation = _strip_optional(annotation)
@@ -1079,6 +1411,24 @@ class SimulationBuilder:
             value = getattr(instance, field_name)
             data[field_name] = _serialize_value(value)
         return data
+
+    def _resolve_sensor_type(self, sensor_type: str) -> Type[Sensor]:
+        cls = self.sensor_types.get(sensor_type)
+        if cls is not None and cls is not Sensor:
+            return cls
+        for module in self.sensor_modules.values():
+            if sensor_type in module.classes:
+                return module.classes[sensor_type]
+        raise ValueError(f"Unknown sensor type '{sensor_type}'.")
+
+    def _resolve_controller_type(self, controller_type: str) -> Type[Controller]:
+        cls = self.controller_types.get(controller_type)
+        if cls is not None and cls is not Controller:
+            return cls
+        for module in self.controller_modules.values():
+            if controller_type in module.classes:
+                return module.classes[controller_type]
+        raise ValueError(f"Unknown controller type '{controller_type}'.")
 
     def _resolve_calculation_type(self, calculation_type: str) -> Type[Calculation]:
         if calculation_type in self.calculation_types:

@@ -1609,6 +1609,10 @@ async function refreshPlots() {
   renderPlotLayout();
 }
 
+async function refreshAll() {
+  await Promise.all([refreshSensors(), refreshControllers(), refreshCalculations(), refreshPlots()]);
+}
+
 async function updatePlotLayout(layout) {
   state.plots = await fetchJSON('/api/plots', {
     method: 'POST',
@@ -1705,6 +1709,50 @@ function initEventHandlers() {
 
   updateTimeAxisForm();
 
+  const sensorUpload = document.getElementById('sensor-upload');
+  if (sensorUpload) {
+    sensorUpload.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const formData = new FormData(event.target);
+      try {
+        const response = await fetch('/api/sensors/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || 'Upload failed');
+        }
+        await refreshMetadata();
+        clearError();
+      } catch (error) {
+        handleError(error);
+      }
+    });
+  }
+
+  const controllerUpload = document.getElementById('controller-upload');
+  if (controllerUpload) {
+    controllerUpload.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const formData = new FormData(event.target);
+      try {
+        const response = await fetch('/api/controllers/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || 'Upload failed');
+        }
+        await refreshMetadata();
+        clearError();
+      } catch (error) {
+        handleError(error);
+      }
+    });
+  }
+
   document.getElementById('calculation-upload').addEventListener('submit', async (event) => {
     event.preventDefault();
     const formData = new FormData(event.target);
@@ -1723,11 +1771,60 @@ function initEventHandlers() {
       handleError(error);
     }
   });
+
+  const exportButton = document.getElementById('export-config');
+  if (exportButton) {
+    exportButton.addEventListener('click', async () => {
+      try {
+        const config = await fetchJSON('/api/config');
+        const blob = new Blob([JSON.stringify(config, null, 2)], {
+          type: 'application/json',
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        link.href = url;
+        link.download = `simulation-config-${timestamp}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        clearError();
+      } catch (error) {
+        handleError(error);
+      }
+    });
+  }
+
+  const importInput = document.getElementById('import-config');
+  if (importInput) {
+    importInput.addEventListener('change', async (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) {
+        return;
+      }
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        await fetchJSON('/api/config', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+        await refreshMetadata();
+        await refreshAll();
+        clearError();
+      } catch (error) {
+        handleError(error);
+      } finally {
+        event.target.value = '';
+      }
+    });
+  }
 }
 
 async function initialize() {
   await refreshMetadata();
-  await Promise.all([refreshSensors(), refreshControllers(), refreshCalculations(), refreshPlots()]);
+  await refreshAll();
 }
 
 initEventHandlers();

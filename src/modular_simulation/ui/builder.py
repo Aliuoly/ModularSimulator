@@ -22,7 +22,7 @@ from astropy.units import Quantity, Unit, UnitBase  # type: ignore
 from pydantic_core import PydanticUndefined
 from modular_simulation.framework.system import System
 from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
-from modular_simulation.usables.calculations.calculation import Calculation
+from modular_simulation.usables.calculations.calculation import Calculation, TagMetadata
 from modular_simulation.usables.controllers.controller import Controller, ControllerMode
 from modular_simulation.usables.controllers.trajectory import Trajectory
 from modular_simulation.usables.sensors.sensor import Sensor
@@ -588,8 +588,10 @@ class SimulationBuilder:
         for _, cls in inspect.getmembers(module, inspect.isclass):
             if issubclass(cls, Calculation) and cls is not Calculation:
                 classes[cls.__name__] = cls
+        self._replace_uploaded_calculation_classes(classes)
         calc_module = CalculationModule(id=module_id, module=module, classes=classes)
-        self.calculation_modules[module_id] = calc_module
+        if classes:
+            self.calculation_modules[module_id] = calc_module
         return calc_module
 
     # ------------------------------------------------------------------
@@ -766,6 +768,7 @@ class SimulationBuilder:
             default_value = None
             if not field.is_required() and field.default is not PydanticUndefined:
                 default_value = _serialize_value(field.default) if field.default is not None else None
+            tag_metadata = self._field_tag_metadata(field)
             fields.append(
                 {
                     "name": name,
@@ -773,6 +776,7 @@ class SimulationBuilder:
                     "required": field.is_required(),
                     "default": default_value,
                     "description": field.description,
+                    "tag_metadata": tag_metadata,
                 }
             )
         return {
@@ -781,6 +785,58 @@ class SimulationBuilder:
             "fields": fields,
             "doc": inspect.getdoc(cls) or "",
         }
+
+    def _field_tag_metadata(self, field: Any) -> Optional[Dict[str, Any]]:
+        for metadata in getattr(field, "metadata", []) or []:
+            if isinstance(metadata, TagMetadata):
+                unit = str(metadata.unit) if metadata.unit is not None else ""
+                return {
+                    "type": metadata.type.name.lower(),
+                    "unit": unit,
+                    "description": metadata.description,
+                }
+        return None
+
+    def _replace_uploaded_calculation_classes(self, classes: Mapping[str, Type[Calculation]]) -> None:
+        if not classes:
+            return
+        existing_map: Dict[str, str] = {}
+        for module_id, module in list(self.calculation_modules.items()):
+            for class_name in list(module.classes.keys()):
+                existing_map[class_name] = module_id
+
+        for class_name, cls in classes.items():
+            module_id = existing_map.get(class_name)
+            if module_id is None:
+                continue
+            module = self.calculation_modules.get(module_id)
+            if module is None:
+                continue
+            module.classes.pop(class_name, None)
+            if not module.classes:
+                self.calculation_modules.pop(module_id, None)
+            self._reload_existing_calculation_configs(class_name, cls)
+        if classes:
+            self.invalidate("Calculation modules updated; system will be rebuilt on next run.")
+
+    def _reload_existing_calculation_configs(self, class_name: str, cls: Type[Calculation]) -> None:
+        for config in self.calculation_configs.values():
+            if config.name != class_name:
+                continue
+            try:
+                instance = cls(**config.args)
+            except Exception as exc:  # pragma: no cover - defensive
+                self._messages.append(
+                    f"Failed to reload calculation '{class_name}' with uploaded version: {exc}"
+                )
+                continue
+            raw = self._serialize_model(instance)
+            raw["outputs"] = list(instance._output_tag_info_dict.keys())
+            output_units = {tag: info.unit for tag, info in instance._output_tag_info_dict.items()}
+            config.cls = cls
+            config.name = cls.__name__
+            config.raw = raw
+            config.output_units = output_units
 
     def _field_type_label(self, annotation: Any) -> str:
         annotation = _strip_optional(annotation)

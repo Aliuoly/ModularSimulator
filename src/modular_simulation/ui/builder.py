@@ -11,7 +11,20 @@ import pkgutil
 import types
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Type, Union, get_args, get_origin
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    Union,
+    get_args,
+    get_origin,
+)
 
 import matplotlib
 
@@ -69,6 +82,7 @@ class ControllerConfig:
     trajectory: TrajectorySpec
     parent_id: Optional[str] = None
     child_id: Optional[str] = None
+    frozen_trajectory: Optional[TrajectorySpec] = None
 
     @property
     def cv_tag(self) -> str:
@@ -553,6 +567,8 @@ class SimulationBuilder:
 
         segments = [dict(segment) for segment in segments_payload]
         traj_spec = TrajectorySpec(y0=y0, unit=unit, segments=segments)
+        config.frozen_trajectory = None
+        config.raw.pop("trajectory_snapshot", None)
         instance = config.cls(sp_trajectory=self._build_trajectory(traj_spec), **config.args)
         raw = self._serialize_model(instance)
         raw["trajectory"] = {
@@ -563,7 +579,10 @@ class SimulationBuilder:
 
         config.trajectory = traj_spec
         config.raw = raw
-        self.invalidate("Controller trajectory updated; system will be rebuilt on next run.")
+        self.invalidate(
+            "Controller trajectory updated; system will be rebuilt on next run.",
+            skip_controller_ids=[controller_id],
+        )
         return config
 
     # ------------------------------------------------------------------
@@ -885,9 +904,71 @@ class SimulationBuilder:
             return outputs["setpoints"][tag]
         return None
 
-    def invalidate(self, message: str) -> None:
+    def invalidate(
+        self,
+        message: str,
+        *,
+        snapshot: bool = True,
+        skip_controller_ids: Optional[Iterable[str]] = None,
+    ) -> None:
+        if snapshot and self.system is not None:
+            self._snapshot_controller_trajectories(
+                self.system,
+                skip_ids=set(skip_controller_ids or ()),
+            )
         self.system = None
         self._messages.append(message)
+
+    def _snapshot_controller_trajectories(
+        self,
+        system: System,
+        *,
+        skip_ids: Optional[Set[str]] = None,
+    ) -> None:
+        """Persist the active controller trajectories before discarding the system.
+
+        When configuration changes invalidate the running system we reset the
+        simulator, but the UI keeps appending new history samples using the
+        accumulated elapsed time.  Without capturing the current setpoint the
+        next run would replay the original trajectory from ``t=0`` and appear
+        duplicated in the appended history window.  To keep continuity we
+        snapshot each controller's current setpoint as a degenerate trajectory
+        that simply holds the latest value from the moment the system was
+        invalidated.
+
+        Parameters
+        ----------
+        system:
+            Active :class:`~modular_simulation.framework.system.System` instance
+            whose controllers provide the authoritative trajectory state.
+        """
+
+        try:
+            controller_lookup = system.controller_dictionary
+        except Exception:
+            return
+
+        skip = skip_ids or set()
+        current_time = system.time
+        for config in self.controller_configs.values():
+            if config.id in skip:
+                continue
+            controller = controller_lookup.get(config.cv_tag)
+            if controller is None:
+                continue
+
+            trajectory = controller.sp_trajectory
+            current_value = float(trajectory.current_value(current_time))
+            unit_text = str(trajectory.unit)
+
+            frozen_spec = TrajectorySpec(y0=current_value, unit=unit_text, segments=[])
+            config.frozen_trajectory = frozen_spec
+            config.raw.setdefault("trajectory_snapshot", {})
+            config.raw["trajectory_snapshot"] = {
+                "y0": frozen_spec.y0,
+                "unit": frozen_spec.unit,
+                "segments": [],
+            }
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -1124,7 +1205,8 @@ class SimulationBuilder:
         return self.system
 
     def _instantiate_controller_chain(self, config: ControllerConfig) -> Controller:
-        controller = config.cls(sp_trajectory=self._build_trajectory(config.trajectory), **config.args)
+        spec = config.frozen_trajectory or config.trajectory
+        controller = config.cls(sp_trajectory=self._build_trajectory(spec), **config.args)
         if config.child_id is not None:
             child_cfg = self.controller_configs.get(config.child_id)
             if child_cfg is not None:

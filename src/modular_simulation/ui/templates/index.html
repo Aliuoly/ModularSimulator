@@ -17,6 +17,16 @@
       <section id="messages" class="panel hidden"></section>
 
       <section class="panel">
+        <h2>Configuration</h2>
+        <div class="inline-form">
+          <button id="export-config" type="button">Download Configuration</button>
+          <label>Load configuration
+            <input id="import-config" type="file" accept=".json,application/json" />
+          </label>
+        </div>
+      </section>
+
+      <section class="panel">
         <h2>Measurable Quantities</h2>
         <p>The system exposes the following measurable tags from states, algebraic variables, control elements, and constants.</p>
         <table id="measurables-table">
@@ -36,6 +46,12 @@
           <h2>Sensors</h2>
           <button id="add-sensor" type="button">Add Sensor</button>
         </div>
+        <form id="sensor-upload" class="inline-form">
+          <label>Upload custom sensors (.py)
+            <input type="file" name="file" accept=".py" />
+          </label>
+          <button type="submit">Upload</button>
+        </form>
         <div id="sensor-form" class="dialog hidden"></div>
         <ul id="sensor-list" class="item-list"></ul>
       </section>
@@ -45,6 +61,12 @@
           <h2>Controllers</h2>
           <button id="add-controller" type="button">Add Controller</button>
         </div>
+        <form id="controller-upload" class="inline-form">
+          <label>Upload custom controllers (.py)
+            <input type="file" name="file" accept=".py" />
+          </label>
+          <button type="submit">Upload</button>
+        </form>
         <div id="controller-form" class="dialog hidden"></div>
         <ul id="controller-list" class="item-list"></ul>
       </section>

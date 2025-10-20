@@ -6,6 +6,8 @@ from astropy.units import Unit
 from typing import Annotated
 
 from modular_simulation.measurables.base_classes import AlgebraicStates, Constants, ControlElements, States
+from textwrap import dedent
+
 from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
 from modular_simulation.ui import SimulationBuilder
 from modular_simulation.usables.sensors.sampled_delayed_sensor import SampledDelayedSensor

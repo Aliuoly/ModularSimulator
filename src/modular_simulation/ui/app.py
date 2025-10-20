@@ -106,6 +106,22 @@ def create_app(builder: SimulationBuilder) -> Flask:
         builder.remove_sensor(sensor_id)
         return ("", 204)
 
+    @app.post("/api/sensors/upload")
+    def upload_sensor():
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        file = request.files["file"]
+        if not file.filename.endswith(".py"):
+            return jsonify({"error": "Upload a .py file"}), 400
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".py") as tmp:
+            file.save(tmp.name)
+            module = builder.register_sensor_module(tmp.name)
+        payload = {
+            "module_id": module.id,
+            "classes": [cls.__name__ for cls in module.classes.values()],
+        }
+        return jsonify(payload), 201
+
     @app.get("/api/controllers")
     def list_controllers():
         return jsonify([_controller_to_payload(cfg) for cfg in builder.controller_configs.values()])
@@ -153,6 +169,22 @@ def create_app(builder: SimulationBuilder) -> Flask:
         builder.remove_controller(controller_id)
         return ("", 204)
 
+    @app.post("/api/controllers/upload")
+    def upload_controller():
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        file = request.files["file"]
+        if not file.filename.endswith(".py"):
+            return jsonify({"error": "Upload a .py file"}), 400
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".py") as tmp:
+            file.save(tmp.name)
+            module = builder.register_controller_module(tmp.name)
+        payload = {
+            "module_id": module.id,
+            "classes": [cls.__name__ for cls in module.classes.values()],
+        }
+        return jsonify(payload), 201
+
     @app.get("/api/calculations")
     def list_calculations():
         return jsonify([_calculation_to_payload(cfg) for cfg in builder.calculation_configs.values()])
@@ -187,6 +219,20 @@ def create_app(builder: SimulationBuilder) -> Flask:
             "classes": [cls.__name__ for cls in module.classes.values()],
         }
         return jsonify(payload), 201
+
+    @app.get("/api/config")
+    def export_configuration():
+        return jsonify(builder.export_configuration())
+
+    @app.post("/api/config")
+    def import_configuration():
+        data = request.get_json(force=True)
+
+        def apply():
+            builder.load_configuration(data)
+            return jsonify(builder.export_configuration())
+
+        return _handle_config_errors(apply)
 
     @app.get("/api/plots")
     def get_plots():

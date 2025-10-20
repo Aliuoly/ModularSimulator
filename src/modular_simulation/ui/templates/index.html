@@ -82,11 +82,18 @@
           <label>Duration value <input type="number" step="any" name="duration_value" /></label>
           <label>Duration unit <input type="text" name="duration_unit" placeholder="s" /></label>
           <button type="submit">Run</button>
+          <button id="reset-simulation" type="button">Reset</button>
         </form>
         <div id="run-status"></div>
         <div id="plot-output" class="plot-output hidden">
           <h3>Simulation Plot</h3>
           <img id="plot-image" alt="Simulation output" />
+          <form id="time-axis-form" class="inline-form time-axis-controls">
+            <label>Time min <input type="number" step="any" name="time_min" /></label>
+            <label>Time max <input type="number" step="any" name="time_max" /></label>
+            <button type="submit">Update Axis</button>
+          </form>
+          <p class="time-axis-hint" data-role="time-range"></p>
         </div>
       </section>
     </main>

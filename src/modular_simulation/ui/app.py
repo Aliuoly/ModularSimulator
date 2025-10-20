@@ -243,6 +243,7 @@ def create_app(builder: SimulationBuilder) -> Flask:
         duration: Optional[Quantity] = None
         if data and data.get("duration"):
             duration = _parse_quantity(data["duration"])
+
         def execute():
             result = builder.run(duration)
             return jsonify(
@@ -251,10 +252,48 @@ def create_app(builder: SimulationBuilder) -> Flask:
                     "outputs": result["outputs"],
                     "figure": result["figure"],
                     "messages": result.get("messages", []),
+                    "time_range": result.get("time_range"),
+                    "time_axis": result.get("time_axis"),
                 }
             )
 
         return _handle_config_errors(execute)
+
+    @app.post("/api/run/reset")
+    def reset_simulation_state():
+        builder.reset_runtime()
+        return jsonify(
+            {
+                "time": builder.elapsed_time,
+                "outputs": builder.get_history_outputs(),
+                "figure": None,
+                "messages": builder.messages(),
+                "time_range": builder.history_range(),
+                "time_axis": builder.time_axis_limits(),
+            }
+        )
+
+    @app.post("/api/run/time-axis")
+    def update_time_axis():
+        data = request.get_json(force=True) if request.data else {}
+
+        def _parse(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            if isinstance(value, str) and value.strip() == "":
+                return None
+            return float(value)
+
+        try:
+            lower = _parse(data.get("time_min"))
+            upper = _parse(data.get("time_max"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Time axis limits must be numeric."}), 400
+
+        result = builder.update_time_axis(lower, upper)
+        result["messages"] = builder.messages()
+        result["time"] = builder.elapsed_time
+        return jsonify(result)
 
     return app
 

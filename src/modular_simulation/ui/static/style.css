@@ -270,6 +270,21 @@ button:disabled {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
 }
 
+.time-axis-controls {
+  margin-top: 1rem;
+  justify-content: center;
+}
+
+.time-axis-controls input {
+  max-width: 8rem;
+}
+
+.time-axis-hint {
+  margin-top: 0.5rem;
+  color: #616161;
+  font-size: 0.9rem;
+}
+
 #messages {
   border-left: 4px solid #d84315;
   background-color: #fff3e0;

@@ -4,6 +4,8 @@ const state = {
   controllers: [],
   calculations: [],
   plots: null,
+  timeAxis: { min: null, max: null },
+  timeRange: { min: null, max: null },
 };
 
 async function fetchJSON(url, options = {}) {
@@ -665,13 +667,84 @@ function openPlotLineDialog({ index = null, defaults = {} } = {}) {
   container.appendChild(form);
 }
 
+function formatTime(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value.toFixed(3);
+  }
+  return '—';
+}
+
+function applyTimeAxisState(result) {
+  if (result && result.time_range) {
+    const { min, max } = result.time_range;
+    state.timeRange = {
+      min: typeof min === 'number' && Number.isFinite(min) ? min : null,
+      max: typeof max === 'number' && Number.isFinite(max) ? max : null,
+    };
+  }
+  if (result && result.time_axis) {
+    const { min, max } = result.time_axis;
+    state.timeAxis = {
+      min: typeof min === 'number' && Number.isFinite(min) ? min : null,
+      max: typeof max === 'number' && Number.isFinite(max) ? max : null,
+    };
+  }
+  updateTimeAxisForm();
+}
+
+function updateTimeAxisForm() {
+  const form = document.getElementById('time-axis-form');
+  if (!form) return;
+  const minInput = form.time_min;
+  const maxInput = form.time_max;
+  const submit = form.querySelector('button[type="submit"]');
+  const hint = document.querySelector('[data-role="time-range"]');
+  const hasRange = typeof state.timeRange.min === 'number' && typeof state.timeRange.max === 'number';
+
+  if (minInput) {
+    minInput.value = state.timeAxis.min ?? '';
+    minInput.disabled = !hasRange;
+  }
+  if (maxInput) {
+    maxInput.value = state.timeAxis.max ?? '';
+    maxInput.disabled = !hasRange;
+  }
+  if (submit) {
+    submit.disabled = !hasRange;
+  }
+  if (hint) {
+    if (hasRange) {
+      hint.textContent = `Available time range: ${state.timeRange.min.toFixed(3)} – ${state.timeRange.max.toFixed(3)}.`;
+    } else {
+      hint.textContent = 'Run the simulation to view and adjust the time axis.';
+    }
+  }
+}
+
+function renderTimeAxisResult(result) {
+  if (!result) return;
+  applyTimeAxisState(result);
+  if (Array.isArray(result.messages)) {
+    renderMessages(result.messages);
+  }
+  const plotOutput = document.getElementById('plot-output');
+  if (!plotOutput) return;
+  if (result.figure) {
+    const img = document.getElementById('plot-image');
+    img.src = result.figure;
+    plotOutput.classList.remove('hidden');
+  } else if (!plotOutput.classList.contains('hidden')) {
+    plotOutput.classList.add('hidden');
+  }
+}
+
 function renderRunResult(result) {
   const status = document.getElementById('run-status');
   if (!result) {
     status.textContent = '';
     return;
   }
-  status.textContent = `Simulation completed. Current time: ${result.time.toFixed(3)}.`;
+  status.textContent = `Simulation completed. Current time: ${formatTime(result.time)}.`;
   const plotOutput = document.getElementById('plot-output');
   if (result.figure) {
     const img = document.getElementById('plot-image');
@@ -680,6 +753,7 @@ function renderRunResult(result) {
   } else {
     plotOutput.classList.add('hidden');
   }
+  applyTimeAxisState(result);
 }
 
 function choiceOptions(typeLabel, fieldName) {
@@ -1512,6 +1586,51 @@ function initEventHandlers() {
       handleError(error);
     }
   });
+
+  document.getElementById('reset-simulation').addEventListener('click', async () => {
+    try {
+      const result = await fetchJSON('/api/run/reset', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      renderRunResult(result);
+      renderMessages(result.messages || []);
+      await refreshMetadata();
+      clearError();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+  document.getElementById('time-axis-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.target;
+    const minValue = form.time_min.value.trim();
+    const maxValue = form.time_max.value.trim();
+    const payload = {};
+    if (minValue !== '') {
+      payload.time_min = Number(minValue);
+    }
+    if (maxValue !== '') {
+      payload.time_max = Number(maxValue);
+    }
+    try {
+      const result = await fetchJSON('/api/run/time-axis', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      renderTimeAxisResult(result);
+      if (typeof result.time === 'number') {
+        const status = document.getElementById('run-status');
+        status.textContent = `Simulation completed. Current time: ${formatTime(result.time)}.`;
+      }
+      clearError();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+  updateTimeAxisForm();
 
   document.getElementById('calculation-upload').addEventListener('submit', async (event) => {
     event.preventDefault();

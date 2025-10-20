@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import importlib
 import importlib.util
 import inspect
@@ -316,10 +317,28 @@ class SimulationBuilder:
         self.plot_layout = PlotLayout()
         self.system: Optional[System] = None
         self._messages: List[str] = []
+        self._history_cache = self._empty_history_structure()
+        self._history_lengths = self._empty_length_structure()
+        self._elapsed_time = 0.0
+        self._time_offset = 0.0
+        self._history_bounds: Dict[str, Optional[float]] = {"min": None, "max": None}
+        self._time_axis_limits: Tuple[Optional[float], Optional[float]] = (None, None)
 
     # ------------------------------------------------------------------
     # Metadata helpers
     # ------------------------------------------------------------------
+    @staticmethod
+    def _empty_history_structure() -> Dict[str, Dict[str, Dict[str, List[float]]]]:
+        return {"sensors": {}, "calculations": {}, "setpoints": {}}
+
+    @staticmethod
+    def _empty_length_structure() -> Dict[str, Dict[str, int]]:
+        return {"sensors": {}, "calculations": {}, "setpoints": {}}
+
+    @property
+    def elapsed_time(self) -> float:
+        return self._elapsed_time
+
     def measurable_metadata(self) -> List[Dict[str, str]]:
         items: List[Dict[str, str]] = []
         for category in ("states", "algebraic_states", "control_elements", "constants"):
@@ -621,7 +640,11 @@ class SimulationBuilder:
     # Execution
     # ------------------------------------------------------------------
     def run(self, duration: Optional[Quantity] = None) -> Dict[str, Any]:
+        system_was_none = self.system is None
         system = self._ensure_system()
+        if system_was_none:
+            self._history_lengths = self._empty_length_structure()
+            self._time_offset = self._elapsed_time
         if duration is None:
             system.step()
         else:
@@ -629,6 +652,21 @@ class SimulationBuilder:
         return self._collect_results(system)
 
     def _collect_results(self, system: System) -> Dict[str, Any]:
+        outputs = self._collect_outputs(system)
+        self._update_history_cache(outputs, self._time_offset)
+        history = self.get_history_outputs()
+        figure = self._render_plot(history, self._time_axis_limits)
+        self._elapsed_time = max(self._elapsed_time, self._time_offset + system.time)
+        return {
+            "time": self._elapsed_time,
+            "outputs": history,
+            "figure": figure,
+            "messages": self.messages(),
+            "time_range": self.history_range(),
+            "time_axis": self.time_axis_limits(),
+        }
+
+    def _collect_outputs(self, system: System) -> Dict[str, Any]:
         measured = system.measured_history
         setpoints = system.setpoint_history
         outputs: Dict[str, Any] = {
@@ -642,17 +680,15 @@ class SimulationBuilder:
             outputs["calculations"][tag] = _serialize_tag_history(series)
         for tag, series in setpoints.items():
             outputs["setpoints"][tag] = _serialize_tag_history(series)
-        figure = self._render_plot(system, outputs)
-        return {
-            "time": system.time,
-            "outputs": outputs,
-            "figure": figure,
-            "messages": self.messages(),
-        }
+        return outputs
 
-    def _render_plot(self, system: System, outputs: Dict[str, Any]) -> Optional[str]:
+    def _render_plot(
+        self,
+        outputs: Dict[str, Any],
+        time_axis: Tuple[Optional[float], Optional[float]] | None = None,
+    ) -> Optional[str]:
         if not self.plot_layout.lines:
-            return self._render_default_plot(outputs)
+            return self._render_default_plot(outputs, time_axis)
         rows = max(self.plot_layout.rows, 1)
         cols = max(self.plot_layout.cols, 1)
         fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4 * rows), squeeze=False)
@@ -690,11 +726,109 @@ class SimulationBuilder:
             handles, labels = ax.get_legend_handles_labels()
             if handles:
                 ax.legend(loc="best")
+            if time_axis:
+                lower, upper = time_axis
+                if lower is not None or upper is not None:
+                    ax.set_xlim(left=lower, right=upper)
 
         plt.tight_layout()
         return self._finalize_figure(fig)
 
-    def _render_default_plot(self, outputs: Dict[str, Any]) -> Optional[str]:
+    def _update_history_cache(self, outputs: Dict[str, Any], offset: float) -> None:
+        for category in ("sensors", "calculations", "setpoints"):
+            category_outputs = outputs.get(category, {})
+            length_tracker = self._history_lengths[category]
+            cache = self._history_cache[category]
+            for tag, series in category_outputs.items():
+                times = list(series.get("time", []))
+                values = list(series.get("value", []))
+                ok_like = series.get("ok")
+                ok_flags = list(ok_like) if ok_like is not None else []
+
+                total_len = len(times)
+                previous_len = length_tracker.get(tag, 0)
+                if total_len < previous_len:
+                    previous_len = 0
+
+                new_times = times[previous_len:]
+                new_values = values[previous_len:]
+                new_ok = ok_flags[previous_len:] if ok_flags else []
+
+                if not new_times:
+                    length_tracker[tag] = total_len
+                    continue
+
+                adjusted_times = [float(t) + offset for t in new_times]
+                entry = cache.setdefault(tag, {"time": [], "value": [], "ok": []})
+                if entry["time"] and adjusted_times and entry["time"][-1] == adjusted_times[0]:
+                    adjusted_times.pop(0)
+                    if new_values:
+                        new_values.pop(0)
+                    if new_ok:
+                        new_ok.pop(0)
+                if not adjusted_times:
+                    length_tracker[tag] = total_len
+                    continue
+                entry["time"].extend(adjusted_times)
+                entry["value"].extend(new_values)
+                if new_ok:
+                    entry["ok"].extend(new_ok)
+                else:
+                    entry["ok"].extend([True] * len(new_values))
+
+                length_tracker[tag] = total_len
+
+                min_time = adjusted_times[0]
+                max_time = adjusted_times[-1]
+                current_min = self._history_bounds["min"]
+                current_max = self._history_bounds["max"]
+                if current_min is None or min_time < current_min:
+                    self._history_bounds["min"] = min_time
+                if current_max is None or max_time > current_max:
+                    self._history_bounds["max"] = max_time
+
+    def get_history_outputs(self) -> Dict[str, Any]:
+        return copy.deepcopy(self._history_cache)
+
+    def history_range(self) -> Dict[str, Optional[float]]:
+        return {"min": self._history_bounds["min"], "max": self._history_bounds["max"]}
+
+    def time_axis_limits(self) -> Dict[str, Optional[float]]:
+        lower, upper = self._time_axis_limits
+        return {"min": lower, "max": upper}
+
+    def update_time_axis(
+        self,
+        lower: Optional[float],
+        upper: Optional[float],
+    ) -> Dict[str, Any]:
+        limits = (
+            float(lower) if lower is not None else None,
+            float(upper) if upper is not None else None,
+        )
+        self._time_axis_limits = limits
+        figure = self._render_plot(self.get_history_outputs(), limits)
+        return {
+            "figure": figure,
+            "time_axis": self.time_axis_limits(),
+            "time_range": self.history_range(),
+        }
+
+    def reset_runtime(self) -> None:
+        self.system = None
+        self._history_cache = self._empty_history_structure()
+        self._history_lengths = self._empty_length_structure()
+        self._elapsed_time = 0.0
+        self._time_offset = 0.0
+        self._history_bounds = {"min": None, "max": None}
+        self._time_axis_limits = (None, None)
+        self._messages.append("Simulation reset to initial conditions.")
+
+    def _render_default_plot(
+        self,
+        outputs: Dict[str, Any],
+        time_axis: Tuple[Optional[float], Optional[float]] | None = None,
+    ) -> Optional[str]:
         sensor_series = list(outputs["sensors"].items())
         calculation_series = list(outputs["calculations"].items())
         setpoint_series = list(outputs["setpoints"].items())
@@ -724,6 +858,11 @@ class SimulationBuilder:
             ax.legend(loc="best")
 
         axes_flat[max_panels - 1].set_xlabel("Time")
+        if time_axis:
+            lower, upper = time_axis
+            for ax in axes_flat:
+                if lower is not None or upper is not None:
+                    ax.set_xlim(left=lower, right=upper)
         plt.tight_layout()
         return self._finalize_figure(fig)
 

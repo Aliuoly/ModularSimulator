@@ -168,6 +168,35 @@ button:disabled {
   color: #1d3557;
 }
 
+.tag-role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.tag-role-badge--input {
+  background-color: #e8f5e9;
+  color: #1b5e20;
+  border-color: rgba(27, 94, 32, 0.2);
+}
+
+.tag-role-badge--output {
+  background-color: #e3f2fd;
+  color: #0d47a1;
+  border-color: rgba(13, 71, 161, 0.2);
+}
+
+.tag-role-badge--constant {
+  background-color: #fff3e0;
+  color: #e65100;
+  border-color: rgba(230, 81, 0, 0.2);
+}
+
 .info-icon {
   display: inline-flex;
   align-items: center;

@@ -703,6 +703,19 @@ function choiceOptions(typeLabel, fieldName) {
   return null;
 }
 
+function getAvailableInputTags() {
+  const measured = Array.isArray(state.metadata?.measurables)
+    ? state.metadata.measurables.map((m) => m.tag)
+    : [];
+  const calculationOutputs = Array.isArray(state.calculations)
+    ? state.calculations.flatMap((calc) => calc.outputs || [])
+    : [];
+  const combined = [...measured, ...calculationOutputs].filter(
+    (tag) => typeof tag === 'string' && tag.trim() !== ''
+  );
+  return Array.from(new Set(combined));
+}
+
 function buildFieldInput(field, defaults = {}) {
   const wrapper = document.createElement('label');
   wrapper.dataset.field = field.name;
@@ -715,6 +728,21 @@ function buildFieldInput(field, defaults = {}) {
   title.className = 'field-title';
   title.textContent = field.name;
   header.appendChild(title);
+  const tagMeta = field.tag_metadata || null;
+  if (tagMeta) {
+    const badge = document.createElement('span');
+    badge.className = `tag-role-badge tag-role-badge--${tagMeta.type}`;
+    if (tagMeta.type === 'input') {
+      badge.textContent = 'Input tag';
+    } else if (tagMeta.type === 'output') {
+      badge.textContent = 'Output tag';
+    } else if (tagMeta.type === 'constant') {
+      badge.textContent = 'Constant';
+    } else {
+      badge.textContent = tagMeta.type;
+    }
+    header.appendChild(badge);
+  }
   if (field.description) {
     const info = document.createElement('span');
     info.className = 'info-icon';
@@ -737,6 +765,30 @@ function buildFieldInput(field, defaults = {}) {
     group.appendChild(input);
     return group;
   };
+
+  if (tagMeta && tagMeta.type === 'input') {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = defaultValue ?? '';
+    const listId = `tag-options-${field.name}-${Math.random().toString(36).slice(2)}`;
+    input.setAttribute('list', listId);
+    const datalist = document.createElement('datalist');
+    datalist.id = listId;
+    getAvailableInputTags().forEach((tag) => {
+      const option = document.createElement('option');
+      option.value = tag;
+      datalist.appendChild(option);
+    });
+    const group = buildGroup('Tag', input);
+    wrapper.appendChild(group);
+    wrapper.appendChild(datalist);
+    if (tagMeta.unit) {
+      const hint = createUnitHint();
+      updateUnitHintElement(hint, tagMeta.unit);
+      wrapper.appendChild(hint);
+    }
+    return wrapper;
+  }
 
   if (field.type === 'quantity') {
     const row = document.createElement('div');
@@ -862,6 +914,11 @@ function buildFieldInput(field, defaults = {}) {
   }
   input.value = defaultValue ?? '';
   wrapper.appendChild(input);
+  if (tagMeta && tagMeta.unit) {
+    const hint = createUnitHint();
+    updateUnitHintElement(hint, tagMeta.unit);
+    wrapper.appendChild(hint);
+  }
   return wrapper;
 }
 

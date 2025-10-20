@@ -175,14 +175,39 @@ function getMeasurableInfo(tag) {
   return state.metadata.measurables.find((item) => item.tag === tag) || null;
 }
 
-function getControlElementInfo(tag) {
-  if (!state.metadata || !state.metadata.control_element_units) return null;
-  return state.metadata.control_element_units[tag] || null;
-}
-
 function getUsableTagInfo(tag) {
   if (!state.metadata || !state.metadata.usable_tag_units) return null;
   return state.metadata.usable_tag_units[tag] || null;
+}
+
+function getMeasuredOrCalculatedTags() {
+  const tags = new Set();
+  const usable = state.metadata?.usable_tags;
+  if (Array.isArray(usable)) {
+    usable.forEach((tag) => {
+      if (typeof tag === 'string') {
+        const normalized = tag.trim();
+        if (normalized) {
+          tags.add(normalized);
+        }
+      }
+    });
+  }
+  if (Array.isArray(state.calculations)) {
+    state.calculations.forEach((calc) => {
+      if (Array.isArray(calc.outputs)) {
+        calc.outputs.forEach((tag) => {
+          if (typeof tag === 'string') {
+            const normalized = tag.trim();
+            if (normalized) {
+              tags.add(normalized);
+            }
+          }
+        });
+      }
+    });
+  }
+  return Array.from(tags);
 }
 
 function readQuantityRangeUnits(value) {
@@ -256,7 +281,7 @@ function setupMvRangeUnits(container, defaults = {}) {
     } else if (typeof defaults.mv_tag === 'string') {
       tag = defaults.mv_tag;
     }
-    const info = getControlElementInfo(tag);
+    const info = getUsableTagInfo(tag);
     const metadata = normalizeUnitMetadata(info);
     const lowerForce = preferredLower === null;
     const upperForce = preferredUpper === null;
@@ -762,14 +787,14 @@ function choiceOptions(typeLabel, fieldName) {
     return state.metadata.measurables.map((m) => m.tag);
   }
   if (fieldName === 'mv_tag') {
-    return state.metadata.control_elements || [];
+    return getMeasuredOrCalculatedTags();
   }
   if (fieldName === 'cv_tag') {
-    const usable = new Set([...(state.metadata.usable_tags || [])]);
-    if (usable.size === 0) {
-      state.metadata.measurables.forEach((m) => usable.add(m.tag));
+    const usable = getMeasuredOrCalculatedTags();
+    if (usable.length > 0) {
+      return usable;
     }
-    return Array.from(usable);
+    return state.metadata.measurables.map((m) => m.tag);
   }
   if (typeLabel === 'enum') {
     return ['AUTO', 'CASCADE', 'TRACKING'];
@@ -778,16 +803,7 @@ function choiceOptions(typeLabel, fieldName) {
 }
 
 function getAvailableInputTags() {
-  const measured = Array.isArray(state.metadata?.measurables)
-    ? state.metadata.measurables.map((m) => m.tag)
-    : [];
-  const calculationOutputs = Array.isArray(state.calculations)
-    ? state.calculations.flatMap((calc) => calc.outputs || [])
-    : [];
-  const combined = [...measured, ...calculationOutputs].filter(
-    (tag) => typeof tag === 'string' && tag.trim() !== ''
-  );
-  return Array.from(new Set(combined));
+  return getMeasuredOrCalculatedTags();
 }
 
 function buildFieldInput(field, defaults = {}) {

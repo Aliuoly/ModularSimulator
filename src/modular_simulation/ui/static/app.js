@@ -855,7 +855,9 @@ function buildFieldInput(field, defaults = {}) {
 
   const input = document.createElement('input');
   input.type = field.type === 'number' || field.type === 'integer' ? 'number' : 'text';
-  if (field.type === 'integer') {
+  if (field.type === 'number') {
+    input.step = 'any';
+  } else if (field.type === 'integer') {
     input.step = '1';
   }
   input.value = defaultValue ?? '';

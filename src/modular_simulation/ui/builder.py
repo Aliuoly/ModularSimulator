@@ -951,11 +951,56 @@ class SimulationBuilder:
         return None
 
     def invalidate(self, message: str) -> None:
+        if self.system is not None:
+            self._snapshot_controller_trajectories(self.system)
         self.system = None
         if self._suppress_invalidations:
             self._suppressed_messages.append(message)
         else:
             self._messages.append(message)
+
+    def _snapshot_controller_trajectories(self, system: System) -> None:
+        """Persist the active controller trajectories before discarding the system.
+
+        When configuration changes invalidate the running system we reset the
+        simulator, but the UI keeps appending new history samples using the
+        accumulated elapsed time.  Without capturing the current setpoint the
+        next run would replay the original trajectory from ``t=0`` and appear
+        duplicated in the appended history window.  To keep continuity we
+        snapshot each controller's current setpoint as a degenerate trajectory
+        that simply holds the latest value from the moment the system was
+        invalidated.
+
+        Parameters
+        ----------
+        system:
+            Active :class:`~modular_simulation.framework.system.System` instance
+            whose controllers provide the authoritative trajectory state.
+        """
+
+        try:
+            controller_lookup = system.controller_dictionary
+        except Exception:
+            return
+
+        current_time = system.time
+        for config in self.controller_configs.values():
+            controller = controller_lookup.get(config.cv_tag)
+            if controller is None:
+                continue
+
+            trajectory = controller.sp_trajectory
+            current_value = float(trajectory.current_value(current_time))
+            unit_text = str(trajectory.unit)
+
+            frozen_spec = TrajectorySpec(y0=current_value, unit=unit_text, segments=[])
+            config.trajectory = frozen_spec
+            config.raw.setdefault("trajectory", {})
+            config.raw["trajectory"] = {
+                "y0": frozen_spec.y0,
+                "unit": frozen_spec.unit,
+                "segments": [],
+            }
 
     # ------------------------------------------------------------------
     # Internal helpers

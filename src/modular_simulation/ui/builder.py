@@ -816,7 +816,7 @@ class SimulationBuilder:
             "time_range": self.history_range(),
         }
 
-    def reset_runtime(self) -> None:
+    def reset_runtime(self, message: Optional[str] = "Simulation reset to initial conditions.") -> None:
         self.system = None
         self._history_cache = self._empty_history_structure()
         self._history_lengths = self._empty_length_structure()
@@ -824,7 +824,8 @@ class SimulationBuilder:
         self._time_offset = 0.0
         self._history_bounds = {"min": None, "max": None}
         self._time_axis_limits = (None, None)
-        self._messages.append("Simulation reset to initial conditions.")
+        if message is not None:
+            self._messages.append(message)
 
     def _render_default_plot(
         self,
@@ -886,7 +887,7 @@ class SimulationBuilder:
         return None
 
     def invalidate(self, message: str) -> None:
-        self.system = None
+        self.reset_runtime(message=None)
         self._messages.append(message)
 
     # ------------------------------------------------------------------

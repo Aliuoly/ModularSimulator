@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import math
-from typing import Callable, Tuple, TYPE_CHECKING, List, Optional
+from typing import Callable, Dict, Tuple, TYPE_CHECKING, List, Optional
 from numpy.typing import NDArray
 import numpy as np
 from enum import IntEnum
@@ -397,15 +397,11 @@ class Controller(BaseModel, ABC):
         pass
     
     @property
-    def sp_history(self):
+    def sp_history(self) -> Dict[str, List[TagData]]:
         """Return a mapping of cascade level to historized setpoint samples."""
-        # expected behavior:
-        # loop 1 <- loop 2 <- loop 3 cascade scheme
-        # loop 1 has cascade controller ->
-        #   result gets update
-        controller = self
-        return_dict = {controller.cv_tag: (controller._sp_history)}
-        while controller.cascade_controller is not None:
+        history: Dict[str, List[TagData]] = {}
+        controller: Optional["Controller"] = self
+        while controller is not None:
+            history[f"{controller.cv_tag}.sp"] = controller._sp_history
             controller = controller.cascade_controller
-            return_dict.update({controller.cv_tag: controller._sp_history})
-        return return_dict
+        return history

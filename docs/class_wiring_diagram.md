@@ -1,12 +1,12 @@
 # Modular Simulation Class Wiring
 
-The diagram below captures how the primary orchestration classes compose and depend on one another. It traces the flow from a top-level `Plant` down through `System` orchestration, the measurable/usable quantity containers, and the instrumentation/controller primitives that operate on tags.
+The diagram below captures how the primary orchestration classes compose and depend on one another. It traces the flow from a top-level `Plant` through `System` orchestration, the measurable/usable quantity containers, and the instrumentation/control primitives that operate on tags.
 
 ```mermaid
 classDiagram
     direction TB
     class Plant {
-        systems: List[System]
+        systems: list[System]
         dt: float
         +step(nsteps=1)
     }
@@ -15,8 +15,8 @@ classDiagram
         +measurable_quantities
         +usable_quantities
         +step(duration)
-        +extend_controller_trajectory()
         +controller_dictionary
+        +cv_tag_list
     }
     class MeasurableQuantities {
         +constants: Constants
@@ -26,41 +26,45 @@ classDiagram
         +tag_list()
         +tag_unit_info()
     }
-    class UsableQuantities {
-        +sensors: List[Sensor]
-        +calculations: List[Calculation]
-        +controllers: List[Controller]
-        +update(t)
-        +tag_list()
-    }
-    class BaseIndexedModel {
+    class MeasurableBase {
         +to_array()
         +update_from_array()
         +tag_list()
+        +tag_unit_info()
     }
     class States
     class ControlElements
     class AlgebraicStates
     class Constants
 
-    class Sensor {
+    class UsableQuantities {
+        +sensors: list[SensorBase]
+        +calculations: list[CalculationBase]
+        +controllers: list[ControllerBase]
+        +update(t)
+        +tag_list()
+    }
+    class SensorBase {
         measurement_tag: str
         alias_tag?: str
         +measure(t)
+        +_initialize()
     }
-    class Calculation {
+    class CalculationBase {
         +calculate(t)
+        +_initialize(tag_infos)
         +_calculation_algorithm()
     }
-    class Controller {
+    class ControllerBase {
         mv_tag: str
         cv_tag: str
         +update(t)
         +change_control_mode(mode)
+        +extend_setpoint()
     }
     class TagInfo {
         tag: str
-        unit: Unit
+        unit: UnitBase
         +data: TagData
         +history
     }
@@ -71,46 +75,44 @@ classDiagram
     }
 
     Plant --> "1..*" System : aggregates
-    Plant ..> System : builds CompositeSystem
+    Plant ..> System : builds composite
 
     System --> MeasurableQuantities : owns
     System --> UsableQuantities : owns
-    System --> "controls" Controller : via usable_quantities
-    System --> BaseIndexedModel : uses state arrays
 
     MeasurableQuantities --> States
     MeasurableQuantities --> ControlElements
     MeasurableQuantities --> AlgebraicStates
     MeasurableQuantities --> Constants
 
-    States --|> BaseIndexedModel
-    ControlElements --|> BaseIndexedModel
-    AlgebraicStates --|> BaseIndexedModel
-    Constants --|> BaseIndexedModel
+    States --|> MeasurableBase
+    ControlElements --|> MeasurableBase
+    AlgebraicStates --|> MeasurableBase
+    Constants --|> MeasurableBase
 
-    UsableQuantities --> Sensor : orchestrates
-    UsableQuantities --> Calculation : orchestrates
-    UsableQuantities --> Controller : orchestrates
-    UsableQuantities --> MeasurableQuantities : resolves tags
+    UsableQuantities --> SensorBase : orchestrates
+    UsableQuantities --> CalculationBase : orchestrates
+    UsableQuantities --> ControllerBase : orchestrates
+    UsableQuantities ..> MeasurableQuantities : resolves tags
 
-    Sensor --> TagInfo : publishes
-    Sensor --> TagData : emits samples
-    Calculation --> TagInfo : defines outputs
-    Calculation --> TagData : emits results
-    Controller --> TagInfo : SP/CV tags
-    Controller --> TagData : MV history
+    SensorBase --> TagInfo : publishes
+    SensorBase --> TagData : emits samples
+    SensorBase ..> MeasurableQuantities : reads values
+
+    CalculationBase --> TagInfo : defines IO
+    CalculationBase --> TagData : emits results
+
+    ControllerBase --> TagInfo : SP/CV tags
+    ControllerBase --> TagData : MV history
+    ControllerBase ..> ControlElements : writes MV
+
     TagInfo --> TagData : stores latest
-
-    Controller ..> ControlElements : writes MV
-    Sensor ..> BaseIndexedModel : reads measurement
-    Calculation ..> TagInfo : converts inputs
 ```
 
 ## Data flow highlights
 
-1. **Plant aggregation** – A `Plant` flattens the measurable, usable, and controllable artifacts of each constituent `System`, wrapping them into a composite system so the plant can advance every subsystem in lockstep.【F:src/modular_simulation/plant.py†L10-L111】
-2. **System orchestration** – `System` owns the measurable/usable containers, refreshes algebraic states, and advances the solver while letting `UsableQuantities` drive sensor measurements, calculations, and controller updates each step.【F:src/modular_simulation/framework/system.py†L24-L382】
-3. **Measurable containers** – `MeasurableQuantities` groups `States`, `ControlElements`, `AlgebraicStates`, and `Constants`, each inheriting array-indexing behaviors from `BaseIndexedModel` to enable efficient solver IO.【F:src/modular_simulation/measurables/measurable_quantities.py†L11-L78】【F:src/modular_simulation/measurables/base_classes.py†L8-L118】
-4. **Usable orchestration** – `UsableQuantities` initializes and updates `Sensor`, `Calculation`, and `Controller` instances, ensuring tags resolve to measurable data and propagating updates during each simulation tick.【F:src/modular_simulation/usables/usable_quantities.py†L17-L208】
-5. **Instrumentation primitives** – Sensors, calculations, and controllers share the `TagInfo`/`TagData` tagging scheme: sensors and calculations publish `TagData` through their `TagInfo`, while controllers coordinate setpoints, cascade relationships, and manipulate control elements via tag-aware getters and setters.【F:src/modular_simulation/usables/sensors/sensor.py†L18-L164】【F:src/modular_simulation/usables/calculations/calculation.py†L52-L182】【F:src/modular_simulation/usables/controllers/controller.py†L62-L405】【F:src/modular_simulation/usables/tag_info.py†L9-L55】
-
+1. **Plant aggregation** – `Plant` flattens measurable and usable artifacts from each constituent `System`, collecting state/control dictionaries, sensors, calculations, controllers, and solver callbacks before wrapping them in a composite system so the plant can advance every subsystem in lockstep.【F:src/modular_simulation/plant.py†L10-L111】
+2. **System orchestration** – `System` owns the measurable/usable containers, validates tag wiring, constructs solver parameters, advances the integration loop, and refreshes algebraic states while invoking `UsableQuantities.update` before each solver step to run sensors, calculations, and controllers.【F:src/modular_simulation/framework/system.py†L28-L296】【F:src/modular_simulation/framework/system.py†L401-L555】
+3. **Measurable containers** – `MeasurableQuantities` groups `States`, `ControlElements`, `AlgebraicStates`, and `Constants`, each inheriting array-indexing behavior from `MeasurableBase` to provide tag lists, unit metadata, and vector conversions for solver IO.【F:src/modular_simulation/measurables/measurable_quantities.py†L1-L72】【F:src/modular_simulation/measurables/measurable_base.py†L1-L118】
+4. **Usable orchestration** – `UsableQuantities` enforces tag consistency, links sensors/calculations/controllers to tag metadata, initializes them against the system's measurables, and executes their `measure`, `calculate`, and `update` hooks every tick.【F:src/modular_simulation/usables/usable_quantities.py†L1-L185】
+5. **Instrumentation primitives** – Sensors resolve measurement getters against measurables and stream `TagData` through `TagInfo`, calculations convert input units and produce outputs the same way, and controllers consume those tag infos to manage setpoints and manipulate control elements.【F:src/modular_simulation/usables/sensors/sensor_base.py†L1-L186】【F:src/modular_simulation/usables/calculations/calculation_base.py†L1-L183】【F:src/modular_simulation/usables/controllers/controller_base.py†L1-L195】【F:src/modular_simulation/usables/tag_info.py†L1-L55】

@@ -1,9 +1,43 @@
-from pydantic import BaseModel, PrivateAttr, ConfigDict, model_validator
+from pydantic import BaseModel, PrivateAttr, ConfigDict, dataclasses, model_validator
 import numpy as np
 from numpy.typing import NDArray
 from functools import cached_property
 from modular_simulation.validation.exceptions import MeasurableConfigurationError
 from astropy.units import UnitBase, Unit
+from enum import IntEnum
+
+class CategorizedMeasurables:
+    def __init__(self, diff_states, alg_states, control_elements, constants):
+        self.differential_states = diff_states
+        self.alg_states = alg_states
+        self.control_elements = control_elements
+        self.constants = constants
+
+
+class MeasurableType(IntEnum):
+    DifferentialState = 0 
+    AlgebraicState = 1
+    ControlElement = 2
+    Constant = 3
+
+@dataclasses.dataclass
+class MeasurableMetadata:
+    type: MeasurableType
+    unit: str
+
+def update_map(map, slice_start, field_name, field_value):
+    try:
+        value = np.asarray(value)
+    except Exception as ex:
+        raise TypeError(
+            f"measurable field '{field_name}' is not coercable into a numpy array. "
+            f"coercion exception: {ex}"
+        )
+    slice_end = slice_start + value.size
+    map[field_name] = slice(slice_start, slice_end)
+    slice_start = slice_end
+    return map, slice_end
+
 class MeasurableBase(BaseModel):
     """
     Base class for the measurable data containers which are
@@ -11,11 +45,73 @@ class MeasurableBase(BaseModel):
     Can be converted to numpy arrays via said indexing, 
     and can be updating from numpy arrays via the same indexing. 
     """
-    _index_map: dict[str, slice] = PrivateAttr()
+    _diff_state_map: dict[str, slice] = PrivateAttr()
+    _diff_array_size: int = PrivateAttr()
+    _alg_state_map: dict[str, slice] = PrivateAttr()
+    _alg_array_size: int = PrivateAttr()
+    _control_element_map: dict[str, slice] = PrivateAttr()
+    _control_array_size: int = PrivateAttr()
+    _constant_map: dict[str, slice] = PrivateAttr()
+    _constant_array_size: int = PrivateAttr()
     _tag_unit_info: dict[str, UnitBase] = PrivateAttr(default_factory = dict)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
     
+    @model_validator(mode = 'after')
+    def _validate_annotation_and_categorize(self):
+        diff_slice_start = 0
+        alg_slice_start = 0
+        ce_slice_start = 0
+        k_slice_start = 0
+        for field_name, field_info in self.__class__.model_fields.items():
+            try:
+                metadata = field_info.metadata[0]
+            except Exception as ex:
+                raise MeasurableConfigurationError(
+                    f"Field '{field_name}' in Measurable '{self.__class__.__name__}' is not properly annotated. "
+                    "Be sure to use the 'Annotated' type hint with 'TagMetadata' as the metadata. "
+                ) from ex
+            validated = False
+            for metadatum in metadata: # Lol datum
+                if isinstance(metadatum, MeasurableMetadata):
+                    match metadatum.type:
+                        case MeasurableType.DifferentialState:
+                            self._diff_state_map, self._diff_array_size = update_map(
+                                self._diff_state_map, self._diff_array_size, 
+                                field_name, getattr(self, field_name)
+                                )
+                        case MeasurableType.AlgebraicState:
+                            self._alg_state_map, self._alg_array_size = update_map(
+                                self._alg_state_map, self._alg_array_size, field_name, getattr(self, field_name)
+                                )
+                        case MeasurableType.ControlElement:
+                            self._control_element_map, self._control_array_size = update_map(
+                                self._control_element_map, self._control_array_size, field_name, getattr(self, field_name)
+                                )
+                        case MeasurableType.Constant:
+                            self._constant_map, self._constant_array_size = update_map(
+                                self._constant_map, self._constant_array_size, field_name, getattr(self, field_name)
+                                )
+                        case _:
+                            raise MeasurableConfigurationError(
+                                f"Measurable type '{metadatum.type}' of '{field_name}' in "
+                                f"Measurable '{self.__class__.__name__}' unrecognized"
+                            )
+                    try:
+                        unit = Unit(metadatum.unit)
+                        self._tag_unit_info[field_name] = unit
+                    except Exception as ex:
+                        raise MeasurableConfigurationError(
+                            f"Failed to parse unit '{unit}' of '{field_name}' of '{self.__class__.__name__}'."
+                        )
+                    validated = True
+            if not validated:
+                raise MeasurableConfigurationError(
+                    f"Field '{field_name}' in Measurable '{self.__class__.__name__}' is not properly annotated. "
+                    "Be sure to use the 'Annotated' type hint with 'MeasurableMetadata' instance as the metadata. "
+                )
+
     def model_post_init(self, context):
+        self._validate_annotation_and_categorize()
         # generate _index_map based on the defined fields
         index_dict = {}
         slice_start = 0
@@ -32,13 +128,8 @@ class MeasurableBase(BaseModel):
             slice_start = slice_end
         self._index_map = index_dict
 
-        # get array size
-        array_size = 0
-        for slice_of_field in self._index_map.values():
-            array_size = max(array_size, slice_of_field.stop)
-        self._array_size = array_size
+        
 
-    @model_validator(mode='after')
     def _ensure_unit_annotated(self):
         for field_name, field_info in self.__class__.model_fields.items():
             metadata = field_info.metadata
@@ -47,19 +138,7 @@ class MeasurableBase(BaseModel):
                     f"Field '{field_name}' of '{self.__class__.__name__}' is missing a unit annotation."
                 )
             unit = metadata[0]
-            if isinstance(unit, str):
-                try:
-                    unit = Unit(unit, parse_strict = "raise")
-                except ValueError as parsing_error:
-                    raise MeasurableConfigurationError(
-                        f"Error parsing unit annotation for measurable '{self.__class__.__name__}"
-                        f": {parsing_error}"
-                    )
-            elif not isinstance(unit, UnitBase):
-                raise MeasurableConfigurationError(
-                    f"Field '{field_name}' of '{self.__class__.__name__}' must be annotated with a Unit in the first metadata slot."
-                )
-            self._tag_unit_info[field_name] = unit
+            
         return self
     
     @cached_property
@@ -69,6 +148,15 @@ class MeasurableBase(BaseModel):
     @cached_property
     def tag_list(self) -> list[str]:
         return list(self._index_map.keys())
+    
+    @cached_property
+    def categorized_tags(self) -> dict[str, list[str]]:
+        return CategorizedMeasurables(
+            list(self._diff_state_map.keys()),
+            list(self._alg_state_map.keys()),
+            list(self._control_element_map.keys()),
+            list(self._constant_map.keys())
+        )
 
     def to_array(self) -> NDArray:
         # the following combination, from testing, gave the best times

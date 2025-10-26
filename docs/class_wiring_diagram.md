@@ -90,9 +90,9 @@ classDiagram
     AlgebraicStates --|> MeasurableBase
     Constants --|> MeasurableBase
 
+    UsableQuantities --> ControllerBase : orchestrates
     UsableQuantities --> SensorBase : orchestrates
     UsableQuantities --> CalculationBase : orchestrates
-    UsableQuantities --> ControllerBase : orchestrates
     UsableQuantities ..> MeasurableQuantities : resolves tags
 
     SensorBase --> TagInfo : publishes

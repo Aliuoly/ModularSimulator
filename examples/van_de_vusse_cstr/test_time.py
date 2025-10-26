@@ -1,4 +1,4 @@
-"""Profiling helper for the fast energy balance system."""
+"""Profiling helper for the Van de Vusse example."""
 from __future__ import annotations
 
 import cProfile
@@ -14,7 +14,7 @@ from .run_simulation import make_systems
 systems = make_systems()
 fast_system = systems["fast"]
 
-sensor = next(s for s in fast_system.sensors if s.measurement_tag == "F_in")
+sensor = next(s for s in fast_system.sensors if s.measurement_tag == "Tj_in")
 
 profiler = cProfile.Profile()
 try:

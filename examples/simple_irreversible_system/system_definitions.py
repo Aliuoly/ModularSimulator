@@ -1,47 +1,59 @@
+"""Dynamic model definitions for the simple irreversible reaction example."""
+from __future__ import annotations
+
+from typing import Annotated, Mapping
+
 import numpy as np
-from typing import Mapping, Annotated
-from numpy.typing import NDArray
-from modular_simulation.measurables import States, ControlElements, AlgebraicStates, Constants
-from modular_simulation.framework import System
 from astropy.units import Unit
+from numpy.typing import NDArray
+
+from modular_simulation.core import DynamicModel, MeasurableMetadata, MeasurableType
 
 SQRT_L_PER_S = Unit("L") ** 0.5 / Unit("s")
 
-# 1. Define the Data Structures for the System
-# ============================================
 
-class IrreversibleStates(States):
-    """Pydantic model for the differential states of the system."""
+class IrreversibleModel(DynamicModel):
+    """Dynamic model describing the A -> 2B reaction with volume expansion."""
 
-    V: Annotated[float, Unit("L")]
-    A: Annotated[float, Unit("mol/L")]
-    B: Annotated[float, Unit("mol/L")]
+    V: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.DIFFERENTIAL_STATE, Unit("L")),
+    ] = 0.0
+    A: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.DIFFERENTIAL_STATE, Unit("mol/L")),
+    ] = 0.0
+    B: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.DIFFERENTIAL_STATE, Unit("mol/L")),
+    ] = 0.0
 
-class IrreversibleControlElements(ControlElements):
-    F_in: Annotated[float, Unit("L/s")]  # Inlet flow rate
+    F_out: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.ALGEBRAIC_STATE, Unit("L/s")),
+    ] = 0.0
 
-class IrreversibleAlgebraicStates(AlgebraicStates):
-    F_out: Annotated[float, Unit("L/s")]  # Outlet flow rate, an algebraic function of Volume
+    F_in: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONTROL_ELEMENT, Unit("L/s")),
+    ] = 0.0
 
-class IrreversibleConstants(Constants):
-    """"""
-
-    k: Annotated[float, Unit("1/s")]
-    Cv: Annotated[float, SQRT_L_PER_S]
-    CA_in: Annotated[float, Unit("mol/L")]
-    
-# 2. Define the System Dynamics
-# =============================
-
-class IrreversibleSystem(System):
-    """
-    Implements the 'readable' contract from the `System` base class to define
-    the dynamics of the irreversible reaction A -> 2B.
-    """
+    k: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("1/s")),
+    ] = 0.0
+    Cv: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, SQRT_L_PER_S),
+    ] = 0.0
+    CA_in: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("mol/L")),
+    ] = 0.0
 
     @staticmethod
     def calculate_algebraic_values(
-        y: NDArray, 
+        y: NDArray,
         u: NDArray,
         k: NDArray,
         y_map: Mapping[str, slice],
@@ -49,17 +61,13 @@ class IrreversibleSystem(System):
         k_map: Mapping[str, slice],
         algebraic_map: Mapping[str, slice],
         algebraic_size: int,
-        ) -> NDArray:
-        """
-        Calculates the outlet flow (F_out) based on the current reactor volume.
-        This is the algebraic part of the DAE system.
-        """
+    ) -> NDArray:
+        """Compute the outlet flow from the current reactor volume."""
+
         result = np.zeros(algebraic_size)
-        # Ensure volume doesn't go to zero to prevent division errors.
-        volume = max(1e-6, y[y_map["V"]][0]) 
+        volume = max(1.0e-6, y[y_map["V"]][0])
         Cv = k[k_map["Cv"]][0]
-        # F_out = Cv * sqrt(V)
-        result[algebraic_map["F_out"]][0] =  Cv * (volume**0.5)  # type: ignore[arg-type]
+        result[algebraic_map["F_out"]][0] = Cv * np.sqrt(volume)
         return result
 
     @staticmethod
@@ -69,40 +77,36 @@ class IrreversibleSystem(System):
         u: NDArray,
         k: NDArray,
         algebraic: NDArray,
-        y_map: Mapping[str, slice],
         u_map: Mapping[str, slice],
+        y_map: Mapping[str, slice],
         k_map: Mapping[str, slice],
         algebraic_map: Mapping[str, slice],
-        ) -> NDArray:
-        """
-        Calculates the derivatives for the differential states (dV/dt, dA/dt, dB/dt).
-        This is the differential part of the DAE system.
-        """
-        # Unpack values from the inputs
-        F_out = algebraic[algebraic_map["F_out"]][0] 
-        F_in = u[u_map["F_in"]][0] 
-        kc = k[k_map["k"]][0] 
-        CA_in = k[k_map["CA_in"]][0] 
+    ) -> NDArray:
+        """Evaluate the material balance derivatives."""
 
-        # Unpack current state values using the StateMap for clarity
-        volume = max(1e-6, y[y_map["V"]][0]) 
-        molarity_A = y[y_map["A"]][0] 
-        molarity_B = y[y_map["B"]][0] 
-        
-        # Calculate reaction rate: r = k * [A] * V
-        reaction_rate = molarity_A * volume * kc
-        
-        # Initialize the derivative array
         dy = np.zeros_like(y)
-        
-        # Calculate the derivatives
+
+        F_out = algebraic[algebraic_map["F_out"]][0]
+        F_in = u[u_map["F_in"]][0]
+        rate_constant = k[k_map["k"]][0]
+        inlet_conc = k[k_map["CA_in"]][0]
+
+        volume = max(1.0e-6, y[y_map["V"]][0])
+        conc_a = y[y_map["A"]][0]
+        conc_b = y[y_map["B"]][0]
+
+        reaction_rate = conc_a * volume * rate_constant
         dV_dt = F_in - F_out
-        dy[y_map["V"]] = dV_dt 
-        dy[y_map["A"]] = (1/volume) * (
-            -reaction_rate + F_in * CA_in - F_out * molarity_A - molarity_A * dV_dt
-        ) 
-        dy[y_map["B"]] = (1/volume) * (
-            2*reaction_rate - F_out * molarity_B - molarity_B * dV_dt
-        ) 
+
+        dy[y_map["V"]] = dV_dt
+        dy[y_map["A"]] = (1.0 / volume) * (
+            -reaction_rate + F_in * inlet_conc - F_out * conc_a - conc_a * dV_dt
+        )
+        dy[y_map["B"]] = (1.0 / volume) * (
+            2.0 * reaction_rate - F_out * conc_b - conc_b * dV_dt
+        )
 
         return dy
+
+
+__all__ = ["IrreversibleModel"]

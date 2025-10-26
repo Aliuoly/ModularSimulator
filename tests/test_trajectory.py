@@ -1,7 +1,7 @@
 import pytest
 from astropy.units import Unit
 
-from modular_simulation.usables.controllers.trajectory import Trajectory
+from modular_simulation.interfaces import Trajectory
 
 
 def test_set_now_prunes_segments_and_records_history():

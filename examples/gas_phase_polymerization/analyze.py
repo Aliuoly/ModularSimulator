@@ -3,14 +3,15 @@ import pstats
 import io
 
 # Import your existing simulation setups
-from run_simulation import normal_system
+from run_simulation import make_system
 from astropy.units import Unit
 
 
 print("--- Starting Profiling Session ---")
 profiler = cProfile.Profile()
 profiler.enable()
-normal_system.step(24 * Unit("hour"))
+system = make_system()
+system.step(24 * Unit("hour"))
 profiler.disable()
 s = io.StringIO()
 ps = pstats.Stats(profiler, stream=s)

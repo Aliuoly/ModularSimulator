@@ -1,84 +1,102 @@
+"""Dynamic model and utilities for the Van de Vusse CSTR example."""
+from __future__ import annotations
 
 from typing import Annotated, Mapping
+
 import numpy as np
-from numpy.typing import NDArray
-from pydantic import ConfigDict, Field
-
-from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
-from modular_simulation.framework.system import System
-from modular_simulation.usables import CalculationBase, Constant, MeasuredTag, OutputTag
 from astropy.units import Unit
+from numpy.typing import NDArray
+from pydantic import Field
+
+from modular_simulation.core import DynamicModel, MeasurableMetadata, MeasurableType
+from modular_simulation.interfaces import CalculationBase, Constant, MeasuredTag, OutputTag
 
 
-class VanDeVusseStates(States):
-    """Differential state variables for the Van de Vusse CSTR."""
+class VanDeVusseModel(DynamicModel):
+    """Dynamic model for the Van de Vusse reactor."""
 
-    Ca: Annotated[float, Unit("mol/L")] = Field(description="Concentration of A in the reactor [mol/L]")
-    Cb: Annotated[float, Unit("mol/L")] = Field(description="Concentration of B in the reactor [mol/L]")
-    T: Annotated[float, Unit("K")] = Field(description="Reactor temperature [K]")
-    Tk: Annotated[float, Unit("K")] = Field(description="Jacket temperature [K]")
+    Ca: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.DIFFERENTIAL_STATE, Unit("mol/L")),
+    ] = Field(2.2291, description="Concentration of A in the reactor [mol/L]")
+    Cb: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.DIFFERENTIAL_STATE, Unit("mol/L")),
+    ] = Field(1.0417, description="Concentration of B in the reactor [mol/L]")
+    T: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.DIFFERENTIAL_STATE, Unit("K")),
+    ] = Field(79.591, description="Reactor temperature [K]")
+    Tk: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.DIFFERENTIAL_STATE, Unit("K")),
+    ] = Field(77.69, description="Jacket temperature [K]")
 
+    Tj_in: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONTROL_ELEMENT, Unit("K")),
+    ] = Field(77.69, description="Jacket inlet temperature [K]")
 
-class VanDeVusseControlElements(ControlElements):
-    """Externally actuated variables for the Van de Vusse reactor."""
-
-    Tj_in: Annotated[float, Unit("K")] = Field(description="Jacket inlet temperature [K]")
-
-
-class VanDeVusseAlgebraicStates(AlgebraicStates):
-    """No algebraic states are required for this model."""
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class VanDeVusseConstants(Constants):
-    """Physical constants for the Van de Vusse model."""
-
-    F: Annotated[float, Unit("L/s")]
-    Ca0: Annotated[float, Unit("mol/L")]
-    T0: Annotated[float, Unit("K")]
-    k10: Annotated[float, Unit("1/s")]
-    E1: Annotated[float, Unit("J/mol")]
-    dHr1: Annotated[float, Unit("J/mol")]
-    rho: Annotated[float, Unit("kg/L")]
-    Cp: Annotated[float, Unit("J/(kg*K)")]
-    kw: Annotated[float, Unit("J/(s*K*L**2)")]
-    AR: Annotated[float, Unit("L**2")]
-    VR: Annotated[float, Unit("L")]
-    mK: Annotated[float, Unit("kg")]
-    CpK: Annotated[float, Unit("J/(kg*K)")]
-    Fj: Annotated[float, Unit("L/s")]
-
-
-class HeatDutyCalculation(CalculationBase):
-    """Calculate the instantaneous heat duty transferred between jacket and reactor."""
-
-    heat_duty_tag: OutputTag
-
-    Tk_tag: MeasuredTag
-    T_tag: MeasuredTag
-
-    kw: Constant
-    area: Constant
-
-    def _calculation_algorithm(
-        self,
-        t: float,
-        inputs_dict: dict[str, float],
-    ) -> dict[str, float]:
-        Tk = inputs_dict[self.Tk_tag]
-        T = inputs_dict[self.T_tag]
-
-        heat_duty = self.kw * self.area * (Tk - T)
-        return {self.heat_duty_tag: heat_duty}
-
-
-class VanDeVusseSystem(System):
-    """Readable implementation of the Van de Vusse reactor model."""
+    F: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("L/s")),
+    ] = 14.19
+    Ca0: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("mol/L")),
+    ] = 5.1
+    T0: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("K")),
+    ] = 104.9
+    k10: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("1/s")),
+    ] = 1.287e10
+    E1: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("K")),
+    ] = 9758.3
+    dHr1: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("J/mol")),
+    ] = 4.2
+    rho: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("kg/L")),
+    ] = 0.9342
+    Cp: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("J/(kg*K)")),
+    ] = 3.01
+    kw: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("J/(s*K*L**2)")),
+    ] = 4032.0
+    AR: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("L**2")),
+    ] = 0.215
+    VR: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("L")),
+    ] = 10.0
+    mK: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("kg")),
+    ] = 5.0
+    CpK: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("J/(kg*K)")),
+    ] = 2.0
+    Fj: Annotated[
+        float,
+        MeasurableMetadata(MeasurableType.CONSTANT, Unit("L/s")),
+    ] = 10.0
 
     @staticmethod
     def calculate_algebraic_values(
-        y: NDArray, 
+        y: NDArray,
         u: NDArray,
         k: NDArray,
         y_map: Mapping[str, slice],
@@ -96,11 +114,12 @@ class VanDeVusseSystem(System):
         u: NDArray,
         k: NDArray,
         algebraic: NDArray,
-        y_map: Mapping[str, slice],
         u_map: Mapping[str, slice],
+        y_map: Mapping[str, slice],
         k_map: Mapping[str, slice],
         algebraic_map: Mapping[str, slice],
-        ) -> NDArray:
+    ) -> NDArray:
+        dy = np.zeros_like(y)
 
         Ca = y[y_map["Ca"]][0]
         Cb = y[y_map["Cb"]][0]
@@ -145,9 +164,33 @@ class VanDeVusseSystem(System):
             + kw * AR * (T - Tk)
         ) / jacket_capacity_term
 
-        dy = np.zeros_like(y)
-        dy[y_map["Ca"]] = dCa  
-        dy[y_map["Cb"]] = dCb  
-        dy[y_map["T"]] = dT  
-        dy[y_map["Tk"]] = dTk  
+        dy[y_map["Ca"]] = dCa
+        dy[y_map["Cb"]] = dCb
+        dy[y_map["T"]] = dT
+        dy[y_map["Tk"]] = dTk
         return dy
+
+
+class HeatDutyCalculation(CalculationBase):
+    """Calculate the instantaneous heat duty transferred between jacket and reactor."""
+
+    heat_duty_tag: OutputTag
+    Tk_tag: MeasuredTag
+    T_tag: MeasuredTag
+
+    kw: Constant
+    area: Constant
+
+    def _calculation_algorithm(
+        self,
+        t: float,
+        inputs_dict: dict[str, float],
+    ) -> dict[str, float]:
+        Tk = inputs_dict[self.Tk_tag]
+        T = inputs_dict[self.T_tag]
+
+        heat_duty = self.kw * self.area * (Tk - T)
+        return {self.heat_duty_tag: heat_duty}
+
+
+__all__ = ["VanDeVusseModel", "HeatDutyCalculation"]

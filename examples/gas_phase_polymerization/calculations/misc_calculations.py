@@ -1,7 +1,7 @@
-from modular_simulation.usables import (
-    CalculationBase, 
+from modular_simulation.interfaces import (
+    CalculationBase,
     TagMetadata,
-    TagType, 
+    TagType,
 )
 import numpy as np
 from typing import Any, Annotated

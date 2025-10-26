@@ -33,11 +33,15 @@ class MeasurableMetadata:
 
 
 class _CategoryView:
-    """Lightweight view over a subset of a :class:`DynamicModel`."""
-
+    """
+    Lightweight view over a subset of a :class:`DynamicModel`.
+    The available views are items of the :class:`MeasurableType` Enum
+    """
+    _model: DynamicModel
+    _category:MeasurableType
     __slots__ = ("_model", "_category")
 
-    def __init__(self, model: "DynamicModel", category: MeasurableType) -> None:
+    def __init__(self, model: DynamicModel, category: MeasurableType) -> None:
         object.__setattr__(self, "_model", model)
         object.__setattr__(self, "_category", category)
 
@@ -70,7 +74,7 @@ class _CategoryView:
     def tag_unit_info(self) -> dict[str, UnitBase]:
         return {tag: self._model.tag_unit_info[tag] for tag in self._index_map}
 
-    def __bool__(self) -> bool:  # pragma: no cover - thin wrapper
+    def __bool__(self) -> bool:  
         return self._array_size > 0
 
     def __getattr__(self, item: str) -> Any:

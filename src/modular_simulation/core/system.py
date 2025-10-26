@@ -302,26 +302,6 @@ class System(BaseModel):
         if progress is not None:
             progress.close()
 
-    def get_state(self) -> dict:
-        state: dict[str, Any] = {
-            "dynamic_model": self.dynamic_model.model_dump(serialize_as_any=True),
-            "sensors": [sensor.get_state() for sensor in self.model_interface.sensors],
-            "calculations": [
-                calculation.get_state() for calculation in self.model_interface.calculations
-            ],
-            "controllers": [
-                controller.get_state() for controller in self.model_interface.controllers
-            ],
-        }
-        return state
-
-    def set_state(self, state: dict) -> None:
-        self.dynamic_model = self.dynamic_model.model_copy(update=state["dynamic_model"])
-        for calculation in self.model_interface.calculations:
-            state.update(calculation.get_state())
-        for controller in self.model_interface.controllers:
-            state.update(controller.get_state())
-
     def extend_controller_trajectory(
         self, cv_tag: str, value: float | None = None
     ) -> "Trajectory":
@@ -332,12 +312,11 @@ class System(BaseModel):
             )
         controller = self.controller_dictionary[cv_tag]
         if controller.mode != ControllerMode.AUTO:
-            warnings.warn(
+            warn_str = (
                 "Tried to change trajectory of '%s' controller but failed - controller must be in AUTO mode, "
-                "but is %s.",
-                (cv_tag, controller.mode.name),
-                stacklevel=2,
+                "but is %s."
             )
+            warnings.warn(warn_str.format(cv_tag, controller.mode.name))
         active_trajectory = controller.sp_trajectory
         if value is None:
             value = active_trajectory(self._t)
@@ -362,8 +341,8 @@ class System(BaseModel):
         return controller.mode
 
     @cached_property
-    def controller_dictionary(self) -> dict[str, "ControllerBase"]:
-        return_dict: dict[str, "ControllerBase"] = {}
+    def controller_dictionary(self) -> dict[str, ControllerBase]:
+        return_dict: dict[str, ControllerBase] = {}
         for controller in self.model_interface.controllers:
             active = controller
             return_dict[active.cv_tag] = active

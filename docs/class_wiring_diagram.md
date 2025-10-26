@@ -6,7 +6,7 @@ The diagram below captures how the runtime orchestrator, dynamic model, and oper
 classDiagram
     direction TB
     class System {
-        dt: Quantity
+        dt: astropy.unit.Quantity
         dynamic_model: DynamicModel
         sensors: list[SensorBase]
         calculations: list[CalculationBase]
@@ -55,6 +55,7 @@ classDiagram
         cv_tag: str
         mode: ControllerMode
         sp_trajectory: Trajectory
+        cascade_controller: ~ControllerBase~
         +change_control_mode(mode)
         +update(t)
         +_control_algorithm()
@@ -75,24 +76,33 @@ classDiagram
         value: float|NDArray
         ok: bool
     }
+    class SensorOuput{
+        <<TagInfo>>
+    }
+    class CalculationOutput{
+        <<TagInfo>>
+    }
+    class ControllerOutput{
+        <<TagInfo>>
+    }
 
-    System --> DynamicModel : orchestrates
-    DynamicModel --> CategoryView : exposes views
-    DynamicModel ..> MeasurableMetadata : configured by
-    System --> SensorBase : owns
-    System --> CalculationBase : owns
-    System --> ControllerBase : owns
-    ControllerBase --> Trajectory : consumes
-    SensorBase --> TagInfo : publishes
-    CalculationBase --> TagInfo : outputs
-    ControllerBase --> TagInfo : manages tags
-    TagInfo --> TagData : stores samples
-    SensorBase --> TagData : emits
-    CalculationBase --> TagData : emits
-    ControllerBase --> TagData : MV history
-    ControllerBase ..> DynamicModel : writes MV
+    System o-- DynamicModel : orchestrates
+    DynamicModel *-- CategoryView : exposes views
+    DynamicModel <-- MeasurableMetadata : fields annotated by
+    System "1" *-- "*" SensorBase
+    System "1" *-- "*" CalculationBase
+    System "1" *-- "*" ControllerBase
+    ControllerBase --* Trajectory : obtains setpoint
+    SensorBase ..> DynamicModel 
+    SensorBase --> SensorOutput 
+    SensorOutput ..> CalculationBase
+    CalculationBase --> CalculationOutput
+    CalculationOutput ..> CalculationBase
+    SensorOutput ..> ControllerBase : reads cv/mv
+    CalculationOutput ..> ControllerBase : reads cv/mv
+    ControllerBase --> ControllerOutput
+    ControllerOutput ..> DynamicModel : manipulates controled elements
     SensorBase ..> DynamicModel : reads values
-    CalculationBase ..> TagInfo : consumes inputs
 ```
 
 ## Data flow highlights

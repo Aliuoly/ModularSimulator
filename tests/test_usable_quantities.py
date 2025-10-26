@@ -7,7 +7,6 @@ from modular_simulation.core import create_system
 from modular_simulation.interfaces import (
     ControllerBase,
     ControllerMode,
-    ModelInterface,
     SampledDelayedSensor,
     Trajectory,
 )
@@ -58,25 +57,26 @@ def base_controller(heater_mv_range):
     )
 
 
-def test_duplicate_tags_raise_exception():
+def test_duplicate_tags_raise_exception(thermal_model):
     sensors = [
         SampledDelayedSensor(measurement_tag="temperature", alias_tag="duplicate", unit=Unit("K")),
         SampledDelayedSensor(measurement_tag="temperature", alias_tag="duplicate", unit=Unit("K")),
     ]
     with pytest.raises(ExceptionGroup) as excinfo:
-        ModelInterface(sensors=sensors)
+        create_system(
+            dt=Quantity(1.0, Unit("s")),
+            dynamic_model=thermal_model,
+            sensors=sensors,
+        )
     assert any(isinstance(err, SensorConfigurationError) for err in excinfo.value.exceptions)
 
 
 def test_missing_sensor_source_raises(thermal_model):
-    interface = ModelInterface(
-        sensors=[SampledDelayedSensor(measurement_tag="unknown_tag", unit=Unit("K"))]
-    )
     with pytest.raises(ExceptionGroup) as excinfo:
         create_system(
             dt=Quantity(1.0, Unit("s")),
             dynamic_model=thermal_model,
-            model_interface=interface,
+            sensors=[SampledDelayedSensor(measurement_tag="unknown_tag", unit=Unit("K"))],
         )
     assert any(isinstance(err, SensorConfigurationError) for err in excinfo.value.exceptions)
 
@@ -88,7 +88,12 @@ def test_missing_calculation_input_raises(thermal_model, base_sensor):
         time_constant=1.0,
     )
     with pytest.raises(ExceptionGroup) as excinfo:
-        ModelInterface(sensors=[base_sensor], calculations=[calc])
+        create_system(
+            dt=Quantity(1.0, Unit("s")),
+            dynamic_model=thermal_model,
+            sensors=[base_sensor],
+            calculations=[calc],
+        )
     assert any(isinstance(err, CalculationConfigurationError) for err in excinfo.value.exceptions)
 
 
@@ -100,7 +105,9 @@ def test_missing_controller_references_raise(thermal_model, base_sensor, base_fi
         mv_range=heater_mv_range,
     )
     with pytest.raises(ExceptionGroup) as excinfo:
-        ModelInterface(
+        create_system(
+            dt=Quantity(1.0, Unit("s")),
+            dynamic_model=thermal_model,
             sensors=[base_sensor],
             calculations=[base_filter],
             controllers=[controller],
@@ -117,25 +124,29 @@ def test_update_executes_all_components(thermal_model, base_sensor, base_filter,
         coefficient_of_variance=0.0,
         unit=Unit("W"),
     )
-    interface = ModelInterface(
+    system = create_system(
+        dt=Quantity(1.0, Unit("s")),
+        dynamic_model=thermal_model,
         sensors=[base_sensor, mv_sensor],
         calculations=[base_filter],
         controllers=[base_controller],
+        use_numba=False,
+        record_history=False,
     )
-    interface._initialize(thermal_model)
 
-    thermal_model.temperature = 305.0
-    interface.update(1.0)
-    interface.update(2.0)
+    system.dynamic_model.temperature = 305.0
+    system.update(1.0)
+    system.dynamic_model.temperature = 305.0
+    system.update(2.0)
 
     sensor_history = base_sensor._tag_info.history
     assert len(sensor_history) >= 3
     assert sensor_history[-1].value == pytest.approx(305.0)
 
-    filtered_info = next(info for info in interface.tag_infos if info.tag == "temp_filtered")
+    filtered_info = system.tag_infos[[info.tag for info in system.tag_infos].index("temp_filtered")]
     assert filtered_info.history[-1].time == pytest.approx(2.0)
 
-    control_value = thermal_model.heater_power
+    control_value = system.dynamic_model.heater_power
     lower, upper = base_controller.mv_range
     assert lower <= control_value <= upper
     assert not math.isnan(control_value)

@@ -1,10 +1,11 @@
 import pytest
-from astropy.units import Unit
+import pytest
+from astropy.units import Quantity, Unit
 
+from modular_simulation.core import create_system
 from modular_simulation.interfaces import (
     ControllerBase,
     ControllerMode,
-    ModelInterface,
     SampledDelayedSensor,
     Trajectory,
 )
@@ -43,49 +44,55 @@ def controller_setup(thermal_model, heater_mv_range):
         ramp_rate=10.0,
         gain=0.5,
     )
-    interface = ModelInterface(
+    system = create_system(
+        dt=Quantity(1.0, Unit("s")),
+        dynamic_model=thermal_model,
         sensors=[temp_sensor, mv_sensor],
         controllers=[controller],
+        use_numba=False,
+        record_history=False,
     )
-    interface._initialize(thermal_model)
-    return controller, temp_sensor, thermal_model, interface
+    return controller, system
 
 
 def test_controller_initial_mode_is_auto(controller_setup):
-    controller, sensor, model, interface = controller_setup
+    controller, system = controller_setup
     assert controller.mode == ControllerMode.AUTO
     assert controller._sp_getter == controller.sp_trajectory
 
 
 def test_controller_update_applies_ramp(controller_setup):
-    controller, sensor, model, interface = controller_setup
+    controller, system = controller_setup
 
-    model.temperature = 290.0
+    system.dynamic_model.temperature = 290.0
     controller.sp_trajectory.set_now(0.0, 310.0)
-    interface.update(1.0)
-    interface.update(2.0)
+    system.update(1.0)
+    system.dynamic_model.temperature = 290.0
+    system.update(2.0)
     assert controller._last_output.ok is True
 
     allowed_delta = controller.ramp_rate * 1.0
     expected = controller._last_output.value
     assert expected == pytest.approx(controller._u0 + allowed_delta, rel=1e-6)
-    assert model.heater_power == expected
+    assert system.dynamic_model.heater_power == expected
 
 
 def test_controller_mode_switching(controller_setup):
-    controller, sensor, model, interface = controller_setup
+    controller, system = controller_setup
 
     controller.change_control_mode(ControllerMode.TRACKING)
     assert controller.mode == ControllerMode.TRACKING
 
-    model.temperature = 305.0
-    interface.update(1.0)
-    interface.update(2.0)
+    system.dynamic_model.temperature = 305.0
+    system.update(1.0)
+    system.dynamic_model.temperature = 305.0
+    system.update(2.0)
     assert controller.sp_trajectory(2.0) == pytest.approx(305.0)
 
     controller.change_control_mode("auto")
     assert controller.mode == ControllerMode.AUTO
 
     controller.sp_trajectory.set_now(3.0, 315.0)
-    interface.update(3.0)
+    system.dynamic_model.temperature = 305.0
+    system.update(3.0)
     assert controller._last_output.time == pytest.approx(3.0)

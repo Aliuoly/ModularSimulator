@@ -66,19 +66,27 @@ class InternalModelController(ControllerBase):
     _mv_converter_from_model_units_to_system_units: Callable = PrivateAttr()
 
     def _initialize(
-            self, 
-            tag_infos: list[TagInfo],
-            usable_quantities, # kept for IMC intiialization. I hate it. 
-            control_elements, 
-            is_final_control_element = True):
+        self,
+        tag_infos: list[TagInfo],
+        sensors,
+        calculations,
+        control_elements,
+        is_final_control_element = True,
+    ):
         """override the controller _initialize method to do some additional work in setting model"""
         # first do the normal initialize though
-        super()._initialize(tag_infos, usable_quantities, control_elements, is_final_control_element)
+        super()._initialize(
+            tag_infos,
+            sensors,
+            calculations,
+            control_elements,
+            is_final_control_element,
+        )
         # and now set the model
         # look through the available calculations and grab the right one
         # also grab the unit info so we can pass in the model input
-        # with the units the calculation expects. 
-        for calculation in usable_quantities.calculations:
+        # with the units the calculation expects.
+        for calculation in calculations:
             if calculation.calculation_name == self.model.calculation_name:
                 self._internal_model = getattr(calculation, self.model.method_name)
                 self._mv_converter_from_model_units_to_system_units = \

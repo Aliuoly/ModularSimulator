@@ -1,6 +1,6 @@
 import pytest
 
-from modular_simulation.interfaces import ModelInterface, SampledDelayedSensor
+from modular_simulation.interfaces import SampledDelayedSensor
 
 
 @pytest.fixture()
@@ -14,8 +14,7 @@ def sampled_sensor(thermal_model):
         random_seed=1,
         unit="K",
     )
-    interface = ModelInterface(sensors=[sensor])
-    interface._initialize(thermal_model)
+    sensor._initialize(thermal_model)
     return sensor, thermal_model
 
 
@@ -55,8 +54,7 @@ def test_sensor_deadtime_returns_delayed_samples(thermal_model):
         random_seed=0,
         unit="K",
     )
-    interface = ModelInterface(sensors=[sensor])
-    interface._initialize(thermal_model)
+    sensor._initialize(thermal_model)
 
     true_history = []
     samples = []

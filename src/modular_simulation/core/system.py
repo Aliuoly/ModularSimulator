@@ -17,9 +17,15 @@ from scipy.integrate import solve_ivp  # type: ignore
 from tqdm import tqdm  # type: ignore
 
 from modular_simulation.core.dynamic_model import DynamicModel
-from modular_simulation.interfaces import ModelInterface
-from modular_simulation.interfaces.controllers.controller_base import ControllerMode
+from modular_simulation.interfaces import (
+    CalculationBase,
+    ControllerBase,
+    ControllerMode,
+    SensorBase,
+)
+from modular_simulation.interfaces.tag_info import TagInfo
 from modular_simulation.validation.exceptions import (
+    CalculationConfigurationError,
     ControllerConfigurationError,
     SensorConfigurationError,
 )
@@ -38,8 +44,17 @@ class System(BaseModel):
     dynamic_model: DynamicModel = Field(
         ..., description="Container for differential, algebraic, and control variables."
     )
-    model_interface: ModelInterface = Field(
-        ..., description="Sensors, calculations, and controllers attached to the model."
+    sensors: list[SensorBase] = Field(
+        default_factory=list,
+        description="Sensors attached to the model for runtime measurements.",
+    )
+    calculations: list[CalculationBase] = Field(
+        default_factory=list,
+        description="Calculations that post-process measured data into usable tags.",
+    )
+    controllers: list[ControllerBase] = Field(
+        default_factory=list,
+        description="Controllers acting on measured/calculated tags to drive control elements.",
     )
     solver_options: dict[str, Any] = Field(
         default_factory=lambda: {"method": "LSODA"},
@@ -68,10 +83,14 @@ class System(BaseModel):
     _history_slots: list[tuple[Callable[[], Any], list]] = PrivateAttr(default_factory=list)
     _params: dict[str, Any] = PrivateAttr()
     _t: float = PrivateAttr(default=0.0)
+    _components_initialized: bool = PrivateAttr(default=False)
 
     @model_validator(mode="after")
     def _validate(self) -> "System":
         exception_group: list[Exception] = []
+        exception_group.extend(self._validate_duplicate_tags())
+        exception_group.extend(self._validate_calculation_inputs())
+        exception_group.extend(self._validate_controller_tags())
         exception_group.extend(self._validate_sensors_resolvable())
         exception_group.extend(self._validate_controllers_resolvable())
         if exception_group:
@@ -79,8 +98,36 @@ class System(BaseModel):
                 "errors encountered during model interface instantiation:",
                 exception_group,
             )
-        self.model_interface._initialize(self.dynamic_model)
+        self._initialize_components()
         return self
+
+    def _initialize_components(self) -> None:
+        for sensor in self.sensors:
+            sensor._initialize(self.dynamic_model)
+        tag_infos = self._tag_infos
+        for calculation in self.calculations:
+            calculation._initialize(tag_infos)
+        for controller in self.controllers:
+            controller._initialize(
+                tag_infos,
+                sensors=self.sensors,
+                calculations=self.calculations,
+                control_elements=self.dynamic_model.control_elements,
+            )
+        self._components_initialized = True
+
+    def update(self, t: float | None = None) -> None:
+        if not self._components_initialized:
+            raise RuntimeError(
+                "system interface components are not initialized. Ensure the system has been constructed."
+            )
+        time = self._t if t is None else t
+        for sensor in self.sensors:
+            sensor.measure(time)
+        for calculation in self.calculations:
+            calculation.calculate(time)
+        for controller in self.controllers:
+            controller.update(time)
 
     def model_post_init(self, __context: Any) -> None:
         if self.use_numba:
@@ -155,10 +202,79 @@ class System(BaseModel):
             "rhs_function": self.dynamic_model.rhs,
         }
 
+    def _validate_duplicate_tags(self) -> list[SensorConfigurationError]:
+        exception_group: list[SensorConfigurationError] = []
+        seen_tags: list[str] = []
+        duplicate_tags: list[str] = []
+        for tag in (tag_info.tag for tag_info in self._tag_infos):
+            if tag in seen_tags and ".sp" not in tag:
+                duplicate_tags.append(tag)
+            else:
+                seen_tags.append(tag)
+        if duplicate_tags:
+            exception_group.append(
+                SensorConfigurationError(
+                    "The following duplicate tag(s) found: "
+                    + ", ".join(sorted(set(duplicate_tags)))
+                    + "."
+                )
+            )
+        return exception_group
+
+    def _validate_calculation_inputs(self) -> list[CalculationConfigurationError]:
+        exception_group: list[CalculationConfigurationError] = []
+        available_tags = {tag_info.tag for tag_info in self._tag_infos}
+        for calculation in self.calculations:
+            missing_tags = [
+                info.tag
+                for info in calculation._input_tag_info_dict.values()
+                if info.tag not in available_tags
+            ]
+            if missing_tags:
+                exception_group.append(
+                    CalculationConfigurationError(
+                        "The following input tag(s) required by "
+                        f"'{calculation.__class__.__name__}' are not available: "
+                        + ", ".join(sorted(set(missing_tags)))
+                        + "."
+                    )
+                )
+        return exception_group
+
+    def _validate_controller_tags(self) -> list[ControllerConfigurationError]:
+        exception_group: list[ControllerConfigurationError] = []
+        available_tags = {tag_info.tag for tag_info in self._tag_infos}
+        missing_cv_tags: list[str] = []
+        missing_mv_tags: list[str] = []
+        for controller in self.controllers:
+            if controller.cv_tag not in available_tags:
+                missing_cv_tags.append(controller.cv_tag)
+            if controller.mv_tag not in available_tags:
+                missing_mv_tags.append(controller.mv_tag)
+        if missing_cv_tags:
+            exception_group.append(
+                ControllerConfigurationError(
+                    "The following controlled variables are not available as "
+                    "either measurements or calculations: "
+                    + ", ".join(sorted(set(missing_cv_tags)))
+                    + "."
+                )
+            )
+        if missing_mv_tags:
+            exception_group.append(
+                ControllerConfigurationError(
+                    "The following manipulated variables are not available as "
+                    "either measurements or calculations: "
+                    + ", ".join(sorted(set(missing_mv_tags)))
+                    + "."
+                )
+            )
+        return exception_group
+
     def _validate_sensors_resolvable(self) -> list[SensorConfigurationError]:
         unavailable_measurement_tags: list[str] = []
         available_tags = set(self.dynamic_model.tag_list)
-        for sensor in self.model_interface.sensors:
+        for sensor in self.sensors:
             if sensor.measurement_tag not in available_tags:
                 unavailable_measurement_tags.append(sensor.measurement_tag)
         if not unavailable_measurement_tags:
@@ -176,7 +292,7 @@ class System(BaseModel):
         available_ce_tags = set(self.dynamic_model.control_elements.tag_list)
         improper_ce_tags = [
             controller.mv_tag
-            for controller in self.model_interface.controllers
+            for controller in self.controllers
             if controller.mv_tag not in available_ce_tags
         ]
         if improper_ce_tags:
@@ -197,7 +313,7 @@ class System(BaseModel):
         self._history["time"].append(self._t)
 
     def _pre_integration_step(self) -> tuple[NDArray, NDArray]:
-        self.model_interface.update(self._t)
+        self.update()
         return (
             self.dynamic_model.states.to_array(),
             self.dynamic_model.control_elements.to_array(),
@@ -341,9 +457,33 @@ class System(BaseModel):
         return controller.mode
 
     @cached_property
+    def _tag_infos(self) -> list[TagInfo]:
+        infos: list[TagInfo] = []
+        for sensor in self.sensors:
+            infos.append(sensor._tag_info)
+        for calculation in self.calculations:
+            infos.extend(calculation._output_tag_info_dict.values())
+        for controller in self.controllers:
+            active = controller
+            while True:
+                infos.append(active._make_sp_tag_info(infos))
+                if active.cascade_controller is None:
+                    break
+                active = active.cascade_controller
+        return infos
+
+    @cached_property
+    def tag_infos(self) -> list[TagInfo]:
+        return self._tag_infos
+
+    @cached_property
+    def tag_list(self) -> list[str]:
+        return [tag_info.tag for tag_info in self._tag_infos]
+
+    @cached_property
     def controller_dictionary(self) -> dict[str, ControllerBase]:
         return_dict: dict[str, ControllerBase] = {}
-        for controller in self.model_interface.controllers:
+        for controller in self.controllers:
             active = controller
             return_dict[active.cv_tag] = active
             while active.cascade_controller is not None:
@@ -367,9 +507,9 @@ class System(BaseModel):
             "sensors": sensors_detail,
             "calculations": calculations_detail,
         }
-        for sensor in self.model_interface.sensors:
+        for sensor in self.sensors:
             sensors_detail[sensor.alias_tag] = sensor._tag_info.history
-        for calculation in self.model_interface.calculations:
+        for calculation in self.calculations:
             for output_tag_name, output_tag_info in calculation._output_tag_info_dict.items():
                 calculations_detail[output_tag_name] = output_tag_info.history
         return history
@@ -383,7 +523,7 @@ class System(BaseModel):
     @property
     def setpoint_history(self) -> dict[str, dict[str, list]]:
         history: dict[str, dict[str, list]] = {}
-        for controller in self.model_interface.controllers:
+        for controller in self.controllers:
             history.update(controller.sp_history)
         return history
 

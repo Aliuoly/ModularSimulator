@@ -12,7 +12,6 @@ from modular_simulation.core import (
 from modular_simulation.interfaces import (
     ControllerBase,
     ControllerMode,
-    ModelInterface,
     SampledDelayedSensor,
     Trajectory,
 )
@@ -111,12 +110,10 @@ def heater_system():
         unit=Unit("W"),
     )
 
-    interface = ModelInterface(sensors=[temp_sensor, mv_sensor])
-
     system = create_system(
         dt=dt,
         dynamic_model=model,
-        model_interface=interface,
+        sensors=[temp_sensor, mv_sensor],
         use_numba=False,
         record_history=True,
         solver_options={"method": "RK45", "rtol": 1e-9, "atol": 1e-9},
@@ -174,15 +171,11 @@ def test_controller_management_in_system(heater_mv_range):
         mv_range=heater_mv_range,
     )
 
-    interface = ModelInterface(
-        sensors=[sensor, mv_sensor],
-        controllers=[controller],
-    )
-
     system = create_system(
         dt=dt,
         dynamic_model=model,
-        model_interface=interface,
+        sensors=[sensor, mv_sensor],
+        controllers=[controller],
         use_numba=False,
         record_history=False,
         solver_options={"method": "RK45", "rtol": 1e-9, "atol": 1e-9},

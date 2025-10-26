@@ -35,17 +35,30 @@ class FirstOrderTrajectoryController(ControllerBase):
     _get_open_loop_tc: Callable[[], float] = PrivateAttr()
     _t: float = PrivateAttr(default = 0.)
     # ------------------------------------------------------------------------
-    def _initialize(self, tag_infos, usable_quantities, control_elements, is_final_control_element = True):
+    def _initialize(
+        self,
+        tag_infos,
+        sensors,
+        calculations,
+        control_elements,
+        is_final_control_element = True,
+    ):
         # do whatever normal initialization first
-        super()._initialize(tag_infos, usable_quantities, control_elements, is_final_control_element)
+        super()._initialize(
+            tag_infos,
+            sensors,
+            calculations,
+            control_elements,
+            is_final_control_element,
+        )
         # and then resolve the open_loop_time_constant thing
         if isinstance(self.open_loop_time_constant, str):
-            for sensor in usable_quantities.sensors:
+            for sensor in sensors:
                 if sensor.alias_tag == self.open_loop_time_constant:
                     self._get_open_loop_tc = lambda tag_info = sensor._tag_info: tag_info.data.value
                     return
 
-            for calculation in usable_quantities.calculations:
+            for calculation in calculations:
                 available_tags = calculation._output_tag_info_dict.keys()
                 if self.open_loop_time_constant in available_tags:
                     tag_info = calculation._output_tag_info_dict[self.open_loop_time_constant]

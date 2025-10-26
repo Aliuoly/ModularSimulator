@@ -11,8 +11,10 @@ from modular_simulation.interfaces.controllers.trajectory import Trajectory
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 from astropy.units import Quantity, UnitBase, UnitConversionError #type: ignore
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from modular_simulation.core.dynamic_model import DynamicModel
-    from modular_simulation.interfaces.model_interface import ModelInterface
+    from modular_simulation.interfaces.calculations.calculation_base import CalculationBase
+    from modular_simulation.interfaces.sensors.sensor_base import SensorBase
 import logging
 logger = logging.getLogger(__name__)
 
@@ -77,8 +79,9 @@ class ControllerBase(BaseModel, ABC):
             "manipulated variable (MV) for this controller.")
     cv_tag: str = Field(
         ...,
-        description = "The tag of the ModelInterface corresponding to the" \
-                        "measured or calculated controlled variable (CV) for this controller"
+        description=(
+            "The tag corresponding to the measured or calculated controlled variable (CV) for this controller"
+        ),
     )
     sp_trajectory: Trajectory = Field(
         ..., 
@@ -258,8 +261,9 @@ class ControllerBase(BaseModel, ABC):
         # will be provided by the sp_trajectory
     def _initialize(
         self,
-        tag_infos: list[TagInfo], 
-        usable_quantities: "ModelInterface", # kept for IMC initialization. I hate it.
+        tag_infos: list[TagInfo],
+        sensors: "Sequence[SensorBase]",
+        calculations: "Sequence[CalculationBase]",
         control_elements: Any,
         is_final_control_element: bool = True,
         ) -> None:
@@ -294,11 +298,12 @@ class ControllerBase(BaseModel, ABC):
                 logger.debug(f"'{self.cv_tag}' controller not in CASCADE mode -> cascade controller forced to TRACKING. ")
             
             self.cascade_controller._initialize(
-                tag_infos = tag_infos, 
-                usable_quantities = usable_quantities,
-                control_elements = control_elements, 
+                tag_infos=tag_infos,
+                sensors=sensors,
+                calculations=calculations,
+                control_elements=control_elements,
                 is_final_control_element=False,
-                )
+            )
         
 
     def update(self, t: float) -> TagData:

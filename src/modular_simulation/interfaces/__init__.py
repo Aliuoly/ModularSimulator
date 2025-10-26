@@ -15,16 +15,6 @@ from .controllers import (
     Trajectory,
 )
 from .controllers.controller_base import ControllerMode
-from .model_interface import ModelInterface
-
-ModelInterface.model_rebuild(
-    _types_namespace={
-        "SensorBase": SensorBase,
-        "CalculationBase": CalculationBase,
-        "ControllerBase": ControllerBase,
-        "TagData": TagData,
-    }
-)
 
 __all__ = [
     "BangBangController",
@@ -34,7 +24,6 @@ __all__ = [
     "ControllerMode",
     "FirstOrderTrajectoryController",
     "InternalModelController",
-    "ModelInterface",
     "PIDController",
     "SampledDelayedSensor",
     "SensorBase",

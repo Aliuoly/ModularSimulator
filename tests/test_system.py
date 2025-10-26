@@ -1,7 +1,8 @@
+from typing import Annotated
+
 import numpy as np
 import pytest
 from astropy.units import Quantity, Unit
-from typing import Annotated
 
 from modular_simulation.core import (
     DynamicModel,
@@ -167,7 +168,7 @@ def test_controller_management_in_system(heater_mv_range):
     controller = SimpleController(
         mv_tag="heater_power",
         cv_tag="temp_meas",
-        sp_trajectory=Trajectory(y0=300.0, unit=Unit("K")),
+        sp_trajectory=Trajectory(y0=Quantity(300.0, Unit("K"))),
         mv_range=heater_mv_range,
     )
 
@@ -187,4 +188,4 @@ def test_controller_management_in_system(heater_mv_range):
 
     system.set_controller_mode("temp_meas", ControllerMode.AUTO)
     trajectory = system.extend_controller_trajectory("temp_meas", value=310.0)
-    assert trajectory(0.0) == pytest.approx(310.0)
+    assert trajectory(0.0).to_value(Unit("K")) == pytest.approx(310.0)

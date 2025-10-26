@@ -2,12 +2,14 @@ from collections.abc import Callable
 import bisect
 import math
 import numpy as np
-from astropy.units import UnitBase, Unit #type: ignore
+from astropy.units import Quantity, UnitBase, Unit  # type: ignore
 from dataclasses import dataclass
-from pydantic import BaseModel, Field, PrivateAttr, field_serializer, field_validator, ConfigDict
+from pydantic import BaseModel, Field, PrivateAttr, field_serializer, ConfigDict
 from dataclasses import replace
+from typing import Any
 
 Number = int | float
+ValueLike = Number | Quantity
 
 # ------------------------------
 # Utilities
@@ -138,8 +140,7 @@ class Trajectory(BaseModel):
     maintained alongside cached breakpoints and starting values to keep
     evaluation amortized :math:`O(1)` for monotonic time progression.
     """
-    y0: float
-    unit: UnitBase|str
+    y0: ValueLike
     t0: float = 0.0
     segments: list[Segment] = Field(default_factory=list)
 
@@ -148,6 +149,7 @@ class Trajectory(BaseModel):
     _cursor: int = PrivateAttr(default=0)
     _last_value: float | None = PrivateAttr(default=None)
     _start_vals: list[float] = PrivateAttr(default_factory=list)  # y at each segment start (O(1) eval)
+    _unit: UnitBase = PrivateAttr(default=Unit(""))
 
     # historization and bookkeeping for fast set_now
     _history_times: list[float] = PrivateAttr(default_factory=list)
@@ -157,18 +159,39 @@ class Trajectory(BaseModel):
     _max_retained_segments: int = PrivateAttr(default=1)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def model_post_init(self, __context: Any) -> None:
+        unit = self._infer_unit(self.y0)
+        object.__setattr__(self, "_unit", unit)
+        object.__setattr__(self, "y0", self._to_magnitude(self.y0, unit=unit))
+        if self.segments:
+            self._rebuild_breaks(recompute_starts=True)
+        else:
+            self._breaks = [self.t0]
+
+    def _infer_unit(self, value: ValueLike) -> UnitBase:
+        if isinstance(value, Quantity):
+            return value.unit
+        return Unit("")
+
+    def _to_magnitude(self, value: ValueLike, *, unit: UnitBase | None = None) -> float:
+        target_unit = self._unit if unit is None else unit
+        if isinstance(value, Quantity):
+            if not value.unit.is_equivalent(target_unit):
+                raise ValueError(
+                    f"Trajectory value with unit '{value.unit}' is not compatible with trajectory unit '{target_unit}'."
+                )
+            return float(value.to_value(target_unit))
+        return float(value)
+
+    @property
+    def unit(self) -> UnitBase:
+        return self._unit
     # --------------------------
     # Builder / mutators (chainable)
     # --------------------------
-    @field_validator("unit", mode = 'before')
-    @classmethod
-    def convert_unit(cls, unit: str|UnitBase) -> UnitBase:
-        if isinstance(unit, str):
-            return Unit(unit)
-        return unit
-    
     def clone(self) -> "Trajectory":
-        out = Trajectory(y0 = self.y0, unit = self.unit, t0 = self.t0, segments = list(self.segments))
+        out = Trajectory(y0=Quantity(self.y0, self.unit), t0=self.t0, segments=list(self.segments))
         out._breaks = list(self._breaks)
         out._start_vals = list(self._start_vals)
         out._history_times = list(self._history_times)
@@ -210,14 +233,14 @@ class Trajectory(BaseModel):
             "time": np.asarray(self._history_times, dtype=float),
             "value": np.asarray(self._history_values, dtype=float),
         }
-    def writer(self, time_getter: Callable[[], float]) -> Callable[[Number], None]:
+    def writer(self, time_getter: Callable[[], float]) -> Callable[[ValueLike], None]:
         """Return a callable that writes setpoints at the time provided by ``time_getter``."""
 
-        def _write(value: Number) -> None:
+        def _write(value: ValueLike) -> None:
             t = time_getter()
             if t is None:
                 raise RuntimeError("Cannot write to trajectory without a valid time reference.")
-            self.set_now(float(t), float(value))
+            self.set_now(float(t), value)
 
         return _write
     def last_setpoint(self) -> Number:
@@ -243,19 +266,27 @@ class Trajectory(BaseModel):
             return False
         return True
 
-    def hold(self, duration: float, value: float | None = None) -> "Trajectory":
+    def hold(self, duration: float, value: ValueLike | None = None) -> "Trajectory":
         if value is None:
-            value = self.peek_end_value()
+            value_mag = self.peek_end_value()
+        else:
+            value_mag = self._to_magnitude(value)
         t = self._end_time()
-        self._append(Hold(t, duration, value))
+        self._append(Hold(t, duration, value_mag))
         return self
 
-    def step(self, magnitude: float) -> "Trajectory":
+    def step(self, magnitude: ValueLike) -> "Trajectory":
         t = self._end_time()
-        self._append(Step(t, 0.0, magnitude))
+        self._append(Step(t, 0.0, self._to_magnitude(magnitude)))
         return self
 
-    def ramp(self, magnitude: float | None = None, *, duration: float | None = None, ramprate: float | None = None) -> "Trajectory":
+    def ramp(
+        self,
+        magnitude: ValueLike | None = None,
+        *,
+        duration: float | None = None,
+        ramprate: float | None = None,
+    ) -> "Trajectory":
         if magnitude is None and duration is None and ramprate is None:
             raise ValueError("Provide magnitude+duration, or magnitude+ramprate, or duration+ramprate")
         if magnitude is None:
@@ -263,16 +294,37 @@ class Trajectory(BaseModel):
         if duration is None:
             duration = abs(magnitude / ramprate)  # type: ignore
         t = self._end_time()
-        self._append(Ramp(t, duration, magnitude))
+        self._append(Ramp(t, duration, self._to_magnitude(magnitude)))
         return self
 
-    def random_walk(self, std: float = 0.1, *, duration: float = 1.0, dt: float = 1.0, min: float | None = None, max: float | None = None, seed: int = 0) -> "Trajectory":
+    def random_walk(
+        self,
+        std: ValueLike = 0.1,
+        *,
+        duration: float = 1.0,
+        dt: float = 1.0,
+        min: ValueLike | None = None,
+        max: ValueLike | None = None,
+        seed: int = 0,
+    ) -> "Trajectory":
         t = self._end_time()
-        self._append(RandomWalk(t, duration, std, dt, min, max, seed))
+        clamp_min = None if min is None else self._to_magnitude(min)
+        clamp_max = None if max is None else self._to_magnitude(max)
+        self._append(
+            RandomWalk(
+                t,
+                duration,
+                self._to_magnitude(std),
+                dt,
+                clamp_min,
+                clamp_max,
+                seed,
+            )
+        )
         return self
 
     # O(1) inner-loop retarget: no deletion, just append a Hold at t
-    def set_now(self, t: float, value: float) -> "Trajectory":
+    def set_now(self, t: float, value: ValueLike) -> "Trajectory":
         """Append a hold segment starting at ``t`` with the provided value.
 
         When ``t`` is at or beyond the current end time the operation is O(1).
@@ -299,12 +351,13 @@ class Trajectory(BaseModel):
             del self.segments[:drop]
             del self._start_vals[:drop]
             self._rebuild_breaks()
-        
-        
-        self._append(Hold(t0 = t, duration = 0, value = value), start_value=prev_value)
-        self._record_history_entry(t, value)
+
+        value_mag = self._to_magnitude(value)
+
+        self._append(Hold(t0 = t, duration = 0, value = value_mag), start_value=prev_value)
+        self._record_history_entry(t, value_mag)
         self._last_set_time = t
-        self._last_set_value = value
+        self._last_set_value = value_mag
         return self
     
 
@@ -330,8 +383,8 @@ class Trajectory(BaseModel):
     # Evaluation
     # --------------------------
 
-    def __call__(self, t: float) -> float:
-        return self.eval(t)
+    def __call__(self, t: float) -> Quantity:
+        return Quantity(self.eval(t), self.unit)
 
     def eval(self, t: float) -> float:
         if not self.segments:
@@ -412,13 +465,10 @@ class Trajectory(BaseModel):
             for s in self.segments:
                 self._start_vals.append(y)
                 y = s.eval(s.t1(), y)
-    @field_serializer("unit", mode="plain")
-    def _serialize_unit(self, unit: UnitBase) -> str:
-        return str(unit)
     @field_serializer("segments", mode="plain")
     def _serialize_segments(self, segments: list[Segment]) -> list:
         # subclass of segments all get interpreted as base 'Segment',
-        # which will throw unimplemented error if used as is. 
+        # which will throw unimplemented error if used as is.
         # therefore, serialization must lose info on future
         # segments:
         return []
@@ -456,25 +506,39 @@ class MultiTrajectory:
 # ------------------------------
 if __name__ == "__main__":
     # Build a trajectory
-    T = (Trajectory(y0=0.0, unit = "m3", t0=0.0)
-         .hold(1.0, value=0.0)
-         .step(5.0)
-         .ramp(magnitude=5.0, ramprate=1.0)  # duration = 5s
-         .random_walk(std=0.1, duration=10.0, dt=0.5, min=0.0, max=12.0, seed=42)
-         .hold(3.0))
+    T = (
+        Trajectory(y0=Quantity(0.0, Unit("m3")), t0=0.0)
+        .hold(1.0, value=Quantity(0.0, Unit("m3")))
+        .step(Quantity(5.0, Unit("m3")))
+        .ramp(magnitude=Quantity(5.0, Unit("m3")), ramprate=1.0)  # duration = 5s
+        .random_walk(
+            std=Quantity(0.1, Unit("m3")),
+            duration=10.0,
+            dt=0.5,
+            min=Quantity(0.0, Unit("m3")),
+            max=Quantity(12.0, Unit("m3")),
+            seed=42,
+        )
+        .hold(3.0)
+    )
 
-    ts = np.linspace(0, 25, 101, dtype = np.float64)
-    ys = np.array([T(t) for t in ts])
+    ts = np.linspace(0, 25, 101, dtype=np.float64)
+    ys = np.array([T(t).to_value(Unit("m3")) for t in ts])
     print(f"y(0..25): mean={ys.mean():.3f}, min={ys.min():.3f}, max={ys.max():.3f}")
 
     # Cascade update: outer loop updates inner-loop SP every 0.1s
-    inner = Trajectory(y0=ys[0], unit = "m2", t0=0.0)
+    inner = Trajectory(y0=Quantity(ys[0], Unit("m2")), t0=0.0)
     for k, t in enumerate(ts):
         sp = T(t)
         inner.set_now(t, sp)  # O(1) append + clear future
         _ = inner(t)  # controller pulls inner(t)
 
     # Vector example (e.g., pressure & temperature)
-    M = MultiTrajectory([T.clone(), Trajectory(y0=2.0, unit = "m3").ramp(magnitude=-1.0, duration=10.0)])
-    yv = M(3.3)
+    M = MultiTrajectory(
+        [
+            T.clone(),
+            Trajectory(y0=Quantity(2.0, Unit("m3"))).ramp(magnitude=Quantity(-1.0, Unit("m3")), duration=10.0),
+        ]
+    )
+    yv = np.array([track(t).to_value(track.unit) for track in M.tracks])
     print("vector at t=3.3:", yv)

@@ -437,9 +437,19 @@ class System(BaseModel):
         if value is None:
             value = active_trajectory(self._t)
 
-        old_value = active_trajectory(self._t)
+        old_quantity = active_trajectory(self._t)
         active_trajectory.set_now(self._t, value)
-        new_value = active_trajectory(self._t)
+        new_quantity = active_trajectory(self._t)
+        old_value = (
+            old_quantity.to_value(active_trajectory.unit)
+            if isinstance(old_quantity, Quantity)
+            else old_quantity
+        )
+        new_value = (
+            new_quantity.to_value(active_trajectory.unit)
+            if isinstance(new_quantity, Quantity)
+            else new_quantity
+        )
         logger.info(
             "Setpoint trajectory for '%(tag)s' controller changed at time %(time)0.0f from %(old)0.1e to %(new)0.1e",
             {"tag": cv_tag, "time": self._t, "old": old_value, "new": new_value},

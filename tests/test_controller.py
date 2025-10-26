@@ -1,5 +1,4 @@
 import pytest
-import pytest
 from astropy.units import Quantity, Unit
 
 from modular_simulation.core import create_system
@@ -39,7 +38,7 @@ def controller_setup(thermal_model, heater_mv_range):
     controller = RampController(
         mv_tag="heater_power",
         cv_tag="temp_meas",
-        sp_trajectory=Trajectory(y0=300.0, unit=Unit("K")),
+        sp_trajectory=Trajectory(y0=Quantity(300.0, Unit("K"))),
         mv_range=heater_mv_range,
         ramp_rate=10.0,
         gain=0.5,
@@ -52,6 +51,7 @@ def controller_setup(thermal_model, heater_mv_range):
         use_numba=False,
         record_history=False,
     )
+    controller = system.controller_dictionary[controller.cv_tag]
     return controller, system
 
 
@@ -87,7 +87,7 @@ def test_controller_mode_switching(controller_setup):
     system.update(1.0)
     system.dynamic_model.temperature = 305.0
     system.update(2.0)
-    assert controller.sp_trajectory(2.0) == pytest.approx(305.0)
+    assert controller.sp_trajectory(2.0).to_value(Unit("K")) == pytest.approx(305.0)
 
     controller.change_control_mode("auto")
     assert controller.mode == ControllerMode.AUTO

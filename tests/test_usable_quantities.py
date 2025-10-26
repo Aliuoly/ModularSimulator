@@ -51,7 +51,7 @@ def base_controller(heater_mv_range):
     return ProportionalController(
         mv_tag="heater_power",
         cv_tag="temp_filtered",
-        sp_trajectory=Trajectory(y0=300.0, unit=Unit("K")),
+        sp_trajectory=Trajectory(y0=Quantity(300.0, Unit("K"))),
         mv_range=heater_mv_range,
         ramp_rate=50.0,
     )
@@ -101,7 +101,7 @@ def test_missing_controller_references_raise(thermal_model, base_sensor, base_fi
     controller = ProportionalController(
         mv_tag="nonexistent",
         cv_tag="temp_filtered",
-        sp_trajectory=Trajectory(y0=300.0, unit=Unit("K")),
+        sp_trajectory=Trajectory(y0=Quantity(300.0, Unit("K"))),
         mv_range=heater_mv_range,
     )
     with pytest.raises(ExceptionGroup) as excinfo:

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from astropy.units import UnitBase, UnitsError #type: ignore
+from astropy.units import UnitBase, UnitsError  #type: ignore
 import numpy as np
 from numpy.typing import NDArray
 

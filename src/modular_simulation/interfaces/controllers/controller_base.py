@@ -111,9 +111,8 @@ class ControllerBase(BaseModel, ABC):
         )
     )
     mode: ControllerMode = Field(
-        # default to CASCADE so highest loop gets used. 
-        # Highest loop with no cascade controller will automatically change to AUTO.
-        default = ControllerMode.CASCADE, 
+        # default to AUTO so controllers begin tracking their local trajectory until cascaded explicitly
+        default = ControllerMode.AUTO,
         description = (
             "ControllerBase's mode - if AUTO, setpoint comes from the sp_trajectory provided. "
             "If CASCADE, setpoint comes from the cascade controller, if provided. "
@@ -126,6 +125,7 @@ class ControllerBase(BaseModel, ABC):
     _mv_setter: Callable[[float|NDArray], None] = PrivateAttr()
     _sp_tag_info: TagInfo = PrivateAttr()
     _last_output: TagData = PrivateAttr()
+    _last_output_magnitude: float | NDArray = PrivateAttr(default=0.0)
     _u0: float | NDArray = PrivateAttr(default = 0.)
     _sp_history: list[TagData] = PrivateAttr(default_factory = list)
     _mv_system_unit: UnitBase = PrivateAttr()
@@ -165,10 +165,13 @@ class ControllerBase(BaseModel, ABC):
         for tag_info in tag_infos:
             if tag_info.tag == self.mv_tag:
                 # set the '0 point' value with whatever the measurement is
-                self._u0 = tag_info.data.value
+                raw_value = tag_info.data.value
+                self._u0 = raw_value
+                self._mv_system_unit = tag_info.unit
                 self._mv_setter = do_nothing_mv_setter
                 break
-        
+
+        self._last_output_magnitude = self._u0
         self._last_output = TagData(time = 0, value = self._u0, ok = True)
         
     def _initialize_mv_setter(
@@ -193,7 +196,8 @@ class ControllerBase(BaseModel, ABC):
                         self._u0 = backwards_converter(getattr(control_elements, control_element_name))
                         self._mv_setter = make_mv_setter(control_elements, self.mv_tag, unit_converter)
                         break
-                
+
+        self._last_output_magnitude = self._u0
         self._last_output = TagData(time = 0, value = self._u0, ok = True)
     
     def change_control_mode(self, mode: ControllerMode | str) -> None:
@@ -326,7 +330,7 @@ class ControllerBase(BaseModel, ABC):
         # in which case, they all get skipped as well since the
         # .update method never gets called (since it is used as the _sp_getter only when lower loop is CASCADE)
         if self.mode == ControllerMode.TRACKING:
-            self.sp_trajectory.set_now(t = t, value = cv.value)
+            self.sp_trajectory.set_now(t = t, value = Quantity(cv.value, self._sp_tag_info.unit))
             self._sp_history.append(cv)
             if self.cascade_controller is not None:
                 self.cascade_controller.update(t)
@@ -339,20 +343,34 @@ class ControllerBase(BaseModel, ABC):
         # 2. get set point. If is a from a cascade controller, is a Triplet
         #       if is not from a cascade controller, is a float or NDArray from sp_trajectory(t)
         sp = self._sp_getter(t)
-        
+
         if isinstance(sp, TagData):
             # this means we are in cascade control mode
             # so we go ahead and update trajectory with cascade setpoint
-            sp_val = sp.value
+            sp_quantity = Quantity(sp.value, self._sp_tag_info.unit)
+            try:
+                sp_quantity = sp_quantity.to(self._sp_tag_info.unit)
+            except UnitConversionError as exc:
+                raise ControllerConfigurationError(
+                    f"Cascade controller output for '{self.cv_tag}' is not compatible with unit '{self._sp_tag_info.unit}'."
+                ) from exc
+            sp_val = sp_quantity.value
             proceed = sp.ok and cv.ok
-            self._sp_history.append(sp)
-            self.sp_trajectory.set_now(t = t, value = sp_val)
+            self._sp_history.append(TagData(sp.time, sp_val, sp.ok))
+            self.sp_trajectory.set_now(t = t, value = sp_quantity)
         else:
-            sp_val = sp
+            sp_quantity = sp if isinstance(sp, Quantity) else Quantity(sp, self._sp_tag_info.unit)
+            try:
+                sp_quantity = sp_quantity.to(self._sp_tag_info.unit)
+            except UnitConversionError as exc:
+                raise ControllerConfigurationError(
+                    f"Setpoint trajectory for '{self.cv_tag}' returned a unit incompatible with '{self._sp_tag_info.unit}'."
+                ) from exc
+            sp_val = sp_quantity.value
             proceed = cv.ok
             #setpoint from sp_trajectory quality is always good (user sets it)
-            self._sp_history.append(TagData(t, sp_val, True)) 
-        
+            self._sp_history.append(TagData(t, sp_val, True))
+
         # if setpoint or cv quality is bad, skip controller update and return last value
         if not proceed:
             return self._last_output
@@ -365,12 +383,16 @@ class ControllerBase(BaseModel, ABC):
             )
         control_output = np.clip(control_output, *self.mv_range)
         ramp_output = self._apply_mv_ramp(
-            t0 = self._last_output.time, mv0 = self._last_output.value, mv_target = control_output, t_now = t
+            t0 = self._last_output.time,
+            mv0 = self._last_output_magnitude,
+            mv_target = control_output,
+            t_now = t
             )
         if self._is_final_control_element:
             self._mv_setter(ramp_output)
 
         # do misc things like set _last_output, make sp track PV (if TRACKING mode), update sp_trajectory with cascade sp (if CASCADE mode)
+        self._last_output_magnitude = ramp_output
         self._last_output = TagData(time = t, value = ramp_output, ok = True) # TODO: figure out what to do with quality for MV - seems to always be OK.
 
         return self._last_output

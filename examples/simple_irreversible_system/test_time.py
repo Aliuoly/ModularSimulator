@@ -1,3 +1,6 @@
+"""Quick profiling harness for the fast irreversible system variant."""
+from __future__ import annotations
+
 import cProfile
 import io
 import pstats
@@ -6,15 +9,17 @@ import pytest
 
 pytest.importorskip("matplotlib")
 
-from .run_simulation import fast_system
+from .run_simulation import make_systems
 
-sensors = fast_system.usable_quantities.sensors
-sensor = next(s for s in sensors if s.measurement_tag == "F_in")
+systems = make_systems()
+fast_system = systems["fast"]
+
+sensor = next(s for s in fast_system.sensors if s.measurement_tag == "F_in")
 
 profiler = cProfile.Profile()
 try:
     profiler.enable()
-    for _ in range(10000):
+    for _ in range(10_000):
         sensor.measure(0.0)
 finally:
     profiler.disable()

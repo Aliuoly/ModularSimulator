@@ -1,20 +1,18 @@
 from pydantic import BaseModel, PrivateAttr, ConfigDict, model_validator
-from typing import Dict, List
 import numpy as np
 from numpy.typing import NDArray
 from functools import cached_property
 from modular_simulation.validation.exceptions import MeasurableConfigurationError
-from astropy.units import Unit, UnitBase
-class BaseIndexedModel(BaseModel):
+from astropy.units import UnitBase, Unit
+class MeasurableBase(BaseModel):
     """
     Base class for the measurable data containers which are
     indexible via an internally constructed Enum. 
     Can be converted to numpy arrays via said indexing, 
     and can be updating from numpy arrays via the same indexing. 
     """
-
-    _index_map: Dict[str, slice] = PrivateAttr()
-    _tag_unit_info: Dict[str, UnitBase] = PrivateAttr(default_factory = dict)
+    _index_map: dict[str, slice] = PrivateAttr()
+    _tag_unit_info: dict[str, UnitBase] = PrivateAttr(default_factory = dict)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
     
     def model_post_init(self, context):
@@ -49,70 +47,100 @@ class BaseIndexedModel(BaseModel):
                     f"Field '{field_name}' of '{self.__class__.__name__}' is missing a unit annotation."
                 )
             unit = metadata[0]
-            if not isinstance(unit, UnitBase):
+            if isinstance(unit, str):
+                try:
+                    unit = Unit(unit, parse_strict = "raise")
+                except ValueError as parsing_error:
+                    raise MeasurableConfigurationError(
+                        f"Error parsing unit annotation for measurable '{self.__class__.__name__}"
+                        f": {parsing_error}"
+                    )
+            elif not isinstance(unit, UnitBase):
                 raise MeasurableConfigurationError(
                     f"Field '{field_name}' of '{self.__class__.__name__}' must be annotated with a Unit in the first metadata slot."
                 )
             self._tag_unit_info[field_name] = unit
         return self
+    
     @cached_property
-    def tag_unit_info(self) -> Dict[str, UnitBase]:
+    def tag_unit_info(self) -> dict[str, UnitBase]:
         return self._tag_unit_info
     
     @cached_property
-    def tag_list(self) -> List[str]:
+    def tag_list(self) -> list[str]:
         return list(self._index_map.keys())
 
-    def to_array(self) -> NDArray[np.float64]:
+    def to_array(self) -> NDArray:
         # the following combination, from testing, gave the best times
         # use np.zeros(...) to remake array each time
         #   instead of np.empty(...) and alike
         #   using a preallocated array and updating it
-        #   was no faster and flowed things down due to
+        #   was no faster and slowed things down due to
         #   requirement of additional checking logics. 
         # use dictionary for array indexing instead of 
         #   an enum. 
-        array = np.zeros(self._array_size, dtype=np.float64)
+        array = np.zeros(self._array_size, dtype=float)
         for attr_name, slice in self._index_map.items(): 
             array[slice] = getattr(self, attr_name)
         return array
 
-    def update_from_array(self, array: NDArray[np.float64]) -> None:
+    def update_from_array(self, array: NDArray) -> None:
         """updates the class in place using the provided array."""
         for field_name, field_index in self._index_map.items():
             if field_index.start == field_index.stop - 1:
                 setattr(self, field_name, array[field_index][0])
                 continue
             setattr(self, field_name, array[field_index])
-class ControlElements(BaseIndexedModel):
+
+    
+class ControlElements(MeasurableBase):
     """
     Base container class for control elements.
     Directly interacts with the States, but is externally controlled.
     Subclasses should define control variables as fields.
+    Example ControlElements subclass:
+    ```
+    class ExampleControlElements(ControlElements):
+        inlet_flow: Annotated[float, "L/s"]                          # annotated using with str
+        inlet_temperature: Annotated[float, astropy.units.Unit("K")] # annotated using with astropy.units.Unit. Both valid.
+    ```
     """
-    # e.g. user defined fields:
-    # flow_rate: float = 0.0
-    # inlet_temperature: float = 273.
 
-class States(BaseIndexedModel):
+class States(MeasurableBase):
     """
     Base container class for differential state variables in a simulation.
+    Example States subclass:
+    ```
+    class ExampleStates(States):
+        concentration: Annotated[float, "mol/L"]               # annotated using with str
+        temperature: Annotated[float, astropy.units.Unit("K")] # annotated using with astropy.units.Unit. Both valid.
+    ```
     """
 
-class AlgebraicStates(BaseIndexedModel):
+class AlgebraicStates(MeasurableBase):
 
     """
     Base container class for quantities that are algebraic functions of states. 
-    Calculation is defined in the system. It may be calculated from any method
+    CalculationBase is defined in the system. It may be calculated from any method
     that does not involve integration.
+    Example AlgebraicStates subclass:
+    ```
+    class ExampleAlgebraicStates(AlgebraicStates):
+        reaction_rate: Annotated[float, "mol/s"]               # annotated using with str
+        density: Annotated[float, astropy.units.Unit("g/L")]   # annotated using with astropy.units.Unit. Both valid.
+    ```
     """
-    # e.g. user defined fields:
-    # outlet_flow: float = 0.0
-        # e.g. calculated as a pressure driven flow = Cv * f(dP)
 
-class Constants(BaseIndexedModel):
+class Constants(MeasurableBase):
     """
     Base container class for constants in a simulation.
+    Example Constants subclass:
+    ```
+    class ExampleConstants(Constants):
+        rate_constant: Annotated[float, "1/s"]                 # annotated using with str
+        volume: Annotated[float, astropy.units.Unit("m3")]     # annotated using with astropy.units.Unit as cubic meter
+        area: Annotated[float, astropy.units.Unit("m")**2]     # base units raised to a power can be done like this as well
+    ```
     """
     
 

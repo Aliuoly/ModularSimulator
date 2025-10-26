@@ -1,10 +1,11 @@
+from __future__ import annotations # without this cant type hint the cascade controller properly
 from abc import ABC, abstractmethod
 import math
-from typing import Callable, Dict, Tuple, TYPE_CHECKING, List, Optional
+from typing import Callable, TYPE_CHECKING, Optional
 from numpy.typing import NDArray
 import numpy as np
 from enum import IntEnum
-from pydantic import BaseModel, PrivateAttr, Field, ConfigDict
+from pydantic import BaseModel, PrivateAttr, Field, ConfigDict, SerializeAsAny
 from modular_simulation.usables.tag_info import TagData, TagInfo
 from modular_simulation.usables.controllers.trajectory import Trajectory
 from modular_simulation.validation.exceptions import ControllerConfigurationError
@@ -18,9 +19,10 @@ logger = logging.getLogger(__name__)
 def do_nothing_mv_setter(value):
     pass
 
-def make_mv_setter(control_elements, tag):
+def make_mv_setter(control_elements: "ControlElements", tag: str, unit_converter:Callable[[float],float]):
+    
     def mv_setter(value) -> None:
-        setattr(control_elements, tag, value)
+        setattr(control_elements, tag, unit_converter(value))
     return mv_setter
 
 def make_cv_getter(raw_tag_info: TagInfo, desired_tag_info: TagInfo):
@@ -59,7 +61,7 @@ class ControllerMode(IntEnum):
     AUTO    = 1
     CASCADE = 2
 
-class Controller(BaseModel, ABC):
+class ControllerBase(BaseModel, ABC):
     """Shared infrastructure for feedback controllers operating on usable tags.
 
     The base class translates between system measurements, setpoint
@@ -81,9 +83,14 @@ class Controller(BaseModel, ABC):
     sp_trajectory: Trajectory = Field(
         ..., 
         description="A Trajectory instance defining the setpoint (SP) over time.")
-    mv_range: Tuple[Quantity, Quantity] = Field(
+    mv_range: tuple[float, float] = Field(
         ...,
-        description = "Lower and upper bound of the manipulated variable, in that order."
+        description = (
+            "Lower and upper bound of the manipulated variable, in that order. "
+            "The unit is assumed to be the same unit as the mv_tag's unit. "
+            "If you want to specify some other unit, consider changing the "
+            "measured unit of mv_tag or making a conversion calculation separately."
+        )
     )
     ramp_rate: float | None = Field(
         default=None,
@@ -93,7 +100,7 @@ class Controller(BaseModel, ABC):
             "towards the target at no more than this rate during each update."
         ),
     )
-    cascade_controller: Optional["Controller"] = Field(
+    cascade_controller: SerializeAsAny[ControllerBase | None] = Field(
         default = None,
         description = (
             "If provided, and when controller mode is CASCADE, the setpoint source "
@@ -105,12 +112,11 @@ class Controller(BaseModel, ABC):
         # Highest loop with no cascade controller will automatically change to AUTO.
         default = ControllerMode.CASCADE, 
         description = (
-            "Controller's mode - if AUTO, setpoint comes from the sp_trajectory provided. "
+            "ControllerBase's mode - if AUTO, setpoint comes from the sp_trajectory provided. "
             "If CASCADE, setpoint comes from the cascade controller, if provided. "
             "If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
         )
     )
-    _converted_mv_range_value:Tuple[float, float] = PrivateAttr()
     _is_final_control_element: bool = PrivateAttr(default = True)
     _sp_getter: Callable[[float], TagData] = PrivateAttr()
     _cv_getter: Callable[[], TagData] = PrivateAttr()
@@ -118,11 +124,11 @@ class Controller(BaseModel, ABC):
     _sp_tag_info: TagInfo = PrivateAttr()
     _last_output: TagData = PrivateAttr()
     _u0: float | NDArray = PrivateAttr(default = 0.)
-    _sp_history: List[TagData] = PrivateAttr(default_factory = list)
+    _sp_history: list[TagData] = PrivateAttr(default_factory = list)
     _mv_system_unit: UnitBase = PrivateAttr()
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
 
-    def _make_sp_tag_info_and_mv_range(self, tag_infos: List[TagInfo]):
+    def _make_sp_tag_info(self, tag_infos: list[TagInfo]):
         """Construct SP tag metadata and convert MV limits into system units."""
         for tag_info in tag_infos:
             if tag_info.tag == self.cv_tag:
@@ -131,24 +137,14 @@ class Controller(BaseModel, ABC):
                     unit = self.sp_trajectory.unit,
                     description = f"setpoint for {self.cv_tag}"
                 )
+            if tag_info.tag == self.mv_tag: 
+                self._mv_system_unit = tag_info.unit
                 
-            if tag_info.tag == self.mv_tag:
-                converted_range = [0., 0.]
-                for i in range(2):
-                    try:
-                        self._mv_system_unit = tag_info.unit
-                        converted_range[i] = self.mv_range[i].to(tag_info.unit).value #type: ignore
-                    except (UnitConversionError, AttributeError) as ex:
-                        raise ControllerConfigurationError(
-                            f"{self.cv_tag} controller's mv_range is improperly defined: {ex}"
-                        )
-                self._converted_mv_range_value = tuple(converted_range) #type: ignore
         return self._sp_tag_info
-
-        
+    
     def _initialize_cv_getter(
         self,
-        tag_infos: List[TagInfo]
+        tag_infos: list[TagInfo]
         ) -> None:
         # validation already done during quantity initiation. No error checking here. 
         for tag_info in tag_infos:
@@ -160,7 +156,7 @@ class Controller(BaseModel, ABC):
                 break
     def _initialize_non_final_control_element_mv_setter(
         self,
-        tag_infos : List[TagInfo]
+        tag_infos : list[TagInfo]
         ) -> None:
         # validation already done during quantity initiation. No error checking here. 
         for tag_info in tag_infos:
@@ -175,16 +171,26 @@ class Controller(BaseModel, ABC):
     def _initialize_mv_setter(
         self,
         control_elements: "ControlElements",
+        tag_infos: list[TagInfo],
         ) -> None:
         # validation already done during quantity initiation. No error checking here. 
 
         for control_element_name in control_elements.model_dump():
             if control_element_name == self.mv_tag:
                 # set the '0 point' value with whatever the measurement is
-                self._u0 = getattr(control_elements, control_element_name)
-                self._mv_setter = make_mv_setter(control_elements, self.mv_tag)
-                break
-        
+                
+                for tag_info in tag_infos:
+                    if tag_info.tag == self.mv_tag:
+                        unit_converter = tag_info.unit.get_converter(
+                            control_elements.tag_unit_info[tag_info.tag]
+                        )
+                        backwards_converter = control_elements.tag_unit_info[tag_info.tag].get_converter(
+                            tag_info.unit
+                        )
+                        self._u0 = backwards_converter(getattr(control_elements, control_element_name))
+                        self._mv_setter = make_mv_setter(control_elements, self.mv_tag, unit_converter)
+                        break
+                
         self._last_output = TagData(time = 0, value = self._u0, ok = True)
     
     def change_control_mode(self, mode: ControllerMode | str) -> None:
@@ -252,7 +258,7 @@ class Controller(BaseModel, ABC):
         # will be provided by the sp_trajectory
     def _initialize(
         self,
-        tag_infos: List[TagInfo], 
+        tag_infos: list[TagInfo], 
         usable_quantities: "UsableQuantities", # kept for IMC intiialization. I hate it. 
         control_elements: "ControlElements",
         is_final_control_element: bool = True,
@@ -271,7 +277,7 @@ class Controller(BaseModel, ABC):
             self._is_final_control_element = False
             self._initialize_non_final_control_element_mv_setter(tag_infos)
         else:
-            self._initialize_mv_setter(control_elements)
+            self._initialize_mv_setter(control_elements, tag_infos)
         
         # B. initialize cv_getter
         self._initialize_cv_getter(tag_infos)
@@ -323,7 +329,7 @@ class Controller(BaseModel, ABC):
         
         if cv is None:
             raise RuntimeError(
-                f"Controller '{self.cv_tag}' not initialized. "
+                f"ControllerBase '{self.cv_tag}' not initialized. "
             )
         # 2. get set point. If is a from a cascade controller, is a Triplet
         #       if is not from a cascade controller, is a float or NDArray from sp_trajectory(t)
@@ -352,7 +358,7 @@ class Controller(BaseModel, ABC):
             raise ValueError(
                 f"{self.cv_tag} controller output is NAN!"
             )
-        control_output = np.clip(control_output, *self._converted_mv_range_value)
+        control_output = np.clip(control_output, *self.mv_range)
         ramp_output = self._apply_mv_ramp(
             t0 = self._last_output.time, mv0 = self._last_output.value, mv_target = control_output, t_now = t
             )
@@ -397,10 +403,10 @@ class Controller(BaseModel, ABC):
         pass
     
     @property
-    def sp_history(self) -> Dict[str, List[TagData]]:
+    def sp_history(self) -> dict[str, list[TagData]]:
         """Return a mapping of cascade level to historized setpoint samples."""
-        history: Dict[str, List[TagData]] = {}
-        controller: Optional["Controller"] = self
+        history: dict[str, list[TagData]] = {}
+        controller: Optional["ControllerBase"] = self
         while controller is not None:
             history[f"{controller.cv_tag}.sp"] = controller._sp_history
             controller = controller.cascade_controller

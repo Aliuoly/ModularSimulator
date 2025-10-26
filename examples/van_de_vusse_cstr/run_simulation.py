@@ -1,5 +1,5 @@
 import logging
-from typing import List, TYPE_CHECKING
+, TYPE_CHECKING
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -19,7 +19,7 @@ from system_definitions import (
 )
 
 if TYPE_CHECKING:
-    from modular_simulation.usables import Calculation
+    from modular_simulation.usables import CalculationBase
 
 
 def make_systems():
@@ -58,7 +58,7 @@ def make_systems():
         SampledDelayedSensor(measurement_tag="Tj_in", sampling_period=0.1),
     ]
 
-    calculations: List["Calculation"] = [  # type: ignore[var-annotated]
+    calculations: list["CalculationBase"] = [  # type: ignore[var-annotated]
         HeatDutyCalculation(
             heat_duty_tag="Qk",
             Tk_tag="Tk",

@@ -1,12 +1,12 @@
 from typing import Callable
 from pydantic import Field, PrivateAttr
-from modular_simulation.usables.controllers.controller import Controller
+from modular_simulation.usables.controllers.controller_base import ControllerBase
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 import logging
 logger = logging.getLogger(__name__)
 
-class FirstOrderTrajectoryController(Controller):
-    """Controller that targets user-specified first-order closed-loop dynamics.
+class FirstOrderTrajectoryController(ControllerBase):
+    """ControllerBase that targets user-specified first-order closed-loop dynamics.
 
     The controller approximates the process as a first-order lag and computes
     the manipulated variable that will drive the measured CV toward the
@@ -34,7 +34,6 @@ class FirstOrderTrajectoryController(Controller):
 
     _get_open_loop_tc: Callable[[], float] = PrivateAttr()
     _t: float = PrivateAttr(default = 0.)
-
     # ------------------------------------------------------------------------
     def _initialize(self, tag_infos, usable_quantities, control_elements, is_final_control_element = True):
         # do whatever normal initialization first

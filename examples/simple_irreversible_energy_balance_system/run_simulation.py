@@ -1,6 +1,4 @@
 import logging
-from typing import List, TYPE_CHECKING
-
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
@@ -29,10 +27,10 @@ except ImportError:  # pragma: no cover - support direct script execution
     )
 
 if TYPE_CHECKING:
-    from modular_simulation.usables import Calculation
+    from modular_simulation.usables import CalculationBase
 
 
-# 1. Set up the initial conditions and system components.
+# 1. set up the initial conditions and system components.
 # =======================================================
 
 def make_systems():
@@ -57,7 +55,7 @@ def make_systems():
         SampledDelayedSensor(measurement_tag="jacket_flow"),
     ]
 
-    calculations: List["Calculation"] = []
+    calculations: list["CalculationBase"] = []
 
     controllers = [
         PIDController(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from astropy.units import Quantity  # type: ignore
 from flask import Flask, jsonify, render_template, request
@@ -14,7 +14,7 @@ from .builder import (
 )
 
 
-def _sensor_to_payload(config) -> Dict[str, Any]:
+def _sensor_to_payload(config) -> dict[str, Any]:
     return {
         "id": config.id,
         "type": config.name,
@@ -22,7 +22,7 @@ def _sensor_to_payload(config) -> Dict[str, Any]:
     }
 
 
-def _controller_to_payload(config) -> Dict[str, Any]:
+def _controller_to_payload(config) -> dict[str, Any]:
     params = _serialize_value(config.raw)
     # remove the unserializable trajectory which is handled specifically
     del params["sp_trajectory"]
@@ -46,7 +46,7 @@ def _controller_to_payload(config) -> Dict[str, Any]:
     return payload
 
 
-def _calculation_to_payload(config) -> Dict[str, Any]:
+def _calculation_to_payload(config) -> dict[str, Any]:
     return {
         "id": config.id,
         "type": config.name,
@@ -323,7 +323,7 @@ def create_app(builder: SimulationBuilder) -> Flask:
     def update_time_axis():
         data = request.get_json(force=True) if request.data else {}
 
-        def _parse(value: Any) -> Optional[float]:
+        def _parse(value: Any) -> float | None:
             if value is None:
                 return None
             if isinstance(value, str) and value.strip() == "":
@@ -352,9 +352,9 @@ def launch_ui(
     host: str = "127.0.0.1",
     port: int = 5000,
     debug: bool = False,
-    solver_options: Optional[Dict[str, Any]] = None,
+    solver_options: Optional[dict[str, Any]] = None,
     use_numba: bool = False,
-    numba_options: Optional[Dict[str, Any]] = None,
+    numba_options: Optional[dict[str, Any]] = None,
     record_history: bool = True,
 ) -> None:
     builder = SimulationBuilder(

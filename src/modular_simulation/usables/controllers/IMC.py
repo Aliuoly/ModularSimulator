@@ -1,49 +1,49 @@
-from typing import Callable, Dict, Any, Type, Protocol
+from typing import Callable, Any, Protocol, Annotated
 from numpy.typing import NDArray
-from scipy.optimize import minimize_scalar #type: ignore
-from pydantic import Field, PrivateAttr
+from pydantic import Field, PrivateAttr, BaseModel, BeforeValidator
 from astropy.units import Quantity #type: ignore
-from modular_simulation.usables.controllers.controller import Controller
-from modular_simulation.usables import Calculation
+from modular_simulation.usables.controllers.controller_base import ControllerBase
+from modular_simulation.usables import CalculationBase
 from modular_simulation.usables.tag_info import TagInfo
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 import logging
+from modular_simulation.utils import bounded_minimize
 logger = logging.getLogger(__name__)
 
-
-class CalculationModelPath:
-    """Descriptor pointing an IMC to a ``Calculation`` method to use as its model.
+def convert_calculation_to_str(calculation_name: type[CalculationBase] | str) -> str:
+    if isinstance(calculation_name, str):
+        return calculation_name
+    elif issubclass(calculation_name, CalculationBase):
+        return calculation_name.__name__
+    else:
+        raise ValueError("calculation name to a IMC controller must be either str or type[CalculationBase]")
+class CalculationModelPath(BaseModel):
+    """Descriptor pointing an IMC to a ``CalculationBase`` method to use as its model.
 
     ``calculation_name`` can be the class/type itself or the custom name used
     when the calculation was registered with the system.  ``method_name`` is
     the attribute on that calculation that implements the forward model.
     """
-    def __init__(self, calculation_name: Type[Calculation] | str, method_name: str):
-        if isinstance(str, calculation_name): #type: ignore
-            self.calculation_name = calculation_name
-        else:
-            self.calculation_name = calculation_name.__name__ #type: ignore
-        self.method_name = method_name
+    calculation_name: Annotated[str, BeforeValidator(convert_calculation_to_str)]
+    method_name: str
 
 class IMCModel(Protocol):
     """Protocol describing call signature for IMC internal models."""
     def __call__(self, input: Quantity) -> float | NDArray:
         ...
 
-
-
-class InternalModelController(Controller):
+class InternalModelController(ControllerBase):
     """Internal Model Control (IMC) implementation for SISO loops.
 
     ``model`` may be a callable operating directly in system units or a
-    :class:`Calculation` method referenced via :class:`CalculationModelPath`.
+    :class:`CalculationBase` method referenced via :class:`CalculationModelPath`.
     During initialization the controller resolves the model, builds unit
     converters between the calculation space and the system's manipulated
     variable, and caches MV bounds in those units.  Each update solves a
     scalar optimization problem to minimize the predicted setpoint error while
     honouring MV constraints and optional setpoint filtering.
     """
-    model: Callable[[float], float] | CalculationModelPath = Field(
+    model: CalculationModelPath = Field(
         ...,
         description = (
             "A model that takes as input the manipulated variable's value "
@@ -56,7 +56,7 @@ class InternalModelController(Controller):
         le = 1.0,
         description = "first order filter factor on setpoint changes. "
     )
-    solver_options: Dict[str, Any] = Field(
+    solver_options: dict[str, Any] = Field(
         default = {"tol": 1e-3, "max_iter": 25},
         description="optional arguments for the minimize_scalar solver from scipy."
     )
@@ -75,28 +75,25 @@ class InternalModelController(Controller):
         # first do the normal initialize though
         super()._initialize(tag_infos, usable_quantities, control_elements, is_final_control_element)
         # and now set the model
-        if isinstance(self.model, CalculationModelPath):
-            # look through the available calculations and grab the right one
-            # also grab the unit info so we can pass in the model input
-            # with the units the calculation expects. 
-            for calculation in usable_quantities.calculations:
-                if calculation.calculation_name == self.model.calculation_name:
-                    self._internal_model = getattr(calculation, self.model.method_name)
-                    self._mv_range_in_model_units = (
-                        self.mv_range[0].to(calculation._input_tag_info_dict[self.mv_tag].unit).value,
-                        self.mv_range[1].to(calculation._input_tag_info_dict[self.mv_tag].unit).value
+        # look through the available calculations and grab the right one
+        # also grab the unit info so we can pass in the model input
+        # with the units the calculation expects. 
+        for calculation in usable_quantities.calculations:
+            if calculation.calculation_name == self.model.calculation_name:
+                self._internal_model = getattr(calculation, self.model.method_name)
+                self._mv_converter_from_model_units_to_system_units = \
+                    calculation._input_tag_info_dict[self.mv_tag].unit.get_converter(
+                        self._mv_system_unit
                     )
-                    self._mv_converter_from_model_units_to_system_units = \
-                        calculation._input_tag_info_dict[self.mv_tag].unit.get_converter(
-                            self._mv_system_unit
-                        )
-                    return 
-            # if we didn't return, raise error
-            raise ControllerConfigurationError(
-                f"Could not find the model for '{self.cv_tag}' controller. "
-            )
-        else:
-            self._internal_model = self.model
+                self._mv_range_in_model_units = (
+                    self._mv_converter_from_model_units_to_system_units(self.mv_range[0]),
+                    self._mv_converter_from_model_units_to_system_units(self.mv_range[1])
+                )
+                return 
+        # if we didn't return, raise error
+        raise ControllerConfigurationError(
+            f"Could not find the model for '{self.cv_tag}' controller. "
+        )
 
 
     # ------------------------------------------------------------------------
@@ -126,9 +123,9 @@ class InternalModelController(Controller):
             return (internal_model(u) - sp_effective)**2
 
         # --- 3  root‑solve starting from last control action -----------------
-        output = minimize_scalar(residual, bounds = self._mv_range_in_model_units).x
+        output, offset = bounded_minimize(residual, *self._mv_range_in_model_units)
         logger.debug(
-            "%-12.12s IMC | t=%8.1f cv=%8.2f sp=%8.2f out=%8.2f, cv_pred_at_out=%8.2f",
-            self.cv_tag, t, cv, sp, output, internal_model(output)
+            "%-12.12s IMC | t=%8.1f cv=%8.2f sp=%8.2f out=%8.2f, cv_pred_at_out=%8.2f, offset=%8.2f",
+            self.cv_tag, t, cv, sp, output, internal_model(output), offset
         )
         return self._mv_converter_from_model_units_to_system_units(output)

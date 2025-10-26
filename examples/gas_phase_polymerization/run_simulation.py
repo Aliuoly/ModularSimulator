@@ -32,7 +32,8 @@ normal_system = create_system(
 )
 
 if __name__ == '__main__':
-    normal_system.step(48 * Unit("hour"))
+    normal_system.step(1 * Unit("hour"))
+    print(normal_system)
     history = normal_system.measured_history
     sensor_hist = history["sensors"]
     calculations_hist = history["calculations"]
@@ -51,7 +52,7 @@ if __name__ == '__main__':
     plot_triplet_series(ax2, calculations_hist["pM1"], label="pM1",
                         line_kwargs={"color": "tab:orange"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
-    plot_triplet_series(ax2, sp_hist["pM1"], label="SP pM1",
+    plot_triplet_series(ax2, sp_hist["pM1.sp"], label="SP pM1",
                         line_kwargs={"color": "tab:red", "linestyle": "--"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
     ax.set_title("F_m1 vs pM1")
@@ -71,7 +72,7 @@ if __name__ == '__main__':
     plot_triplet_series(ax2, calculations_hist["rM2"], label="rM2",
                         line_kwargs={"color": "tab:orange"}, style='step', 
                         time_converter=lambda t: t/3600.) # seconds to hours
-    plot_triplet_series(ax2, sp_hist["rM2"], label="SP rM2",
+    plot_triplet_series(ax2, sp_hist["rM2.sp"], label="SP rM2",
                         line_kwargs={"color": "tab:red", "linestyle": "--"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
     ax.set_title("F_m2 vs rM2")
@@ -91,7 +92,7 @@ if __name__ == '__main__':
     plot_triplet_series(ax2, calculations_hist["rH2"], label="rH2",
                         line_kwargs={"color": "tab:orange"}, style='step', 
                         time_converter=lambda t: t/3600.) # seconds to hours
-    plot_triplet_series(ax2, sp_hist["rH2"], label="SP rH2",
+    plot_triplet_series(ax2, sp_hist["rH2.sp"], label="SP rH2",
                         line_kwargs={"color": "tab:red", "linestyle": "--"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
     ax.set_title("F_h2 vs rH2")
@@ -111,7 +112,7 @@ if __name__ == '__main__':
     plot_triplet_series(ax, calculations_hist["filtered_mass_prod_rate"], label="filtered Prod Rate",
                         line_kwargs={"color": "green"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
-    plot_triplet_series(ax, sp_hist["filtered_mass_prod_rate"], label="SP Prod Rate",
+    plot_triplet_series(ax, sp_hist["filtered_mass_prod_rate.sp"], label="SP Prod Rate",
                         line_kwargs={"color": "tab:green", "linestyle": "--"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
 
@@ -132,10 +133,10 @@ if __name__ == '__main__':
     plot_triplet_series(ax, sensor_hist["lab_MI"], label="lab MI",
                         line_kwargs={"color": "tab:blue"}, style = 'step', 
                         time_converter=lambda t: t/3600.) # seconds to hours
-    plot_triplet_series(ax, sp_hist["cumm_MI"], label="SP MI",
+    plot_triplet_series(ax, sp_hist["cumm_MI.sp"], label="SP MI",
                         line_kwargs={"color": "tab:red", "linestyle": "--"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
-    plot_triplet_series(ax, sp_hist["inst_MI"], label="SP inst",
+    plot_triplet_series(ax, sp_hist["inst_MI.sp"], label="SP inst",
                         line_kwargs={"color": "tab:green", "linestyle": "--"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
     ax.set_title("Melt Index")
@@ -154,10 +155,10 @@ if __name__ == '__main__':
     plot_triplet_series(ax, sensor_hist["lab_density"], label="lab density",
                         line_kwargs={"color": "tab:blue"}, style = 'step', 
                         time_converter=lambda t: t/3600.) # seconds to hours
-    plot_triplet_series(ax, sp_hist["cumm_density"], label="SP cumm",
+    plot_triplet_series(ax, sp_hist["cumm_density.sp"], label="SP cumm",
                         line_kwargs={"color": "tab:red", "linestyle": "--"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
-    plot_triplet_series(ax, sp_hist["inst_density"], label="SP inst",
+    plot_triplet_series(ax, sp_hist["inst_density.sp"], label="SP inst",
                         line_kwargs={"color": "tab:green", "linestyle": "--"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
     ax.set_title("Density")
@@ -171,7 +172,7 @@ if __name__ == '__main__':
     plot_triplet_series(ax, calculations_hist["cat_inventory"], label="cat inventory",
                         line_kwargs={"color": "tab:orange"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
-    plot_triplet_series(ax, sp_hist["cat_inventory"], label="SP",
+    plot_triplet_series(ax, sp_hist["cat_inventory.sp"], label="SP",
                         line_kwargs={"color": "tab:red", "linestyle": "--"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
     ax.set_title("Catalyst Inventory")
@@ -210,7 +211,7 @@ if __name__ == '__main__':
     plot_triplet_series(ax2, sensor_hist["bed_level"], label="bed_level",
                         line_kwargs={"color": "tab:orange"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
-    plot_triplet_series(ax2, sp_hist["bed_level"], label="bed_level SP",
+    plot_triplet_series(ax2, sp_hist["bed_level.sp"], label="bed_level SP",
                         line_kwargs={"color": "tab:red", 'linestyle': '--'}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
     ax.set_title("Bed weight vs Bed level")
@@ -240,3 +241,4 @@ if __name__ == '__main__':
 
     plt.tight_layout()
     plt.show()
+    normal_system.save_checkpoint("checkpt.pkl")

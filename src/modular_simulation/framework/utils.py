@@ -1,29 +1,28 @@
 from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
 from modular_simulation.usables.usable_quantities import UsableQuantities
-from typing import Any, Dict, List, TYPE_CHECKING, Type
+from typing import Any,  TYPE_CHECKING
 from modular_simulation.framework.system import System
 if TYPE_CHECKING:
     from modular_simulation.measurables import States, AlgebraicStates, ControlElements, Constants
-    from modular_simulation.usables import Sensor, Calculation
-    from modular_simulation.usables import Controller
+    from modular_simulation.usables import SensorBase, ControllerBase, CalculationBase
 import logging
 from astropy.units import Quantity #type: ignore
 logger = logging.getLogger(__name__)
 
 def create_system(
-        system_class: Type[System],
+        system_class: type[System],
         dt: Quantity,
         initial_states: "States",
         initial_controls: "ControlElements",
         initial_algebraic: "AlgebraicStates",
         system_constants: "Constants",
-        sensors: List["Sensor"],
-        calculations: List["Calculation"],
-        controllers: List["Controller"],
+        sensors: list["SensorBase"],
+        calculations: list["CalculationBase"],
+        controllers: list["ControllerBase"],
         *,
         use_numba: bool = False,
-        numba_options: Dict[str, Any] = {'nopython': True, 'cache': True},
-        solver_options: Dict[str, Any] = {'method': 'LSODA'},
+        numba_options: dict[str, Any] = {'nopython': True, 'cache': True},
+        solver_options: dict[str, Any] = {'method': 'LSODA'},
         record_history: bool = True,
         ) -> System:
     """
@@ -55,7 +54,6 @@ def create_system(
         sensors=copied_sensors,
         calculations=copied_calculations,
         controllers=copied_controllers,
-        measurable_quantities=measurables,
     )
 
     # link measurables to usables

@@ -36,7 +36,7 @@ class StateType(IntEnum):
 class StateMetadata:
     unit: astropy.units.Unit = astropy.units.Unit() # dimensionless unit by default
     type: StateType = StateType.CONSTANT
-    alias: List[str] = []
+    alias: list[str] = []
 
 class ExistingState:
     name: str

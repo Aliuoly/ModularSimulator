@@ -1,14 +1,21 @@
-from pydantic import BaseModel, ConfigDict, Field, model_validator, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from modular_simulation.validation.exceptions import MeasurableConfigurationError
-from modular_simulation.measurables.base_classes import AlgebraicStates, States, ControlElements, Constants
+from modular_simulation.measurables.measurable_base import AlgebraicStates, States, ControlElements, Constants
 from functools import cached_property
-from typing import Iterable, Dict
-from astropy.units import UnitBase # type:ignore
-
-
-
+from astropy.units import UnitBase
 
 class MeasurableQuantities(BaseModel):
+    """
+    --
+    Read-only properties:
+    --
+    ```
+        tag_list: list[str]
+            list of measurable tags available for measurement via sensors
+        tag_unit_info: dict[str, astropy.units.UnitBase]
+            Dictionary of measurable tags and their units
+    ```
+    """
     constants: Constants = Field(
         default_factory = Constants,
         description = (
@@ -61,7 +68,8 @@ class MeasurableQuantities(BaseModel):
         return self
     
     @cached_property
-    def tag_list(self) -> Iterable[str]:
+    def tag_list(self) -> list[str]:
+        """list of measurable tag names"""
         return_list = list(self.states.tag_list)
         return_list.extend(list(self.algebraic_states.tag_list))
         return_list.extend(list(self.control_elements.tag_list))
@@ -69,7 +77,8 @@ class MeasurableQuantities(BaseModel):
         return return_list
     
     @cached_property
-    def tag_unit_info(self) -> Dict[str, UnitBase]:
+    def tag_unit_info(self) -> dict[str, UnitBase]:
+        """dictionary of measurable tag names and their associated unit """
         return_dict = {}
         return_dict.update(self.algebraic_states.tag_unit_info)
         return_dict.update(self.states.tag_unit_info)

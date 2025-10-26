@@ -1,4 +1,4 @@
-from .base_classes import ControlElements, States, AlgebraicStates, Constants
+from .measurable_base import ControlElements, States, AlgebraicStates, Constants, MeasurableBase
 from .measurable_quantities import MeasurableQuantities
 
 __all__ = [
@@ -7,4 +7,5 @@ __all__ = [
     "AlgebraicStates",
     "Constants",
     "MeasurableQuantities",
+    "MeasurableBase",
 ]

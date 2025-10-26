@@ -10,14 +10,14 @@ from modular_simulation.usables import SampledDelayedSensor
 from modular_simulation.plotting import plot_triplet_series
 from modular_simulation.framework import create_system
 from modular_simulation.usables import Trajectory, PIDController
-from typing import List, TYPE_CHECKING
+, TYPE_CHECKING
 import logging
 from astropy.units import Unit
 
 if TYPE_CHECKING:
-    from modular_simulation.usables import Calculation
+    from modular_simulation.usables import CalculationBase
 
-# 1. Set up the initial conditions and system components.
+# 1. set up the initial conditions and system components.
 # =======================================================
 
 # Initial values for the differential states. Note F_out is now an algebraic state.
@@ -63,7 +63,7 @@ sensors=[
         faulty_aware = True
     ),
 ]
-calculations: List["Calculation"] = []
+calculations: list["CalculationBase"] = []
 
 # Define the controllers that will manipulate the control elements.
 controllers=[

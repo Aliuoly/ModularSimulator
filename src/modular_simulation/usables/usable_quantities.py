@@ -1,69 +1,56 @@
-from typing import Dict, List, TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING
 from pydantic import  PrivateAttr, BaseModel, ConfigDict, Field, model_validator
-from modular_simulation.validation.exceptions import SensorConfigurationError, CalculationConfigurationError, ControllerConfigurationError
+from modular_simulation.validation.exceptions import (
+    SensorConfigurationError, 
+    CalculationConfigurationError, 
+    ControllerConfigurationError
+)
 from modular_simulation.usables.tag_info import TagInfo
 from functools import cached_property
 import logging
 if TYPE_CHECKING:
-    from modular_simulation.usables.sensors.sensor import Sensor
-    from modular_simulation.usables.calculations.calculation import Calculation
-    from modular_simulation.usables.controllers.controller import Controller
+    from modular_simulation.usables.sensors.sensor_base import SensorBase
+    from modular_simulation.usables.calculations.calculation_base import CalculationBase
+    from modular_simulation.usables.controllers.controller_base import ControllerBase
     from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
-    from modular_simulation.usables.tag_info import TagData
 
 logger = logging.getLogger(__name__)
 
 
 class UsableQuantities(BaseModel):
     """
-    1. Defines how measurements and calculations are obtained through
-        - measurement_definition: Dict[str, Sensor]
-        - calculation_definition: Dict[str, Calculation]
-    2. Saves the current snapshot of measurements and calculations
-        - results: Dict[str, Any]
+    Represents a collection of sensors, calculations, and controllers for managing usable quantities in a simulation system
+    
+    :var sensors: List of sensors, which provide measured tags to the system
+    :vartype sensors: list[SensorBase]
+    :var calculations: List of calculations, uses measured tags and other calculated tags 
+                        to provide calculated tags to the system
+    :vartype calculations: list[CalculationBase]
+    :var controllers: List of controllers, which uses measured tags and configured setpoints
+                        to control ControlElements of the system.
+    :vartype controllers: list[ControllerBase]
+    :var _initialized: Indicates whether the usable quantities have been initialized
+    :vartype _initialized: bool
     """
-    sensors: List["Sensor"] = Field(
+    sensors: list["SensorBase"] = Field(
         default_factory = list,
     )
-    calculations: List["Calculation"] = Field(
+    calculations: list["CalculationBase"] = Field(
         default_factory = list,
     )
-    controllers: List["Controller"] = Field(
+    controllers: list["ControllerBase"] = Field(
         default_factory = list
     )
-    measurable_quantities: "MeasurableQuantities" = Field(
-        ...
-    )
 
-    _tag_infos: List[TagInfo] = PrivateAttr(default_factory=list)
     _initialized: bool = PrivateAttr(default = False)
-
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = 'forbid')
-
-    def model_post_init(self, context):
-        # construct the _tag_infos
-        for sensor in self.sensors:
-            self._tag_infos.append(sensor._tag_info)
-            if sensor.unit is None:
-                sensor.unit = self.measurable_quantities.tag_unit_info[sensor.measurement_tag]
-                sensor._tag_info.unit = sensor.unit
-        for calculation in self.calculations:
-            for output_tag_info in calculation._output_tag_info_dict.values():
-                self._tag_infos.append(output_tag_info)
-        # controller needs cv info so have to pass in tag_infos
-        for controller in self.controllers:
-            while controller.cascade_controller is not None:
-                self._tag_infos.append(controller._make_sp_tag_info_and_mv_range(self._tag_infos))
-                controller = controller.cascade_controller
-            self._tag_infos.append(controller._make_sp_tag_info_and_mv_range(self._tag_infos))
 
     @model_validator(mode = 'after')
     def _validate(self):
         exception_group = []
         exception_group.extend(self._validate_duplicate_tag())
-        exception_group.extend(self._validate_sensors_resolvable())
-        exception_group.extend(self._validate_calculations_resolvable())
-        exception_group.extend(self._validate_controllers_resolvable())
+        exception_group.extend(self._validate_calculations_inputs_are_available())
+        exception_group.extend(self._validate_controller_mv_cv_are_measured())
         
         if len(exception_group) > 0:
             raise ExceptionGroup(
@@ -72,40 +59,18 @@ class UsableQuantities(BaseModel):
                 )
         return self
     
-    def _initialize(self):
-        for sensor in self.sensors:
-            sensor._initialize(self.measurable_quantities)
-        for calculation in self.calculations:
-            calculation._initialize(self._tag_infos)
-        for controller in self.controllers:
-            controller._initialize(self._tag_infos, self, self.measurable_quantities.control_elements)
-        self._initialized = True
-    def _validate_sensors_resolvable(self):
-        exception_group = []
-        available_measurement_tags = self.measurable_quantities.tag_list
-        unavailable_measurement_tags = []
-
-        for sensor in self.sensors:
-            measurement_tag = sensor.measurement_tag
-            if measurement_tag not in available_measurement_tags:
-                unavailable_measurement_tags.append(measurement_tag)
-
-        if len(unavailable_measurement_tags) > 0:
-            exception_group.append(
-                SensorConfigurationError(
-                    "The following measurement tag(s) are not defined in measurable quantities: "
-                    f"{', '.join(unavailable_measurement_tags)}."
-                )
-            )
-        return exception_group
-    
-    def _validate_duplicate_tag(self):
+    def _validate_duplicate_tag(self) -> list[SensorConfigurationError]:
         exception_group = []
         all_tags = [tag_info.tag for tag_info in self._tag_infos]
         seen_tags = []
         duplicate_tags = []
         for tag in all_tags:
-            if tag in seen_tags:
+            # ignore case where multiple controllers control the same element
+            # this could happen when one controls when below SP
+            # another another controls when above SP
+            # e.g., air conditioner with both warm and cool air sources
+            # controlling room temperature. 
+            if tag in seen_tags and ".sp" not in tag: 
                 duplicate_tags.append(tag)
             else:
                 seen_tags.append(tag)
@@ -118,7 +83,7 @@ class UsableQuantities(BaseModel):
             )
         return exception_group
     
-    def _validate_calculations_resolvable(self):
+    def _validate_calculations_inputs_are_available(self) -> list[CalculationConfigurationError]:
         exception_group = []
         all_tags = [tag_info.tag for tag_info in self._tag_infos]
         for calculation in self.calculations:
@@ -135,56 +100,43 @@ class UsableQuantities(BaseModel):
                     )
         return exception_group
     
-    def _validate_controllers_resolvable(self):
+    def _validate_controller_mv_cv_are_measured(self) -> list[ControllerConfigurationError]:
         exception_group = []
-
         all_tags = [tag_info.tag for tag_info in self._tag_infos]
-        missing_cv_tags = []
-        missing_mv_tags = []
+        missing_cv_tags, missing_mv_tags = [], []
         for controller in self.controllers:
             if controller.cv_tag not in all_tags:
                 missing_cv_tags.append(controller.cv_tag)
             if controller.mv_tag not in all_tags:
                 missing_mv_tags.append(controller.mv_tag)
+        error_template = (
+            "The following {type} variables are not available "
+            "as either measurements or calculations: {tags}"
+        )
         if len(missing_cv_tags) > 0:
             exception_group.append(
                 ControllerConfigurationError(
-                    "The following controlled variables are not available as either measurements or calculations: "
-                    f"{', '.join(missing_cv_tags)}"
+                    error_template.format(type = "controlled", tags = ', '.join(missing_cv_tags))
                 )
             )
         if len(missing_mv_tags) > 0:
             exception_group.append(
                 ControllerConfigurationError(
-                    "The following manipulated variables are not available as either measurements or calculations:"
-                    f"{', '.join(missing_mv_tags)}"
+                    error_template.format(type = "manipulated", tags = ', '.join(missing_mv_tags))
                 )
             )
-        # 3. check that final control element designate controlled variables (i.e., most-inner loops)
-        #       are defined as control elements in the system measurables. 
-        improper_ce_tags = []
-        available_ce_tags = self.measurable_quantities.control_elements.tag_list
-        for tag in [c.mv_tag for c in self.controllers]: # ignoring the cascade controllers, these mvs must be control elements
-            if tag not in available_ce_tags:
-                improper_ce_tags.append(tag)
         
-        if len(improper_ce_tags) > 0:
-            exception_group.append(
-                ControllerConfigurationError(
-                    "The following controlled variables are not defined as system control elements:"
-                    f"{', '.join(improper_ce_tags)}."
-                )
-            )
         return exception_group
+        
+    def _initialize(self, measurable_quantities: "MeasurableQuantities"):
+        for sensor in self.sensors:
+            sensor._initialize(measurable_quantities)
+        for calculation in self.calculations:
+            calculation._initialize(self._tag_infos)
+        for controller in self.controllers:
+            controller._initialize(self._tag_infos, self, measurable_quantities.control_elements)
+        self._initialized = True
 
-    @cached_property
-    def tag_list(self) -> Iterable[str]:
-        return [tag_info.tag for tag_info in self._tag_infos]
-
-    @property
-    def tag_infos(self) -> List[TagInfo]:
-        return self._tag_infos
-    
     def update(self, t: float) -> None:
         """
         updates the measurements and performs calculations with the latest info.
@@ -207,4 +159,27 @@ class UsableQuantities(BaseModel):
         for controller in self.controllers:
             controller.update(t)
 
+    @cached_property
+    def _tag_infos(self) -> list[TagInfo]:
+        infos = []
+        for sensor in self.sensors:
+            infos.append(sensor._tag_info)
+        for calculation in self.calculations:
+            for output_tag_info in calculation._output_tag_info_dict.values():
+                infos.append(output_tag_info)
+        # controller needs cv info so have to pass in tag_infos
+        for controller in self.controllers:
+            while controller.cascade_controller is not None:
+                infos.append(controller._make_sp_tag_info(infos))
+                controller = controller.cascade_controller
+            infos.append(controller._make_sp_tag_info(infos))
+        return infos
+
+    @cached_property
+    def tag_infos(self):
+        return self._tag_infos
+    
+    @cached_property
+    def tag_list(self) -> list[str]:
+        return [tag_info.tag for tag_info in self._tag_infos]
 

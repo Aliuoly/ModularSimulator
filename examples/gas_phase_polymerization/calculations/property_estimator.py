@@ -1,17 +1,17 @@
 import numpy as np
-from typing import Literal, Dict, Tuple, Deque, Annotated
+from typing import Literal, Deque, Annotated
 from numpy.typing import NDArray
 from pydantic import Field, PrivateAttr
 from astropy.units import Unit #type:ignore
 from modular_simulation.usables import (
-    Calculation, 
+    CalculationBase, 
     TagMetadata,
     TagType,
 )
 import collections
 
 
-class PropertyEstimator(Calculation):
+class PropertyEstimator(CalculationBase):
     """
     Inputs to calculation are:
         ---- MEASURED INPUTS ----
@@ -105,8 +105,8 @@ class PropertyEstimator(Calculation):
     def _calculation_algorithm(
         self, 
         t: float, 
-        inputs_dict: Dict[str, float | NDArray]
-        ) -> Dict[str, float]:
+        inputs_dict: dict[str, float | NDArray]
+        ) -> dict[str, float]:
 
         prod_rate = inputs_dict[self.mass_prod_rate_tag]
         tau = inputs_dict[self.residence_time_tag] # in hours
@@ -324,7 +324,7 @@ class PropertyEstimator(Calculation):
             *, 
             MI_parameters: NDArray[np.float64] | None = None, 
             density_parameters: NDArray[np.float64] | None = None
-            ) -> Tuple[float, float]:
+            ) -> tuple[float, float]:
         """
         Empirical MI (Melt Index) soft sensor based on plant data AND 
             Empirical density soft sensor based on plant-derived regression.

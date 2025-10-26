@@ -3,7 +3,7 @@ import pytest
 from astropy.units import Unit
 
 from modular_simulation.usables.calculations.first_order_filter import FirstOrderFilter
-from modular_simulation.usables.controllers.controller import Controller
+from modular_simulation.usables.controllers.controller_base import ControllerBase
 from modular_simulation.usables.controllers.trajectory import Trajectory
 from modular_simulation.usables.sensors.sampled_delayed_sensor import SampledDelayedSensor
 from modular_simulation.usables.usable_quantities import UsableQuantities
@@ -14,7 +14,7 @@ from modular_simulation.validation.exceptions import (
 )
 
 
-class ProportionalController(Controller):
+class ProportionalController(ControllerBase):
     gain: float = 1.0
 
     def _control_algorithm(self, t, cv, sp):  # type: ignore[override]
@@ -140,6 +140,7 @@ def test_update_executes_all_components(thermal_measurables, base_sensor, base_f
     assert filtered_info.history[-1].time == pytest.approx(2.0)
 
     control_value = thermal_measurables.control_elements.heater_power
-    lower, upper = (bound.value for bound in base_controller.mv_range)
+    lower, upper = base_controller.mv_range
     assert lower <= control_value <= upper
     assert not math.isnan(control_value)
+

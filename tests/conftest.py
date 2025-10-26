@@ -47,6 +47,5 @@ def thermal_measurables() -> MeasurableQuantities:
 @pytest.fixture()
 def heater_mv_range():
     return (
-        Quantity(0.0, UNIT_POWER),
-        Quantity(100.0, UNIT_POWER),
+       0, 100.0
     )

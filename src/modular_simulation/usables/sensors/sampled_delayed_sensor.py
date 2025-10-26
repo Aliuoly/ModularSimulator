@@ -1,12 +1,12 @@
 import numpy as np
-from modular_simulation.usables.sensors.sensor import Sensor, TagData
+from modular_simulation.usables.sensors.sensor_base import SensorBase, TagData
 import collections
 from numpy.typing import NDArray
 from pydantic import Field, PrivateAttr
+from dataclasses import asdict
 
 
-
-class SampledDelayedSensor(Sensor):
+class SampledDelayedSensor(SensorBase):
     """
     A sensor with a set sampling frequency, measurement deadtime, and gaussian noise.
     """
@@ -27,10 +27,9 @@ class SampledDelayedSensor(Sensor):
     _sample_queue: collections.deque[TagData] = PrivateAttr(default_factory=collections.deque)
     _last_t_updated: float|None = PrivateAttr(default = None)
 
-        
     def _should_update(self, t: float) -> bool:
         """
-        Sensor specific logic to determine if a new measurement should be processed and returned
+        SensorBase specific logic to determine if a new measurement should be processed and returned
         """
         new_sample_available = True # default to do update if no last measurement
         if self._last_value is not None:

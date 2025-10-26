@@ -17,19 +17,22 @@ analyzer_partial = partial(
     coefficient_of_variance = 0.01, # 1% rel std
     ) # 2 min delay and sampling period
 sensors = [
-    analyzer_partial(measurement_tag="yM1"),
-    analyzer_partial(measurement_tag="yM2"),
-    analyzer_partial(measurement_tag="yH2"),
+    analyzer_partial(measurement_tag="yM1", unit=''),
+    analyzer_partial(measurement_tag="yM2", unit=''),
+    analyzer_partial(measurement_tag="yH2", unit=''),
     SampledDelayedSensor(
         measurement_tag="pressure",
+        unit=Unit("kPa"),
         coefficient_of_variance = 0.02,
         ),
     SampledDelayedSensor(
         measurement_tag="bed_weight",
+        unit=Unit("tonne"),
         coefficient_of_variance = 0.03,
         ),
     SampledDelayedSensor(
         measurement_tag="mass_prod_rate",
+        unit=Unit("tonne/hr"),
         deadtime = 120., 
         sampling_period = 120.,
         coefficient_of_variance = 0.02,
@@ -37,27 +40,29 @@ sensors = [
     ),
     SampledDelayedSensor(
         measurement_tag="cumm_MI", alias_tag="lab_MI",
-        deadtime = 2 * 3600,
+        deadtime = 2 * 3600, unit='',
         sampling_period = 2 * 3600,# 2 hours,
         instrument_range = (0.05, 200.)
     ),
     SampledDelayedSensor(
         measurement_tag="cumm_density", alias_tag = "lab_density",
         deadtime = 2 * 3600,
+        unit=Unit("g/L"),
         sampling_period = 2 * 3600,# 2 hours
         instrument_range = (900, 970)
     ),
     SampledDelayedSensor(measurement_tag="bed_level",
         coefficient_of_variance = 0.03,
+        unit=Unit("m")
         ),
-    SampledDelayedSensor(measurement_tag="F_cat"),
-    SampledDelayedSensor(measurement_tag="F_teal"),
-    SampledDelayedSensor(measurement_tag="F_m1"),
-    SampledDelayedSensor(measurement_tag="F_m2"),
-    SampledDelayedSensor(measurement_tag="F_h2"),
-    SampledDelayedSensor(measurement_tag="F_n2"),
-    SampledDelayedSensor(measurement_tag="F_vent"),
-    SampledDelayedSensor(measurement_tag="discharge_valve_position"),
+    SampledDelayedSensor(measurement_tag="F_cat", unit=Unit("kg/hr")),
+    SampledDelayedSensor(measurement_tag="F_teal", unit=Unit("mol/hr")),
+    SampledDelayedSensor(measurement_tag="F_m1", unit=Unit("kg/hr")),
+    SampledDelayedSensor(measurement_tag="F_m2", unit=Unit("kg/hr")),
+    SampledDelayedSensor(measurement_tag="F_h2", unit=Unit("kg/hr")),
+    SampledDelayedSensor(measurement_tag="F_n2", unit=Unit("kg/hr")),
+    SampledDelayedSensor(measurement_tag="F_vent", unit=Unit("L/hr")),
+    SampledDelayedSensor(measurement_tag="discharge_valve_position", unit=""),
 ]
 calculations = [
     FirstOrderFilter(

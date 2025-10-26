@@ -1,16 +1,15 @@
 from modular_simulation.usables import (
-    Calculation, 
+    CalculationBase, 
     TagMetadata,
     TagType, 
 )
 import numpy as np
-from typing import Any, Dict, Annotated
+from typing import Any, Annotated
 from astropy.units import Unit
-from scipy.integrate import odeint
-from pydantic import PrivateAttr, Field
+from pydantic import PrivateAttr
 SMALL = 1e-12
 
-class MoleRatioCalculation(Calculation):
+class MoleRatioCalculation(CalculationBase):
     """
     Calculates the mole ratio of comonomer and hydrogen to monomer.
     All are technically unitless unless I want to define
@@ -23,7 +22,7 @@ class MoleRatioCalculation(Calculation):
     yM2_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit())]
     yH2_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit())]
 
-    def _calculation_algorithm(self, t: float, inputs_dict: Dict[str, Any]) -> Dict[str, float]: 
+    def _calculation_algorithm(self, t: float, inputs_dict: dict[str, Any]) -> dict[str, float]: 
         yM1 = inputs_dict[self.yM1_tag]
         yM2 = inputs_dict[self.yM2_tag]
         yH2 = inputs_dict[self.yH2_tag]
@@ -33,7 +32,7 @@ class MoleRatioCalculation(Calculation):
             self.rH2_tag: ratios[1]
         }
     
-class Monomer1PartialPressure(Calculation):
+class Monomer1PartialPressure(CalculationBase):
     """
     Calculates the mole ratio of comonomer and hydrogen to monomer. \n
     Output tags MUST be ordered as follows \n
@@ -47,12 +46,12 @@ class Monomer1PartialPressure(Calculation):
     pressure_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit("kPa"))]
     yM1_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit())]
 
-    def _calculation_algorithm(self, t: float, inputs_dict: Dict[str, Any]): 
+    def _calculation_algorithm(self, t: float, inputs_dict: dict[str, Any]): 
         yM1 = inputs_dict[self.yM1_tag]
         pressure = inputs_dict[self.pressure_tag]
         return {self.pM1_tag: yM1 * pressure}
 
-class ResidenceTimeCalculation(Calculation):
+class ResidenceTimeCalculation(CalculationBase):
     """
     Calculates the residence time of the polymer resin in the reactor. \n
     Output tag MUST have size 1 and refer to 'residence time' \n
@@ -71,7 +70,7 @@ class ResidenceTimeCalculation(Calculation):
         return {self.residence_time_tag: bw / max(SMALL, pr)}
 
 
-class CatInventoryEstimator(Calculation):
+class CatInventoryEstimator(CalculationBase):
     
     cat_inventory_tag: Annotated[str, TagMetadata(TagType.OUTPUT, Unit("kg"))]
 
@@ -82,7 +81,7 @@ class CatInventoryEstimator(Calculation):
     _inventory: float = PrivateAttr(default = 0.0)
     _t: float = PrivateAttr(default = 0.0)
 
-    def _calculation_algorithm(self, t, inputs_dict: Dict[str, Any]):
+    def _calculation_algorithm(self, t, inputs_dict: dict[str, Any]):
         pr = inputs_dict[self.mass_prod_rate_tag]
         bw = inputs_dict[self.bed_weight_tag]
         F_cat = inputs_dict[self.F_cat_tag]
@@ -111,7 +110,7 @@ class CatInventoryEstimator(Calculation):
         return self.integrate_inventory(self._inventory, F_cat, pr, bw, dt)
 
 
-class AlTiRatioEstimator(Calculation):
+class AlTiRatioEstimator(CalculationBase):
     AlTi_ratio_tag: Annotated[str, TagMetadata(TagType.OUTPUT, Unit())]
 
     F_cat_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit("kg/hour"))]
@@ -120,7 +119,7 @@ class AlTiRatioEstimator(Calculation):
     cat_Ti_weight_frac: Annotated[float, TagMetadata(TagType.CONSTANT, Unit())] = 0.0065
     mwTi: Annotated[float, TagMetadata(TagType.CONSTANT, Unit("kmol/kg"))] = 47.8
 
-    def _calculation_algorithm(self, t:float, inputs_dict: Dict[str, Any]):
+    def _calculation_algorithm(self, t:float, inputs_dict: dict[str, Any]):
         F_cat = inputs_dict[self.F_cat_tag]
         Fteal = inputs_dict[self.F_teal_tag] # TODO this is assumed molar flow right now
         FTi = F_cat*self.cat_Ti_weight_frac/self.mwTi

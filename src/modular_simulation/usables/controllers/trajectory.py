@@ -1,17 +1,19 @@
-from dataclasses import dataclass, field, replace
-from typing import List, Optional, Union, Callable
+from collections.abc import Callable
 import bisect
 import math
 import numpy as np
-from astropy.units import UnitBase #type: ignore
+from astropy.units import UnitBase, Unit #type: ignore
+from dataclasses import dataclass
+from pydantic import BaseModel, Field, PrivateAttr, field_serializer, field_validator, ConfigDict
+from dataclasses import replace
 
-Number = Union[int, float]
+Number = int | float
 
 # ------------------------------
 # Utilities
 # ------------------------------
 
-def _clamp(x: float, lo: Optional[float], hi: Optional[float]) -> float:
+def _clamp(x: float, lo: float | None = None, hi: float | None = None) -> float:
     if lo is not None:
         x = max(lo, x)
     if hi is not None:
@@ -54,7 +56,7 @@ class Segment:
     ``t`` given the setpoint at the beginning of the segment.
     """
     t0: float  # start time of segment (absolute)
-    duration: float  # duration of the segment; np.inf for open-ended
+    duration: float  # duration of the segment; float('inf') for open-ended
 
     def eval(self, t: float, y0: float) -> float:
         raise NotImplementedError
@@ -99,19 +101,19 @@ class Ramp(Segment):
 class RandomWalk(Segment):
     """Trajectory segment that emulates a bounded random walk.
 
-    The segment samples a deterministic pseudo-random field to produce
+    The segment samples a deterministic pseudo-random Field to produce
     repeatable noise without maintaining state between evaluations.  The
     resulting value can be clamped to an optional min/max.
     """
     std: float = 0.1
-    dt: float = 1.0  # grid period for the underlying noise field
-    clamp_min: Optional[float] = None
-    clamp_max: Optional[float] = None
+    dt: float = 1.0  # grid period for the underlying noise Field
+    clamp_min: float | None = None
+    clamp_max: float | None = None
     seed: int = 0
 
     def eval(self, t: float, y0: float) -> float:
         # cumulative sum of zero-mean increments; here we emulate a RW
-        # by integrating a continuous noise field over [t0, t]
+        # by integrating a continuous noise Field over [t0, t]
         if t <= self.t0:
             return y0
         # integrate via trapezoid over one step for O(1) closed form approx:
@@ -128,8 +130,7 @@ class RandomWalk(Segment):
 # Trajectory class
 # ------------------------------
 
-@dataclass
-class Trajectory:
+class Trajectory(BaseModel):
     """Composable setpoint profile made of piecewise time segments.
 
     Trajectories expose fluent builders (``hold``/``step``/``ramp``/``random_walk``)
@@ -138,29 +139,36 @@ class Trajectory:
     evaluation amortized :math:`O(1)` for monotonic time progression.
     """
     y0: float
-    unit: UnitBase
+    unit: UnitBase|str
     t0: float = 0.0
-    segments: List[Segment] = field(default_factory=list)
+    segments: list[Segment] = Field(default_factory=list)
 
     # fast-path caches
-    _breaks: List[float] = field(default_factory=list, init=False, repr=False)
-    _cursor: int = field(default=0, init=False, repr=False)
-    _last_value: float | None = field(default=None, init=False, repr=False)
-    _start_vals: List[float] = field(default_factory=list, init=False, repr=False)  # y at each segment start (O(1) eval)
+    _breaks: list[float] = PrivateAttr(default_factory=list)
+    _cursor: int = PrivateAttr(default=0)
+    _last_value: float | None = PrivateAttr(default=None)
+    _start_vals: list[float] = PrivateAttr(default_factory=list)  # y at each segment start (O(1) eval)
 
     # historization and bookkeeping for fast set_now
-    _history_times: List[float] = field(default_factory=list, init=False, repr=False)
-    _history_values: List[Number] = field(default_factory=list, init=False, repr=False)
-    _last_set_time: float | None = field(default=None, init=False, repr=False)
-    _last_set_value: Number | None = field(default=None, init=False, repr=False)
-    _max_retained_segments: int = field(default=1, init=False, repr=False)
+    _history_times: list[float] = PrivateAttr(default_factory=list)
+    _history_values: list[Number] = PrivateAttr(default_factory=list)
+    _last_set_time: float | None = PrivateAttr(default=None)
+    _last_set_value: Number | None = PrivateAttr(default=None)
+    _max_retained_segments: int = PrivateAttr(default=1)
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     # --------------------------
     # Builder / mutators (chainable)
     # --------------------------
-
+    @field_validator("unit", mode = 'before')
+    @classmethod
+    def convert_unit(cls, unit: str|UnitBase) -> UnitBase:
+        if isinstance(unit, str):
+            return Unit(unit)
+        return unit
+    
     def clone(self) -> "Trajectory":
-        out = Trajectory(self.y0, self.t0, list(self.segments))
+        out = Trajectory(y0 = self.y0, unit = self.unit, t0 = self.t0, segments = list(self.segments))
         out._breaks = list(self._breaks)
         out._start_vals = list(self._start_vals)
         out._history_times = list(self._history_times)
@@ -235,7 +243,7 @@ class Trajectory:
             return False
         return True
 
-    def hold(self, duration: float, value: Optional[float] = None) -> "Trajectory":
+    def hold(self, duration: float, value: float | None = None) -> "Trajectory":
         if value is None:
             value = self.peek_end_value()
         t = self._end_time()
@@ -247,7 +255,7 @@ class Trajectory:
         self._append(Step(t, 0.0, magnitude))
         return self
 
-    def ramp(self, magnitude: Optional[float] = None, *, duration: Optional[float] = None, ramprate: Optional[float] = None) -> "Trajectory":
+    def ramp(self, magnitude: float | None = None, *, duration: float | None = None, ramprate: float | None = None) -> "Trajectory":
         if magnitude is None and duration is None and ramprate is None:
             raise ValueError("Provide magnitude+duration, or magnitude+ramprate, or duration+ramprate")
         if magnitude is None:
@@ -258,7 +266,7 @@ class Trajectory:
         self._append(Ramp(t, duration, magnitude))
         return self
 
-    def random_walk(self, std: float = 0.1, *, duration: float = 1.0, dt: float = 1.0, min: Optional[float] = None, max: Optional[float] = None, seed: int = 0) -> "Trajectory":
+    def random_walk(self, std: float = 0.1, *, duration: float = 1.0, dt: float = 1.0, min: float | None = None, max: float | None = None, seed: int = 0) -> "Trajectory":
         t = self._end_time()
         self._append(RandomWalk(t, duration, std, dt, min, max, seed))
         return self
@@ -305,7 +313,7 @@ class Trajectory:
         """Drop segments starting after time ``t`` and clip any active segment."""
         if not self.segments:
             return self
-        new_segments: List[Segment] = []
+        new_segments: list[Segment] = []
         for seg in self.segments:
             if seg.t0 < t < seg.t1():
                 # clip ongoing segment
@@ -369,7 +377,7 @@ class Trajectory:
         t = math.nextafter(self.segments[-1].t1(), -math.inf)
         return self.segments[idx].eval(t, self._start_vals[idx])
 
-    def _append(self, seg: Segment, *, start_value: Optional[float] = None) -> None:
+    def _append(self, seg: Segment, *, start_value: float | None = None) -> None:
         # append must be at the current end time to keep cached starts valid
         if not self._can_append_at_end(seg.t0):
             self.trim_future(seg.t0)
@@ -404,6 +412,29 @@ class Trajectory:
             for s in self.segments:
                 self._start_vals.append(y)
                 y = s.eval(s.t1(), y)
+    @field_serializer("unit", mode="plain")
+    def _serialize_unit(self, unit: UnitBase) -> str:
+        return str(unit)
+    @field_serializer("segments", mode="plain")
+    def _serialize_segments(self, segments: list[Segment]) -> list:
+        # subclass of segments all get interpreted as base 'Segment',
+        # which will throw unimplemented error if used as is. 
+        # therefore, serialization must lose info on future
+        # segments:
+        return []
+    @field_serializer("y0", mode="plain")
+    def _serialize_y0(self, y0: float) -> float:
+        # y0 is to take on the last applicable setpoint
+        # of the existing trajectory. 
+        # unless ofcourse no last value exists yet
+        if self._last_value is None:
+            return self.y0
+        return self._last_value
+    @field_serializer("t0", mode="plain")
+    def _serialize_t0(self, t0:float) -> float:
+        # t0 will be forced to 0 in case it wasnt before
+        # which, I don't think is allowed... not that I've tried. 
+        return 0.0
 
 # ------------------------------
 # Multi-channel convenience wrapper
@@ -411,7 +442,7 @@ class Trajectory:
 
 @dataclass
 class MultiTrajectory:
-    tracks: List[Trajectory]
+    tracks: list[Trajectory]
 
     def __call__(self, t: float) -> np.ndarray:
         return np.array([tr(t) for tr in self.tracks])
@@ -425,7 +456,7 @@ class MultiTrajectory:
 # ------------------------------
 if __name__ == "__main__":
     # Build a trajectory
-    T = (Trajectory(y0=0.0, t0=0.0)
+    T = (Trajectory(y0=0.0, unit = "m3", t0=0.0)
          .hold(1.0, value=0.0)
          .step(5.0)
          .ramp(magnitude=5.0, ramprate=1.0)  # duration = 5s
@@ -437,13 +468,13 @@ if __name__ == "__main__":
     print(f"y(0..25): mean={ys.mean():.3f}, min={ys.min():.3f}, max={ys.max():.3f}")
 
     # Cascade update: outer loop updates inner-loop SP every 0.1s
-    inner = Trajectory(y0=ys[0], t0=0.0)
+    inner = Trajectory(y0=ys[0], unit = "m2", t0=0.0)
     for k, t in enumerate(ts):
         sp = T(t)
         inner.set_now(t, sp)  # O(1) append + clear future
         _ = inner(t)  # controller pulls inner(t)
 
     # Vector example (e.g., pressure & temperature)
-    M = MultiTrajectory([T.clone(), Trajectory(y0=2.0).ramp(magnitude=-1.0, duration=10.0)])
+    M = MultiTrajectory([T.clone(), Trajectory(y0=2.0, unit = "m3").ramp(magnitude=-1.0, duration=10.0)])
     yv = M(3.3)
     print("vector at t=3.3:", yv)

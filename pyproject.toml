@@ -6,8 +6,7 @@ build-backend = "setuptools.build_meta"
 version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
 
-[[tool.mypy.overrides]]
-module = "modular_simulation.*"
+[tool.mypy]
 ignore_missing_imports = true
 
 [project]
@@ -27,13 +26,13 @@ classifiers = [
 ]
 
 dependencies = [
-  "numba==0.61.2",
-  "scipy==1.16.2",
-  "tqdm==4.67.1",
-  "pydantic==2.11.7",
-  "matplotlib>=3.10.6",
+  "numba",
+  "scipy",
+  "tqdm",
+  "pydantic",
+  "matplotlib",
   "astropy",
-  "flask>=3.1.0",
+  "nicegui",
   "pytest",
 ]
 
@@ -43,5 +42,5 @@ testpaths = [
 ]
 [dependency-groups]
 dev = [
-    "ruff>=0.13.1",
+    "ruff",
 ]

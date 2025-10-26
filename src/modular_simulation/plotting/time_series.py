@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Iterable, List, Tuple, TYPE_CHECKING, Callable
+from typing import Any, Iterable, TYPE_CHECKING, Callable
 
 import numpy as np
 
@@ -27,7 +27,7 @@ def _coerce_scalar(value: Any) -> float:
     return float(arr.item())
 
 
-def triplets_to_arrays(samples: Sequence[TagData]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def triplets_to_arrays(samples: Sequence[TagData]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Convert a sequence of triplets into NumPy arrays of time, value, and quality flags."""
 
     times = np.empty(len(samples), dtype=float)
@@ -41,7 +41,7 @@ def triplets_to_arrays(samples: Sequence[TagData]) -> Tuple[np.ndarray, np.ndarr
     return times, values, ok
 
 
-def _extract_series(samples: SeriesInput) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _extract_series(samples: SeriesInput) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if isinstance(samples, Mapping):
         try:
             times_like = samples["time"]
@@ -85,7 +85,7 @@ def plot_triplet_series(
     line_kwargs: Mapping[str, Any] | None = None,
     bad_kwargs: Mapping[str, Any] | None = None,
     time_converter: Callable = lambda v: v
-) -> List[Any]:
+) -> list[Any]:
     """Plot a :class:`TagData` series on ``ax``.
 
     Parameters
@@ -115,7 +115,7 @@ def plot_triplet_series(
 
     times, values, ok = _extract_series(samples)
     times = time_converter(times)
-    artists: List[Any] = []
+    artists: list[Any] = []
 
     if times.size == 0:
         return artists
@@ -141,7 +141,7 @@ def plot_triplet_series(
     return artists
 
 
-def triplets_from_history(history_entry: Mapping[str, Sequence[Any]]) -> List[TagData]:
+def triplets_from_history(history_entry: Mapping[str, Sequence[Any]]) -> list[TagData]:
     """Convert a history mapping (time/value/ok) to triplet objects."""
 
     times, values, ok = _extract_series(history_entry)

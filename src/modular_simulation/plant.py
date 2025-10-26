@@ -1,4 +1,4 @@
-from typing import List, Mapping
+, Mapping
 from numpy.typing import NDArray
 from pydantic import BaseModel, PrivateAttr, ConfigDict
 from modular_simulation.framework.utils import create_system
@@ -11,7 +11,7 @@ class Plant(BaseModel):
     """
     A collection of multiple systems that is then treated as one. 
     """
-    systems: List["System"]
+    systems: list["System"]
     dt: float # overwrites the individual systems' dt with this
 
     _composite_system: System = PrivateAttr()
@@ -27,7 +27,7 @@ class Plant(BaseModel):
         controllers = []
         rhs_list = []
         alg_list = []
-        dt = np.inf
+        dt = float('inf')
 
         for system in self.systems:
             measurable = system.measurable_quantities

@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
 from astropy.units import UnitBase, UnitsError #type: ignore
 import numpy as np
 from numpy.typing import NDArray
@@ -14,6 +13,7 @@ class TagData:
     value: float | NDArray = np.nan
     ok: bool = False  # whether or not the value is ok (not faulty)
 
+
 @dataclass(slots=True)
 class TagInfo:
     """
@@ -23,13 +23,13 @@ class TagInfo:
     """
     tag: str
     unit: UnitBase
-    description: Optional[str] = "no description provided"
+    description: str | None = "no description provided"
     # data is private attr such that user can't set its value directly
     _data: TagData = field(
         init = False,
         default_factory = TagData
     )
-    _history: List[TagData] = field(
+    _history: list[TagData] = field(
         init = False,
         default_factory = list
     )
@@ -50,7 +50,7 @@ class TagInfo:
         self._history.append(new_data)
     
     @property
-    def history(self) -> List[TagData]:
+    def history(self) -> list[TagData]:
         """public access to the tag's history"""
         return self._history
     

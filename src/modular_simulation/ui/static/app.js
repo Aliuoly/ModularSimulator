@@ -181,7 +181,7 @@ function getUsableTagInfo(tag) {
 }
 
 function getMeasuredOrCalculatedTags() {
-  const tags = new Set();
+  const tags = new set();
   const usable = state.metadata?.usable_tags;
   if (Array.isArray(usable)) {
     usable.forEach((tag) => {
@@ -375,7 +375,7 @@ function renderSensorList() {
       <div>Measurement: <span class="tag-pill">${params.measurement_tag}</span></div>
       <div>Alias: <span class="tag-pill">${alias}</span></div>
       <div class="actions">
-        <button data-action="add-controller" data-sensor="${sensor.id}">Add Controller</button>
+        <button data-action="add-controller" data-sensor="${sensor.id}">Add ControllerBase</button>
         <button data-action="remove" data-id="${sensor.id}">Remove</button>
       </div>
     `;
@@ -583,7 +583,7 @@ function openPlotLineDialog({ index = null, defaults = {} } = {}) {
   tagLabel.textContent = 'Tag';
   const tagSelect = document.createElement('select');
   const tagOptions = Array.from(
-    new Set([...(state.metadata.usable_tags || []), ...(state.metadata.setpoint_tags || [])])
+    new set([...(state.metadata.usable_tags || []), ...(state.metadata.setpoint_tags || [])])
   ).sort((a, b) => a.localeCompare(b));
   const hasTags = tagOptions.length > 0;
   if (hasTags) {

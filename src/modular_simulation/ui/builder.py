@@ -11,7 +11,7 @@ import pkgutil
 import types
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Type, Union, get_args, get_origin
+from typing import Any, Iterable, Mapping, Optional, Type, Union, get_args, get_origin
 
 import matplotlib
 
@@ -23,10 +23,10 @@ from astropy.units import Quantity, Unit, UnitBase  # type: ignore
 from pydantic_core import PydanticUndefined
 from modular_simulation.framework.system import System
 from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
-from modular_simulation.usables.calculations.calculation import Calculation, TagMetadata
-from modular_simulation.usables.controllers.controller import Controller, ControllerMode
+from modular_simulation.usables.calculations.calculation_base import CalculationBase, TagMetadata
+from modular_simulation.usables.controllers.controller_base import ControllerBase, ControllerMode
 from modular_simulation.usables.controllers.trajectory import Trajectory
-from modular_simulation.usables.sensors.sensor import Sensor
+from modular_simulation.usables.sensors.sensor_base import SensorBase
 from modular_simulation.usables.tag_info import TagData
 from modular_simulation.usables.usable_quantities import UsableQuantities
 from numpy.typing import NDArray
@@ -36,9 +36,9 @@ from numpy.typing import NDArray
 class SensorConfig:
     id: str
     name: str
-    cls: Type[Sensor]
-    args: Dict[str, Any]
-    raw: Dict[str, Any]
+    cls: Type[SensorBase]
+    args: dict[str, Any]
+    raw: dict[str, Any]
 
     @property
     def alias_tag(self) -> str:
@@ -56,16 +56,16 @@ class SensorConfig:
 class TrajectorySpec:
     y0: float
     unit: str
-    segments: List[Dict[str, Any]]
+    segments: list[dict[str, Any]]
 
 
 @dataclass
 class ControllerConfig:
     id: str
     name: str
-    cls: Type[Controller]
-    args: Dict[str, Any]
-    raw: Dict[str, Any]
+    cls: Type[ControllerBase]
+    args: dict[str, Any]
+    raw: dict[str, Any]
     trajectory: TrajectorySpec
     parent_id: Optional[str] = None
     child_id: Optional[str] = None
@@ -90,31 +90,31 @@ class ControllerConfig:
 class SensorModule:
     id: str
     module: types.ModuleType
-    classes: Dict[str, Type[Sensor]]
+    classes: dict[str, Type[SensorBase]]
 
 
 @dataclass
 class ControllerModule:
     id: str
     module: types.ModuleType
-    classes: Dict[str, Type[Controller]]
+    classes: dict[str, Type[ControllerBase]]
 
 
 @dataclass
 class CalculationModule:
     id: str
     module: types.ModuleType
-    classes: Dict[str, Type[Calculation]]
+    classes: dict[str, Type[CalculationBase]]
 
 
 @dataclass
 class CalculationConfig:
     id: str
     name: str
-    cls: Type[Calculation]
-    args: Dict[str, Any]
-    raw: Dict[str, Any]
-    output_units: Dict[str, UnitBase] = field(default_factory=dict)
+    cls: Type[CalculationBase]
+    args: dict[str, Any]
+    raw: dict[str, Any]
+    output_units: dict[str, UnitBase] = field(default_factory=dict)
 
     @property
     def output_tags(self) -> Iterable[str]:
@@ -134,12 +134,12 @@ class PlotLine:
 class PlotLayout:
     rows: int = 1
     cols: int = 1
-    lines: List[PlotLine] = field(default_factory=list)
+    lines: list[PlotLine] = field(default_factory=list)
 
 
-def _discover_subclasses(base: Type[Any], package: str) -> Dict[str, Type[Any]]:
+def _discover_subclasses(base: Type[Any], package: str) -> dict[str, Type[Any]]:
     module = importlib.import_module(package)
-    discovered: Dict[str, Type[Any]] = {}
+    discovered: dict[str, Type[Any]] = {}
     if not hasattr(module, "__path__"):
         for name, attr in inspect.getmembers(module, inspect.isclass):
             if issubclass(attr, base) and attr is not base:
@@ -182,11 +182,11 @@ def _parse_quantity(value: Mapping[str, Any]) -> Quantity:
     return magnitude * unit
 
 
-def _parse_numeric_tuple(value: Mapping[str, Any]) -> Tuple[float, float]:
+def _parse_numeric_tuple(value: Mapping[str, Any]) -> tuple[float, float]:
     return (float(value.get("min", 0.0)), float(value.get("max", 0.0)))
 
 
-def _parse_quantity_range(value: Mapping[str, Any]) -> Tuple[Quantity, Quantity]:
+def _parse_quantity_range(value: Mapping[str, Any]) -> tuple[Quantity, Quantity]:
     lower = _parse_quantity(value.get("lower"))
     upper = _parse_quantity(value.get("upper"))
     return (lower, upper)
@@ -199,7 +199,7 @@ def _sanitize_number(value: float) -> float | None:
     return number
 
 
-def _unit_metadata(unit: UnitBase | str | None) -> Dict[str, Any]:
+def _unit_metadata(unit: UnitBase | str | None) -> dict[str, Any]:
     """Return serialization-friendly metadata for a unit reference."""
 
     normalized: UnitBase | None
@@ -212,7 +212,7 @@ def _unit_metadata(unit: UnitBase | str | None) -> Dict[str, Any]:
         normalized = None
 
     unit_text = str(normalized) if normalized is not None else ""
-    aliases: List[str] = []
+    aliases: list[str] = []
 
     if normalized is not None:
         raw_aliases = getattr(normalized, "aliases", ())
@@ -250,17 +250,17 @@ def _serialize_value(value: Any) -> Any:
     return value
 
 
-def _serialize_tag_history(series: List[TagData]) -> Dict[str, List[float]]:
-    times: List[float] = []
-    values: List[float] = []
-    ok_flags: List[bool] = []
+def _serialize_tag_history(series: list[TagData]) -> dict[str, list[float]]:
+    times: list[float] = []
+    values: list[float] = []
+    ok_flags: list[bool] = []
 
     for sample in series:
         times.append(float(sample.time))
         ok_flags.append(bool(getattr(sample, "ok", True)))
 
         value = sample.value
-        sanitized: Optional[float]
+        sanitized: float | None
         if isinstance(value, (np.ndarray, np.generic, list, tuple)):
             arr = np.asarray(value).reshape(-1)
             sanitized = _sanitize_number(float(arr[0]))
@@ -275,7 +275,7 @@ def _serialize_tag_history(series: List[TagData]) -> Dict[str, List[float]]:
     return {"time": times, "value": values, "ok": ok_flags}
 
 
-def _series_to_arrays(series: Mapping[str, Any]) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+def _series_to_arrays(series: Mapping[str, Any]) -> tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """Convert a serialized history mapping into NumPy arrays."""
 
     times = np.asarray(series.get("time", []), dtype=float).reshape(-1)
@@ -307,9 +307,9 @@ class SimulationBuilder:
         measurable_quantities: MeasurableQuantities,
         dt: Quantity,
         *,
-        solver_options: Optional[Dict[str, Any]] = None,
+        solver_options: Optional[dict[str, Any]] = None,
         use_numba: bool = False,
-        numba_options: Optional[Dict[str, Any]] = None,
+        numba_options: Optional[dict[str, Any]] = None,
         record_history: bool = True,
     ) -> None:
         self.system_class = system_class
@@ -320,45 +320,45 @@ class SimulationBuilder:
         self.numba_options = numba_options or {"nopython": True, "cache": True}
         self.record_history = record_history
 
-        self.sensor_types = _discover_subclasses(Sensor, "modular_simulation.usables.sensors")
-        self.controller_types = _discover_subclasses(Controller, "modular_simulation.usables.controllers")
-        self.calculation_types = _discover_subclasses(Calculation, "modular_simulation.usables.calculations")
+        self.sensor_types = _discover_subclasses(SensorBase, "modular_simulation.usables.sensors")
+        self.controller_types = _discover_subclasses(ControllerBase, "modular_simulation.usables.controllers")
+        self.calculation_types = _discover_subclasses(CalculationBase, "modular_simulation.usables.calculations")
 
-        self.sensor_modules: Dict[str, SensorModule] = {}
-        self.controller_modules: Dict[str, ControllerModule] = {}
-        self.sensor_configs: List[SensorConfig] = []
-        self.controller_configs: Dict[str, ControllerConfig] = {}
-        self.calculation_configs: Dict[str, CalculationConfig] = {}
-        self.calculation_modules: Dict[str, CalculationModule] = {}
+        self.sensor_modules: dict[str, SensorModule] = {}
+        self.controller_modules: dict[str, ControllerModule] = {}
+        self.sensor_configs: list[SensorConfig] = []
+        self.controller_configs: dict[str, ControllerConfig] = {}
+        self.calculation_configs: dict[str, CalculationConfig] = {}
+        self.calculation_modules: dict[str, CalculationModule] = {}
         self.plot_layout = PlotLayout()
         self.system: Optional[System] = None
-        self._messages: List[str] = []
+        self._messages: list[str] = []
         self._suppress_invalidations = False
-        self._suppressed_messages: List[str] = []
+        self._suppressed_messages: list[str] = []
         self._history_cache = self._empty_history_structure()
         self._history_lengths = self._empty_length_structure()
         self._elapsed_time = 0.0
         self._time_offset = 0.0
-        self._history_bounds: Dict[str, Optional[float]] = {"min": None, "max": None}
-        self._time_axis_limits: Tuple[Optional[float], Optional[float]] = (None, None)
+        self._history_bounds: dict[str, float | None] = {"min": None, "max": None}
+        self._time_axis_limits: tuple[float | None, float | None] = (None, None)
 
     # ------------------------------------------------------------------
     # Metadata helpers
     # ------------------------------------------------------------------
     @staticmethod
-    def _empty_history_structure() -> Dict[str, Dict[str, Dict[str, List[float]]]]:
+    def _empty_history_structure() -> dict[str, dict[str, dict[str, list[float]]]]:
         return {"sensors": {}, "calculations": {}, "setpoints": {}}
 
     @staticmethod
-    def _empty_length_structure() -> Dict[str, Dict[str, int]]:
+    def _empty_length_structure() -> dict[str, dict[str, int]]:
         return {"sensors": {}, "calculations": {}, "setpoints": {}}
 
     @property
     def elapsed_time(self) -> float:
         return self._elapsed_time
 
-    def measurable_metadata(self) -> List[Dict[str, str]]:
-        items: List[Dict[str, str]] = []
+    def measurable_metadata(self) -> list[dict[str, str]]:
+        items: list[dict[str, str]] = []
         for category in ("states", "algebraic_states", "control_elements", "constants"):
             model = getattr(self.base_measurables, category)
             for tag in model.tag_list:
@@ -371,17 +371,17 @@ class SimulationBuilder:
                 })
         return items
 
-    def control_element_tags(self) -> List[str]:
+    def control_element_tags(self) -> list[str]:
         return list(self.base_measurables.control_elements.tag_list)
 
-    def control_element_unit_options(self) -> Dict[str, Dict[str, List[str] | str]]:
-        options: Dict[str, Dict[str, List[str] | str]] = {}
+    def control_element_unit_options(self) -> dict[str, dict[str, list[str] | str]]:
+        options: dict[str, dict[str, list[str] | str]] = {}
         for tag, unit in self.base_measurables.control_elements.tag_unit_info.items():
             options[tag] = _unit_metadata(unit)
         return options
 
-    def usable_tag_unit_options(self) -> Dict[str, Dict[str, List[str] | str]]:
-        options: Dict[str, Dict[str, List[str] | str]] = {}
+    def usable_tag_unit_options(self) -> dict[str, dict[str, list[str] | str]]:
+        options: dict[str, dict[str, list[str] | str]] = {}
         for tag, unit in self.base_measurables.tag_unit_info.items():
             options[tag] = _unit_metadata(unit)
         for cfg in self.sensor_configs:
@@ -397,10 +397,10 @@ class SimulationBuilder:
                 options[tag] = _unit_metadata(unit)
         return options
 
-    def available_sensor_types(self) -> List[Dict[str, Any]]:
-        items: List[Dict[str, Any]] = []
+    def available_sensor_types(self) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
         for cls in self.sensor_types.values():
-            if cls is Sensor:
+            if cls is SensorBase:
                 continue
             items.append(self._describe_model(cls))
         for module in self.sensor_modules.values():
@@ -408,10 +408,10 @@ class SimulationBuilder:
                 items.append(self._describe_model(cls))
         return items
 
-    def available_controller_types(self) -> List[Dict[str, Any]]:
-        items: List[Dict[str, Any]] = []
+    def available_controller_types(self) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
         for cls in self.controller_types.values():
-            if cls is Controller:
+            if cls is ControllerBase:
                 continue
             info = self._describe_model(cls, exclude_fields={"sp_trajectory", "cascade_controller"})
             items.append(info)
@@ -424,10 +424,10 @@ class SimulationBuilder:
                 items.append(info)
         return items
 
-    def available_calculation_types(self) -> List[Dict[str, Any]]:
+    def available_calculation_types(self) -> list[dict[str, Any]]:
         builtin = []
         for cls in self.calculation_types.values():
-            if cls is Calculation:
+            if cls is CalculationBase:
                 continue
             builtin.append(self._describe_model(cls))
         uploaded = []
@@ -436,7 +436,7 @@ class SimulationBuilder:
                 uploaded.append(self._describe_model(cls))
         return builtin + uploaded
 
-    def messages(self) -> List[str]:
+    def messages(self) -> list[str]:
         msgs = list(self._messages)
         self._messages.clear()
         return msgs
@@ -444,12 +444,12 @@ class SimulationBuilder:
     # ------------------------------------------------------------------
     # CRUD for sensors
     # ------------------------------------------------------------------
-    def add_sensor(self, sensor_type: str, params: Dict[str, Any]) -> SensorConfig:
+    def add_sensor(self, sensor_type: str, params: dict[str, Any]) -> SensorConfig:
         cls = self._resolve_sensor_type(sensor_type)
         args = self._convert_arguments(cls, params)
         measurement_tag = args.get("measurement_tag")
         if measurement_tag is None:
-            raise ValueError("Sensor configuration requires a 'measurement_tag'.")
+            raise ValueError("SensorBase configuration requires a 'measurement_tag'.")
         measurement_unit = self.base_measurables.tag_unit_info.get(measurement_tag)
         if measurement_unit is None:
             raise ValueError(
@@ -460,7 +460,7 @@ class SimulationBuilder:
             args["unit"] = measurement_unit
         elif not sensor_unit.is_equivalent(measurement_unit):
             raise ValueError(
-                "Sensor unit must be compatible with the measurement tag's unit. "
+                "SensorBase unit must be compatible with the measurement tag's unit. "
                 f"Received '{sensor_unit}' for tag '{measurement_tag}' ({measurement_unit})."
             )
         instance = cls(**args)
@@ -472,14 +472,14 @@ class SimulationBuilder:
             raw=self._serialize_model(instance),
         )
         self.sensor_configs.append(config)
-        self.invalidate("Sensor definitions changed; system will be rebuilt on next run.")
+        self.invalidate("SensorBase definitions changed; system will be rebuilt on next run.")
         return config
 
     def remove_sensor(self, sensor_id: str) -> None:
         before = len(self.sensor_configs)
         self.sensor_configs = [cfg for cfg in self.sensor_configs if cfg.id != sensor_id]
         if len(self.sensor_configs) != before:
-            self.invalidate("Sensor removed; system will restart from initial conditions on next run.")
+            self.invalidate("SensorBase removed; system will restart from initial conditions on next run.")
 
     # ------------------------------------------------------------------
     # CRUD for controllers
@@ -487,8 +487,8 @@ class SimulationBuilder:
     def add_controller(
         self,
         controller_type: str,
-        params: Dict[str, Any],
-        trajectory: Dict[str, Any],
+        params: dict[str, Any],
+        trajectory: dict[str, Any],
         *,
         parent_id: Optional[str] = None,
     ) -> ControllerConfig:
@@ -517,7 +517,7 @@ class SimulationBuilder:
         if parent_id:
             parent = self.controller_configs[parent_id]
             parent.child_id = controller_id
-        self.invalidate("Controller definitions changed; system will be rebuilt on next run.")
+        self.invalidate("ControllerBase definitions changed; system will be rebuilt on next run.")
         return config
 
     def remove_controller(self, controller_id: str) -> None:
@@ -528,16 +528,16 @@ class SimulationBuilder:
             parent = self.controller_configs[cfg.parent_id]
             if parent.child_id == controller_id:
                 parent.child_id = None
-        self.invalidate("Controller removed; system will restart on next run.")
+        self.invalidate("ControllerBase removed; system will restart on next run.")
 
     def update_controller(
-        self, controller_id: str, params: Optional[Dict[str, Any]]
+        self, controller_id: str, params: Optional[dict[str, Any]]
     ) -> ControllerConfig:
         config = self.controller_configs.get(controller_id)
         if config is None:
             raise ValueError(f"Unknown controller id '{controller_id}'.")
         if params is None:
-            raise ValueError("Controller update requires a 'params' mapping.")
+            raise ValueError("ControllerBase update requires a 'params' mapping.")
 
         updates = self._convert_arguments(
             config.cls, params, exclude={"sp_trajectory", "cascade_controller"}
@@ -558,12 +558,12 @@ class SimulationBuilder:
         config.args = new_args
         config.raw = raw
         self.invalidate(
-            "Controller parameters updated; system will be rebuilt on next run."
+            "ControllerBase parameters updated; system will be rebuilt on next run."
         )
         return config
 
     def update_controller_trajectory(
-        self, controller_id: str, trajectory: Optional[Dict[str, Any]]
+        self, controller_id: str, trajectory: Optional[dict[str, Any]]
     ) -> ControllerConfig:
         config = self.controller_configs.get(controller_id)
         if config is None:
@@ -592,13 +592,13 @@ class SimulationBuilder:
 
         config.trajectory = traj_spec
         config.raw = raw
-        self.invalidate("Controller trajectory updated; system will be rebuilt on next run.")
+        self.invalidate("ControllerBase trajectory updated; system will be rebuilt on next run.")
         return config
 
     # ------------------------------------------------------------------
     # CRUD for calculations
     # ------------------------------------------------------------------
-    def add_calculation(self, calculation_type: str, params: Dict[str, Any]) -> CalculationConfig:
+    def add_calculation(self, calculation_type: str, params: dict[str, Any]) -> CalculationConfig:
         cls = self._resolve_calculation_type(calculation_type)
         args = self._convert_arguments(cls, params)
         instance = cls(**args)
@@ -616,13 +616,13 @@ class SimulationBuilder:
             output_units=output_units,
         )
         self.calculation_configs[config.id] = config
-        self.invalidate("Calculation definitions changed; system will be rebuilt on next run.")
+        self.invalidate("CalculationBase definitions changed; system will be rebuilt on next run.")
         return config
 
     def remove_calculation(self, calculation_id: str) -> None:
         if calculation_id in self.calculation_configs:
             del self.calculation_configs[calculation_id]
-            self.invalidate("Calculation removed; system will restart on next run.")
+            self.invalidate("CalculationBase removed; system will restart on next run.")
 
     def register_sensor_module(self, file_path: str) -> SensorModule:
         module_id = str(uuid.uuid4())
@@ -632,9 +632,9 @@ class SimulationBuilder:
         module = importlib.util.module_from_spec(spec)
         loader = spec.loader
         loader.exec_module(module)  # type: ignore[call-arg]
-        classes: Dict[str, Type[Sensor]] = {}
+        classes: dict[str, Type[SensorBase]] = {}
         for _, cls in inspect.getmembers(module, inspect.isclass):
-            if issubclass(cls, Sensor) and cls is not Sensor:
+            if issubclass(cls, SensorBase) and cls is not SensorBase:
                 classes[cls.__name__] = cls
         self._replace_uploaded_sensor_classes(classes)
         sensor_module = SensorModule(id=module_id, module=module, classes=classes)
@@ -650,9 +650,9 @@ class SimulationBuilder:
         module = importlib.util.module_from_spec(spec)
         loader = spec.loader
         loader.exec_module(module)  # type: ignore[call-arg]
-        classes: Dict[str, Type[Controller]] = {}
+        classes: dict[str, Type[ControllerBase]] = {}
         for _, cls in inspect.getmembers(module, inspect.isclass):
-            if issubclass(cls, Controller) and cls is not Controller:
+            if issubclass(cls, ControllerBase) and cls is not ControllerBase:
                 classes[cls.__name__] = cls
         self._replace_uploaded_controller_classes(classes)
         controller_module = ControllerModule(id=module_id, module=module, classes=classes)
@@ -668,9 +668,9 @@ class SimulationBuilder:
         module = importlib.util.module_from_spec(spec)
         loader = spec.loader
         loader.exec_module(module)  # type: ignore[call-arg]
-        classes: Dict[str, Type[Calculation]] = {}
+        classes: dict[str, Type[CalculationBase]] = {}
         for _, cls in inspect.getmembers(module, inspect.isclass):
-            if issubclass(cls, Calculation) and cls is not Calculation:
+            if issubclass(cls, CalculationBase) and cls is not CalculationBase:
                 classes[cls.__name__] = cls
         self._replace_uploaded_calculation_classes(classes)
         calc_module = CalculationModule(id=module_id, module=module, classes=classes)
@@ -681,7 +681,7 @@ class SimulationBuilder:
     # ------------------------------------------------------------------
     # Plot configuration
     # ------------------------------------------------------------------
-    def set_plot_layout(self, rows: int, cols: int, lines: List[Dict[str, Any]]) -> PlotLayout:
+    def set_plot_layout(self, rows: int, cols: int, lines: list[dict[str, Any]]) -> PlotLayout:
         allowed_tags = set(self.available_usable_tags()) | set(
             self.available_setpoint_tags()
         )
@@ -706,7 +706,7 @@ class SimulationBuilder:
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------
-    def run(self, duration: Optional[Quantity] = None) -> Dict[str, Any]:
+    def run(self, duration: Optional[Quantity] = None) -> dict[str, Any]:
         system_was_none = self.system is None
         system = self._ensure_system()
         if system_was_none:
@@ -718,7 +718,7 @@ class SimulationBuilder:
             system.step(duration)
         return self._collect_results(system)
 
-    def _collect_results(self, system: System) -> Dict[str, Any]:
+    def _collect_results(self, system: System) -> dict[str, Any]:
         outputs = self._collect_outputs(system)
         self._update_history_cache(outputs, self._time_offset)
         history = self.get_history_outputs()
@@ -733,10 +733,10 @@ class SimulationBuilder:
             "time_axis": self.time_axis_limits(),
         }
 
-    def _collect_outputs(self, system: System) -> Dict[str, Any]:
+    def _collect_outputs(self, system: System) -> dict[str, Any]:
         measured = system.measured_history
         setpoints = system.setpoint_history
-        outputs: Dict[str, Any] = {
+        outputs: dict[str, Any] = {
             "sensors": {},
             "calculations": {},
             "setpoints": {},
@@ -751,8 +751,8 @@ class SimulationBuilder:
 
     def _render_plot(
         self,
-        outputs: Dict[str, Any],
-        time_axis: Tuple[Optional[float], Optional[float]] | None = None,
+        outputs: dict[str, Any],
+        time_axis: tuple[float | None, float | None] | None = None,
     ) -> Optional[str]:
         if not self.plot_layout.lines:
             return self._render_default_plot(outputs, time_axis)
@@ -771,7 +771,7 @@ class SimulationBuilder:
             mask = np.isfinite(times) & np.isfinite(values)
             if not mask.any():
                 continue
-            line_kwargs: Dict[str, Any] = {}
+            line_kwargs: dict[str, Any] = {}
             if line.color:
                 line_kwargs["color"] = line.color
             if line.style:
@@ -801,7 +801,7 @@ class SimulationBuilder:
         plt.tight_layout()
         return self._finalize_figure(fig)
 
-    def _update_history_cache(self, outputs: Dict[str, Any], offset: float) -> None:
+    def _update_history_cache(self, outputs: dict[str, Any], offset: float) -> None:
         for category in ("sensors", "calculations", "setpoints"):
             category_outputs = outputs.get(category, {})
             length_tracker = self._history_lengths[category]
@@ -854,21 +854,21 @@ class SimulationBuilder:
                 if current_max is None or max_time > current_max:
                     self._history_bounds["max"] = max_time
 
-    def get_history_outputs(self) -> Dict[str, Any]:
+    def get_history_outputs(self) -> dict[str, Any]:
         return copy.deepcopy(self._history_cache)
 
-    def history_range(self) -> Dict[str, Optional[float]]:
+    def history_range(self) -> dict[str, float | None]:
         return {"min": self._history_bounds["min"], "max": self._history_bounds["max"]}
 
-    def time_axis_limits(self) -> Dict[str, Optional[float]]:
+    def time_axis_limits(self) -> dict[str, float | None]:
         lower, upper = self._time_axis_limits
         return {"min": lower, "max": upper}
 
     def update_time_axis(
         self,
-        lower: Optional[float],
-        upper: Optional[float],
-    ) -> Dict[str, Any]:
+        lower: float | None,
+        upper: float | None,
+    ) -> dict[str, Any]:
         limits = (
             float(lower) if lower is not None else None,
             float(upper) if upper is not None else None,
@@ -893,8 +893,8 @@ class SimulationBuilder:
 
     def _render_default_plot(
         self,
-        outputs: Dict[str, Any],
-        time_axis: Tuple[Optional[float], Optional[float]] | None = None,
+        outputs: dict[str, Any],
+        time_axis: tuple[float | None, float | None] | None = None,
     ) -> Optional[str]:
         sensor_series = list(outputs["sensors"].items())
         calculation_series = list(outputs["calculations"].items())
@@ -941,7 +941,7 @@ class SimulationBuilder:
         encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
         return f"data:image/png;base64,{encoded}"
 
-    def _resolve_plot_series(self, tag: str, outputs: Dict[str, Any]) -> Optional[Dict[str, List[float]]]:
+    def _resolve_plot_series(self, tag: str, outputs: dict[str, Any]) -> Optional[dict[str, list[float]]]:
         if tag in outputs["sensors"]:
             return outputs["sensors"][tag]
         if tag in outputs["calculations"]:
@@ -1010,7 +1010,7 @@ class SimulationBuilder:
         cls: Type[Any],
         *,
         exclude_fields: Optional[Iterable[str]] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         exclude = set(exclude_fields or [])
         fields = []
         for name, field in cls.model_fields.items():
@@ -1038,7 +1038,7 @@ class SimulationBuilder:
             "doc": inspect.getdoc(cls) or "",
         }
 
-    def _field_tag_metadata(self, field: Any) -> Optional[Dict[str, Any]]:
+    def _field_tag_metadata(self, field: Any) -> Optional[dict[str, Any]]:
         for metadata in getattr(field, "metadata", []) or []:
             if isinstance(metadata, TagMetadata):
                 unit = str(metadata.unit) if metadata.unit is not None else ""
@@ -1049,10 +1049,10 @@ class SimulationBuilder:
                 }
         return None
 
-    def _replace_uploaded_sensor_classes(self, classes: Mapping[str, Type[Sensor]]) -> None:
+    def _replace_uploaded_sensor_classes(self, classes: Mapping[str, Type[SensorBase]]) -> None:
         if not classes:
             return
-        existing_map: Dict[str, str] = {}
+        existing_map: dict[str, str] = {}
         for module_id, module in list(self.sensor_modules.items()):
             for class_name in list(module.classes.keys()):
                 existing_map[class_name] = module_id
@@ -1069,14 +1069,14 @@ class SimulationBuilder:
                 self.sensor_modules.pop(module_id, None)
             self._reload_existing_sensor_configs(class_name, cls)
         if classes:
-            self.invalidate("Sensor modules updated; system will be rebuilt on next run.")
+            self.invalidate("SensorBase modules updated; system will be rebuilt on next run.")
 
     def _replace_uploaded_controller_classes(
-        self, classes: Mapping[str, Type[Controller]]
+        self, classes: Mapping[str, Type[ControllerBase]]
     ) -> None:
         if not classes:
             return
-        existing_map: Dict[str, str] = {}
+        existing_map: dict[str, str] = {}
         for module_id, module in list(self.controller_modules.items()):
             for class_name in list(module.classes.keys()):
                 existing_map[class_name] = module_id
@@ -1093,12 +1093,12 @@ class SimulationBuilder:
                 self.controller_modules.pop(module_id, None)
             self._reload_existing_controller_configs(class_name, cls)
         if classes:
-            self.invalidate("Controller modules updated; system will be rebuilt on next run.")
+            self.invalidate("ControllerBase modules updated; system will be rebuilt on next run.")
 
-    def _replace_uploaded_calculation_classes(self, classes: Mapping[str, Type[Calculation]]) -> None:
+    def _replace_uploaded_calculation_classes(self, classes: Mapping[str, Type[CalculationBase]]) -> None:
         if not classes:
             return
-        existing_map: Dict[str, str] = {}
+        existing_map: dict[str, str] = {}
         for module_id, module in list(self.calculation_modules.items()):
             for class_name in list(module.classes.keys()):
                 existing_map[class_name] = module_id
@@ -1115,11 +1115,11 @@ class SimulationBuilder:
                 self.calculation_modules.pop(module_id, None)
             self._reload_existing_calculation_configs(class_name, cls)
         if classes:
-            self.invalidate("Calculation modules updated; system will be rebuilt on next run.")
+            self.invalidate("CalculationBase modules updated; system will be rebuilt on next run.")
 
-    def _ordered_controller_configs(self) -> List[ControllerConfig]:
-        ordered: List[ControllerConfig] = []
-        visited: Set[str] = set()
+    def _ordered_controller_configs(self) -> list[ControllerConfig]:
+        ordered: list[ControllerConfig] = []
+        visited: set[str] = set()
 
         def traverse(config: ControllerConfig) -> None:
             if config.id in visited:
@@ -1137,7 +1137,7 @@ class SimulationBuilder:
                 ordered.append(config)
         return ordered
 
-    def export_configuration(self) -> Dict[str, Any]:
+    def export_configuration(self) -> dict[str, Any]:
         sensors = [
             {
                 "id": cfg.id,
@@ -1147,7 +1147,7 @@ class SimulationBuilder:
             for cfg in self.sensor_configs
         ]
 
-        controllers: List[Dict[str, Any]] = []
+        controllers: list[dict[str, Any]] = []
         for cfg in self._ordered_controller_configs():
             params = _serialize_value(cfg.raw)
             params.pop("sp_trajectory", None)
@@ -1228,19 +1228,19 @@ class SimulationBuilder:
             for sensor in sensors:
                 sensor_type = sensor.get("type")
                 if not sensor_type:
-                    raise ValueError("Sensor configuration entries require a 'type'.")
+                    raise ValueError("SensorBase configuration entries require a 'type'.")
                 params = sensor.get("params") or {}
                 self.add_sensor(sensor_type, params)
 
-            controller_id_map: Dict[str, str] = {}
+            controller_id_map: dict[str, str] = {}
             remaining = list(controllers)
             while remaining:
-                pending: List[Mapping[str, Any]] = []
+                pending: list[Mapping[str, Any]] = []
                 progress = False
                 for controller in remaining:
                     controller_type = controller.get("type")
                     if not controller_type:
-                        raise ValueError("Controller configuration entries require a 'type'.")
+                        raise ValueError("ControllerBase configuration entries require a 'type'.")
                     parent_old = controller.get("parent_id")
                     if parent_old is not None and parent_old not in controller_id_map:
                         pending.append(controller)
@@ -1265,7 +1265,7 @@ class SimulationBuilder:
             for calculation in calculations:
                 calculation_type = calculation.get("type")
                 if not calculation_type:
-                    raise ValueError("Calculation configuration entries require a 'type'.")
+                    raise ValueError("CalculationBase configuration entries require a 'type'.")
                 params = dict(calculation.get("params") or {})
                 params.pop("outputs", None)
                 self.add_calculation(calculation_type, params)
@@ -1283,7 +1283,7 @@ class SimulationBuilder:
             lower = time_axis.get("min")
             upper = time_axis.get("max")
 
-            def _normalize(value: Any) -> Optional[float]:
+            def _normalize(value: Any) -> float | None:
                 if value is None:
                     return None
                 if isinstance(value, str) and value.strip() == "":
@@ -1294,7 +1294,7 @@ class SimulationBuilder:
 
         self._messages.append("Configuration loaded; system will be rebuilt on next run.")
 
-    def _reload_existing_calculation_configs(self, class_name: str, cls: Type[Calculation]) -> None:
+    def _reload_existing_calculation_configs(self, class_name: str, cls: Type[CalculationBase]) -> None:
         for config in self.calculation_configs.values():
             if config.name != class_name:
                 continue
@@ -1313,7 +1313,7 @@ class SimulationBuilder:
             config.raw = raw
             config.output_units = output_units
 
-    def _reload_existing_sensor_configs(self, class_name: str, cls: Type[Sensor]) -> None:
+    def _reload_existing_sensor_configs(self, class_name: str, cls: Type[SensorBase]) -> None:
         for config in self.sensor_configs:
             if config.name != class_name:
                 continue
@@ -1329,7 +1329,7 @@ class SimulationBuilder:
             config.raw = self._serialize_model(instance)
 
     def _reload_existing_controller_configs(
-        self, class_name: str, cls: Type[Controller]
+        self, class_name: str, cls: Type[ControllerBase]
     ) -> None:
         for config in self.controller_configs.values():
             if config.name != class_name:
@@ -1369,7 +1369,7 @@ class SimulationBuilder:
             return "unit"
         if annotation is Quantity:
             return "quantity"
-        if origin in (tuple, Tuple):
+        if origin in (tuple, tuple):
             args = get_args(annotation)
             if all(arg in (float, int, np.float64) for arg in args):
                 return "tuple[number]"
@@ -1382,12 +1382,12 @@ class SimulationBuilder:
     def _convert_arguments(
         self,
         cls: Type[Any],
-        params: Dict[str, Any],
+        params: dict[str, Any],
         *,
         exclude: Optional[Iterable[str]] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         exclude_set = set(exclude or [])
-        converted: Dict[str, Any] = {}
+        converted: dict[str, Any] = {}
         for name, field in cls.model_fields.items():
             if name.startswith("_") or name in exclude_set:
                 continue
@@ -1400,7 +1400,7 @@ class SimulationBuilder:
                 converted[name] = _parse_unit(value)
             elif annotation is Quantity:
                 converted[name] = _parse_quantity(value)
-            elif origin in (tuple, Tuple):
+            elif origin in (tuple, tuple):
                 args = get_args(annotation)
                 if all(arg in (float, int, np.float64) for arg in args):
                     converted[name] = tuple(float(v) for v in value)
@@ -1429,7 +1429,7 @@ class SimulationBuilder:
             elif seg_type == "step":
                 traj.step(float(segment.get("magnitude", 0.0)))
             elif seg_type == "ramp":
-                kwargs: Dict[str, Any] = {}
+                kwargs: dict[str, Any] = {}
                 if "magnitude" in segment:
                     kwargs["magnitude"] = float(segment["magnitude"])
                 if "duration" in segment:
@@ -1448,7 +1448,7 @@ class SimulationBuilder:
                 )
         return traj
 
-    def _serialize_model(self, instance: Any) -> Dict[str, Any]:
+    def _serialize_model(self, instance: Any) -> dict[str, Any]:
         data = {}
         for field_name in instance.__class__.model_fields:
             if field_name.startswith("_"):
@@ -1457,25 +1457,25 @@ class SimulationBuilder:
             data[field_name] = _serialize_value(value)
         return data
 
-    def _resolve_sensor_type(self, sensor_type: str) -> Type[Sensor]:
+    def _resolve_sensor_type(self, sensor_type: str) -> Type[SensorBase]:
         cls = self.sensor_types.get(sensor_type)
-        if cls is not None and cls is not Sensor:
+        if cls is not None and cls is not SensorBase:
             return cls
         for module in self.sensor_modules.values():
             if sensor_type in module.classes:
                 return module.classes[sensor_type]
         raise ValueError(f"Unknown sensor type '{sensor_type}'.")
 
-    def _resolve_controller_type(self, controller_type: str) -> Type[Controller]:
+    def _resolve_controller_type(self, controller_type: str) -> Type[ControllerBase]:
         cls = self.controller_types.get(controller_type)
-        if cls is not None and cls is not Controller:
+        if cls is not None and cls is not ControllerBase:
             return cls
         for module in self.controller_modules.values():
             if controller_type in module.classes:
                 return module.classes[controller_type]
         raise ValueError(f"Unknown controller type '{controller_type}'.")
 
-    def _resolve_calculation_type(self, calculation_type: str) -> Type[Calculation]:
+    def _resolve_calculation_type(self, calculation_type: str) -> Type[CalculationBase]:
         if calculation_type in self.calculation_types:
             return self.calculation_types[calculation_type]
         for module in self.calculation_modules.values():
@@ -1495,7 +1495,7 @@ class SimulationBuilder:
         sensors = [cfg.cls(**cfg.args) for cfg in self.sensor_configs]
         calculations = [cfg.cls(**cfg.args) for cfg in self.calculation_configs.values()]
 
-        controller_instances: List[Controller] = []
+        controller_instances: list[ControllerBase] = []
         roots = [cfg for cfg in self.controller_configs.values() if cfg.parent_id is None]
         for root in roots:
             controller_instances.append(self._instantiate_controller_chain(root))
@@ -1518,7 +1518,7 @@ class SimulationBuilder:
         )
         return self.system
 
-    def _instantiate_controller_chain(self, config: ControllerConfig) -> Controller:
+    def _instantiate_controller_chain(self, config: ControllerConfig) -> ControllerBase:
         controller = config.cls(sp_trajectory=self._build_trajectory(config.trajectory), **config.args)
         if config.child_id is not None:
             child_cfg = self.controller_configs.get(config.child_id)
@@ -1526,13 +1526,13 @@ class SimulationBuilder:
                 controller.cascade_controller = self._instantiate_controller_chain(child_cfg)
         return controller
 
-    def available_usable_tags(self) -> List[str]:
+    def available_usable_tags(self) -> list[str]:
         tags = [cfg.alias_tag for cfg in self.sensor_configs]
         for calc in self.calculation_configs.values():
             tags.extend(calc.output_tags)
         return sorted(set(tags))
 
-    def available_setpoint_tags(self) -> List[str]:
+    def available_setpoint_tags(self) -> list[str]:
         tags = []
         for controller in self.controller_configs.values():
             tag = controller.setpoint_tag

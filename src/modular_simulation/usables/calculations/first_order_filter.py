@@ -1,15 +1,15 @@
 from modular_simulation.usables import (
-    Calculation, 
+    CalculationBase, 
     TagMetadata,
     TagType, 
 )
 from modular_simulation.usables.tag_info import TagInfo
 import numpy as np
-from typing import Annotated, List
-from astropy.units import Unit, UnitBase
+from typing import Annotated
+from astropy.units import Unit
 from pydantic import PrivateAttr, Field
 SMALL = 1e-12
-class FirstOrderFilter(Calculation):
+class FirstOrderFilter(CalculationBase):
     
     filtered_signal_tag: Annotated[str, TagMetadata(TagType.OUTPUT, Unit())]
     raw_signal_tag: Annotated[str, TagMetadata(TagType.INPUT, Unit())]
@@ -24,7 +24,7 @@ class FirstOrderFilter(Calculation):
 
     def _initialize(
             self,
-            tag_infos: List[TagInfo],
+            tag_infos: list[TagInfo],
             ) -> None:
         """
         overwrite the unit info in the annotation

@@ -141,7 +141,7 @@
                     "type": "enum",
                     "required": false,
                     "default": "CASCADE",
-                    "description": "Controller's mode - if AUTO, setpoint comes from the sp_trajectory provided. If CASCADE, setpoint comes from the cascade controller, if provided. If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
+                    "description": "ControllerBase's mode - if AUTO, setpoint comes from the sp_trajectory provided. If CASCADE, setpoint comes from the cascade controller, if provided. If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
                 },
                 {
                     "name": "model",
@@ -165,7 +165,7 @@
                     "description": "optional arguments for the minimize_scalar solver from scipy."
                 }
             ],
-            "doc": "Internal Model Control (IMC) implementation for SISO loops.\n\n``model`` may be a callable operating directly in system units or a\n:class:`Calculation` method referenced via :class:`CalculationModelPath`.\nDuring initialization the controller resolves the model, builds unit\nconverters between the calculation space and the system's manipulated\nvariable, and caches MV bounds in those units.  Each update solves a\nscalar optimization problem to minimize the predicted setpoint error while\nhonouring MV constraints and optional setpoint filtering."
+            "doc": "Internal Model Control (IMC) implementation for SISO loops.\n\n``model`` may be a callable operating directly in system units or a\n:class:`CalculationBase` method referenced via :class:`CalculationModelPath`.\nDuring initialization the controller resolves the model, builds unit\nconverters between the calculation space and the system's manipulated\nvariable, and caches MV bounds in those units.  Each update solves a\nscalar optimization problem to minimize the predicted setpoint error while\nhonouring MV constraints and optional setpoint filtering."
         },
         {
             "name": "PIDController",
@@ -204,7 +204,7 @@
                     "type": "enum",
                     "required": false,
                     "default": "CASCADE",
-                    "description": "Controller's mode - if AUTO, setpoint comes from the sp_trajectory provided. If CASCADE, setpoint comes from the cascade controller, if provided. If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
+                    "description": "ControllerBase's mode - if AUTO, setpoint comes from the sp_trajectory provided. If CASCADE, setpoint comes from the cascade controller, if provided. If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
                 },
                 {
                     "name": "Kp",
@@ -288,7 +288,7 @@
                     "type": "enum",
                     "required": false,
                     "default": "CASCADE",
-                    "description": "Controller's mode - if AUTO, setpoint comes from the sp_trajectory provided. If CASCADE, setpoint comes from the cascade controller, if provided. If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
+                    "description": "ControllerBase's mode - if AUTO, setpoint comes from the sp_trajectory provided. If CASCADE, setpoint comes from the cascade controller, if provided. If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
                 },
                 {
                     "name": "deadband",
@@ -351,7 +351,7 @@
                     "type": "enum",
                     "required": false,
                     "default": "CASCADE",
-                    "description": "Controller's mode - if AUTO, setpoint comes from the sp_trajectory provided. If CASCADE, setpoint comes from the cascade controller, if provided. If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
+                    "description": "ControllerBase's mode - if AUTO, setpoint comes from the sp_trajectory provided. If CASCADE, setpoint comes from the cascade controller, if provided. If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
                 },
                 {
                     "name": "closed_loop_time_constant_fraction",

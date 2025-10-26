@@ -1,21 +1,22 @@
 from numpy.typing import NDArray
 import numpy as np
 from abc import ABC, abstractmethod
-from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
-from typing import TYPE_CHECKING, Any, List, Callable, Optional
-from astropy.units import UnitBase
+from pydantic import BaseModel, Field, ConfigDict, PrivateAttr, field_serializer, field_validator
+from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from astropy.units import UnitBase, Unit
 from modular_simulation.usables.tag_info import TagData, TagInfo
 
 if TYPE_CHECKING:
-    from modular_simulation.measurables.base_classes import MeasurableQuantities, BaseIndexedModel
+    from modular_simulation.measurables import MeasurableQuantities, MeasurableBase
 
-def make_measurement_getter(object: "BaseIndexedModel", tag: str, converter:Callable) -> Callable[[], float|NDArray]:
+def make_measurement_getter(object: "MeasurableBase", tag: str, converter:Callable) -> Callable[[], float|NDArray]:
     def measurement_getter() -> float | NDArray:
         return converter(getattr(object, tag))
     return measurement_getter
 
 
-class Sensor(BaseModel, ABC):
+class SensorBase(BaseModel, ABC):
     """Abstract base class for all sensors in the modular simulation framework.
 
     Subclasses implement the scheduling and signal conditioning steps while
@@ -32,7 +33,7 @@ class Sensor(BaseModel, ABC):
         ...,
         description = "tag of the state or control element to measure."
         )
-    alias_tag: Optional[str] = Field(
+    alias_tag: str | None = Field(
         default = None,
         description = (
             "alias of the measurement to be used when the sensor returns results."
@@ -40,11 +41,10 @@ class Sensor(BaseModel, ABC):
             "then, a usable with tag 'lab_MI' will be available, while 'cumm_MI' would not be available."
         )
     )
-    unit: Optional[UnitBase] = Field(
-        None, 
-        description = "Unit of the measured quantity."
+    unit: str|UnitBase = Field(
+        description = "Unit of the measured quantity. Will be parsed with Astropy if is a string. "
     )
-    description: Optional[str] = Field(
+    description: str|None = Field(
         default = None,
         description = "Description of the sensor's measurement."
     )
@@ -69,7 +69,7 @@ class Sensor(BaseModel, ABC):
             "if False, the .ok field of the measurement will not be set by the sensor routine. "
         ))
     instrument_range: tuple[float,float] = Field(
-        default_factory = lambda : (-np.inf, np.inf),
+        default_factory = lambda : (-float('inf'), float('inf')),
         description = (
             "the range of value this sensor can return. "
             "If true value is beyong the range, it is clipped and returned."
@@ -92,6 +92,13 @@ class Sensor(BaseModel, ABC):
     _initialized: bool = PrivateAttr(default = False)
     _measurement_getter: Callable[[], float | NDArray] = PrivateAttr()
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @field_validator("unit", mode = 'before')
+    @classmethod
+    def convert_unit(cls, unit: str|UnitBase) -> UnitBase:
+        if isinstance(unit, str):
+            return Unit(unit)
+        return unit
     
     def model_post_init(self, context: Any) -> None:
         self._rng = np.random.default_rng(self.random_seed)
@@ -234,5 +241,9 @@ class Sensor(BaseModel, ABC):
         return noisy_value, False
 
     @property
-    def measurement_history(self) -> List[TagData]:
+    def measurement_history(self) -> list[TagData]:
         return list(self._tag_info.history)
+
+    @field_serializer("unit", mode="plain")
+    def _serialize_unit(self, unit: UnitBase) -> str:
+        return str(unit)

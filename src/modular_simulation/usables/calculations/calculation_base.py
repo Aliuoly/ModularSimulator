@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, Any, Annotated, TypeAlias
+from typing import Any, Annotated, TypeAlias
 from numpy.typing import NDArray
+from dataclasses import asdict
+from collections.abc import Callable
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 from modular_simulation.validation.exceptions import CalculationDefinitionError
 from modular_simulation.usables.tag_info import TagInfo, TagData
@@ -49,7 +51,7 @@ ConstantAnnotation: TypeAlias = Annotated[float | NDArray, TagMetadata]
 # specify their own :class:`Annotated` types with custom units and descriptions
 # when more detail is required.
 
-class Calculation(ABC, BaseModel):
+class CalculationBase(BaseModel, ABC):
     """
     inputs and outputs tag names are expected to be annotated with the following info
     1. unit
@@ -61,16 +63,15 @@ class Calculation(ABC, BaseModel):
         default = None,
         description = "Name of the calculation - optional."
     )
-    _last_results: Dict[str, TagData] = PrivateAttr(default_factory = dict)
-    _input_data_getters: Dict[str, Callable[[], TagData]] = PrivateAttr(default_factory=dict)
-    _last_input_data_dict: Dict[str, TagData] = PrivateAttr(default_factory=dict)
-    _last_input_value_dict: Dict[str, float | NDArray] = PrivateAttr(default_factory=dict)
-    _output_tag_info_dict: Dict[str, TagInfo] = PrivateAttr(default_factory=dict)
-    _input_tag_info_dict: Dict[str, TagInfo] = PrivateAttr(default_factory=dict)
+    _last_results: dict[str, TagData] = PrivateAttr(default_factory = dict)
+    _input_data_getters: dict[str, Callable[[], TagData]] = PrivateAttr(default_factory=dict)
+    _last_input_data_dict: dict[str, TagData] = PrivateAttr(default_factory=dict)
+    _last_input_value_dict: dict[str, float | NDArray] = PrivateAttr(default_factory=dict)
+    _output_tag_info_dict: dict[str, TagInfo] = PrivateAttr(default_factory=dict)
+    _input_tag_info_dict: dict[str, TagInfo] = PrivateAttr(default_factory=dict)
     _initialized: bool = PrivateAttr(default = False)
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
 
     @model_validator(mode = 'after')
     def _categorize_fields(self):
@@ -115,7 +116,7 @@ class Calculation(ABC, BaseModel):
     
     def _initialize(
             self,
-            tag_infos: List[TagInfo],
+            tag_infos: list[TagInfo],
             ) -> None:
         """
         Links calculation inputs to tag info instances
@@ -140,7 +141,7 @@ class Calculation(ABC, BaseModel):
         for tag_name, tag_data_getter in self._input_data_getters.items():
             tag_data_dict[tag_name] = tag_data_getter()
 
-    def _update_input_values(self) -> Dict[str, float | NDArray]:
+    def _update_input_values(self) -> dict[str, float | NDArray]:
         value_dict = self._last_input_value_dict
         for tag_name, tag_data in self._last_input_data_dict.items():
             value_dict[tag_name] = tag_data.value
@@ -159,8 +160,8 @@ class Calculation(ABC, BaseModel):
     def _calculation_algorithm(
         self, 
         t: float, 
-        inputs_dict: Dict[str, float | NDArray]
-        ) -> Dict[str, float | NDArray]:
+        inputs_dict: dict[str, float | NDArray]
+        ) -> dict[str, float | NDArray]:
         pass    
 
     def calculate(self, t: float) -> TagData:

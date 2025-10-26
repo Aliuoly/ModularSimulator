@@ -1,11 +1,10 @@
 from pydantic import Field, PrivateAttr
-from modular_simulation.usables.controllers.controller import Controller
-from typing import Tuple
+from modular_simulation.usables.controllers.controller_base import ControllerBase
 from astropy.units import Quantity #type: ignore
 import logging
 logger = logging.getLogger(__name__)
 
-class BangBangController(Controller):
+class BangBangController(ControllerBase):
     """bang-bang controller for either on or off controllers. 
         Default returns on_value starting from when the measurement goes below UL 
         until when the measurement goes above HL. 
@@ -28,7 +27,7 @@ class BangBangController(Controller):
         default = 1.0,
         description = "low pass filter factor on measurement. 1.0 = no filter"
     )
-    mv_range: Tuple[Quantity, Quantity] = Field(
+    mv_range: tuple[float, float] = Field(
         default = (0., 1.),
         description = "limits assumed to correspond to off (first element) or on (second element)"
     )
@@ -38,7 +37,7 @@ class BangBangController(Controller):
     )
     _cv_filtered: float|None = PrivateAttr(default = None) 
     _state: bool = PrivateAttr(default = False)
-
+    
     def _control_algorithm(
         self,
         t: float,
@@ -61,6 +60,6 @@ class BangBangController(Controller):
             self._state = not self._state
         
         if self._state:
-            return self._converted_mv_range_value[1]
+            return self.mv_range[1]
         else:
-            return self._converted_mv_range_value[0]
+            return self.mv_range[0]

@@ -42,7 +42,7 @@ and calculations are historized automatically when the simulation runs, so the
 results can be plotted or analysed afterwards.【F:src/modular_simulation/framework/system.py†L103-L136】【F:src/modular_simulation/framework/system.py†L172-L203】
 
 ### Controllable quantities
-Controllers inherit from the `Controller` base class and operate on
+Controllers inherit from the `ControllerBase` base class and operate on
 measurements provided by the `UsableQuantities`.  They output commands that are
 written back to the `ControlElements`.  The default PID implementation includes
 features like setpoint trajectories, output limiting, ramping and cascade

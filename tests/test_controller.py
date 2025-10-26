@@ -1,13 +1,13 @@
 import pytest
 from astropy.units import Quantity, Unit
 
-from modular_simulation.usables.controllers.controller import Controller, ControllerMode
+from modular_simulation.usables.controllers.controller_base import ControllerBase, ControllerMode
 from modular_simulation.usables.controllers.trajectory import Trajectory
 from modular_simulation.usables.sensors.sampled_delayed_sensor import SampledDelayedSensor
 from modular_simulation.usables.usable_quantities import UsableQuantities
 
 
-class RampController(Controller):
+class RampController(ControllerBase):
     gain: float = 1.0
 
     def _control_algorithm(self, t, cv, sp):  # type: ignore[override]

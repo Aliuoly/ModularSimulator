@@ -1,22 +1,26 @@
-from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
-from modular_simulation.usables.usable_quantities import UsableQuantities
 from abc import ABC, abstractmethod
-from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
+from pydantic import BaseModel, Field, PrivateAttr, ConfigDict, model_validator
 from numpy.typing import NDArray, ArrayLike
-from typing import Any, Dict, List, Mapping, TYPE_CHECKING, Tuple, Callable
+from typing import Any, TYPE_CHECKING
+from collections.abc import Mapping, Callable
 from scipy.integrate import solve_ivp #type: ignore
 from functools import cached_property
 from operator import attrgetter
-from numba import jit #type: ignore
 from numba.typed.typeddict import Dict as NDict #type: ignore
-from numba import types #type: ignore
+from numba import types, jit #type: ignore
 import warnings
 from astropy.units import Quantity #type: ignore
-from modular_simulation.usables.controllers.controller import ControllerMode
-from modular_simulation.measurables.base_classes import BaseIndexedModel
+from modular_simulation.usables.usable_quantities import UsableQuantities
+from modular_simulation.usables.controllers.controller_base import ControllerMode
+from modular_simulation.measurables.measurable_base import MeasurableBase
+from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
+from modular_simulation.validation.exceptions import (
+    SensorConfigurationError, 
+    ControllerConfigurationError
+)
 if TYPE_CHECKING:
     from modular_simulation.usables import TagData
-    from modular_simulation.usables import Controller, Trajectory
+    from modular_simulation.usables import ControllerBase, Trajectory
 import logging
 from tqdm import tqdm #type: ignore
 logger = logging.getLogger(__name__)
@@ -40,13 +44,11 @@ class System(BaseModel, ABC):
             and algebraic variables that can be measured or recorded.
         usable_quantities (UsableQuantities): Defines how sensors and calculations
             are used to generate measurements from the system's state.
-        controllable_quantities (ControllableQuantities): Defines the controllers that
-            manipulate the system's `ControlElements`.
         
-        solver_options (Dict[str, Any]): A dictionary of options passed directly to
+        solver_options (dict[str, Any]): A dictionary of options passed directly to
             SciPy's `solve_ivp` function.
         _t (float): The current simulation time.
-        _history (List[Dict]): A log of the system's state at each time step.
+        _history (list[dict]): A log of the system's state at each time step.
     """
     dt: Quantity = Field(
         default = ...,
@@ -55,19 +57,19 @@ class System(BaseModel, ABC):
             "The solver takes adaptive 'internal steps' regardless of this value to update the system's states. "
         )
     )
-    measurable_quantities: "MeasurableQuantities" = Field(
+    measurable_quantities: MeasurableQuantities = Field(
         ...,
         description = (
             "A container for all constants, state, control, and algebraic variables that can be measured or recorded. "
         )
     )
-    usable_quantities: "UsableQuantities" = Field(
+    usable_quantities: UsableQuantities = Field(
         ...,
         description = (
             "Defines how sensors and calculations and controllers are used to generate measurements from the system's measurable_quantities."
         )
     )
-    solver_options: Dict[str, Any] = Field(
+    solver_options: dict[str, Any] = Field(
         default_factory = lambda : {'method': 'LSODA'},
         description = (
             "arguments to scipy.integrate.solve_ivp call done by the system when taking steps."
@@ -80,7 +82,7 @@ class System(BaseModel, ABC):
             "This should work out of the box and improve speed for large systems."
         )
     )
-    numba_options: Dict[str, Any] = Field(
+    numba_options: dict[str, Any] = Field(
         default_factory = lambda : {'nopython': True, 'cache': True},
         description = (
             "arguments for numba JIT compilation of rhs and calculate_algebraic_values methods. "
@@ -101,27 +103,100 @@ class System(BaseModel, ABC):
         )
     )
 
-    _history: Dict[str, List[ArrayLike]] = PrivateAttr(default_factory = dict)
+    _history: dict[str, list[ArrayLike]] = PrivateAttr(default_factory = dict)
     _t: float = PrivateAttr(default = 0.)
-    _params: Dict[str, Any] = PrivateAttr() # NDict for numba implementation, Dict[str, slice] otherwise
+    _params: dict[str, Any] = PrivateAttr() # NDict for numba implementation, dict[str, slice] otherwise
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
 
     # add private attrs
-    _history_slots: List[Tuple[Callable[[Any], Any], List]] = PrivateAttr(default_factory=list)
+    _history_slots: list[tuple[Callable[[Any], Any], list]] = PrivateAttr(default_factory=list)
 
-    def model_post_init(self, context: Any) -> None:
+    def get_state(self) -> dict:
+        state = {}
+        state["measurable_quantities"] = self.measurable_quantities.model_dump(serialize_as_any=True)
+        state["sensors"] = []
+        state["calculations"] = []
+        state["controllers"] = []
+        for sensor in self.usable_quantities.sensors:
+            state["sensors"].append(sensor.get_state())
+        for calculation in self.usable_quantities.calculations:
+            state["calculations"].append(calculation.get_state())
+        for controller in self.usable_quantities.controllers:
+            state["controllers"].append(controller.get_state())
+        return state
+    
+    def set_state(self, state: dict):
+        self.measurable_quantities.model_validate_json(state["measurable_quantities"])
+        
+        for calculation in self.usable_quantities.calculations:
+            state.update(calculation.get_state())
+        for controller in self.usable_quantities.controllers:
+            state.update(controller.get_state())
 
+    @model_validator(mode = 'after')
+    def _validate(self):
+        exception_group = []
+        exception_group.extend(self._validate_sensors_resolvable())
+        exception_group.extend(self._validate_controllers_resolvable())
+        
+        if len(exception_group) > 0:
+            raise ExceptionGroup(
+                "errors encountered during usable quantity instantiation:", 
+                exception_group
+                )
+        # after validation, initialize usable quantities
+        self.usable_quantities._initialize(self.measurable_quantities)
+        return self
+    
+    def _validate_sensors_resolvable(self):
+        exception_group = []
+        available_measurement_tags = self.measurable_quantities.tag_list
+        unavailable_measurement_tags = []
+
+        for sensor in self.usable_quantities.sensors:
+            measurement_tag = sensor.measurement_tag
+            if measurement_tag not in available_measurement_tags:
+                unavailable_measurement_tags.append(measurement_tag)
+
+        if len(unavailable_measurement_tags) > 0:
+            exception_group.append(
+                SensorConfigurationError(
+                    "The following measurement tag(s) are not defined in measurable quantities: "
+                    f"{', '.join(unavailable_measurement_tags)}."
+                )
+            )
+        return exception_group
+    
+    def _validate_controllers_resolvable(self):
+        exception_group = []
+        available_ce_tags = self.measurable_quantities.control_elements.tag_list
+        # this ignores the cascade controllers, these mvs must be control elements
+        improper_ce_tags = [
+            c.mv_tag 
+            for c in self.usable_quantities.controllers 
+            if c.mv_tag not in available_ce_tags
+        ]
+        
+        if len(improper_ce_tags) > 0:
+            exception_group.append(
+                ControllerConfigurationError(
+                    "The following controlled variables are not defined as system control elements:"
+                    f"{', '.join(improper_ce_tags)}."
+                )
+            )
+        return exception_group
+    
+    def model_post_init(self, contex: Any) -> None:
         if self.use_numba:
             self._construct_fast_params()
         else:
             self._construct_params()
-
         if self.record_history:
             # Build history dict and accessors exactly once
             mq = self.measurable_quantities
             for mq_name in mq.model_dump():
-                mq_obj: BaseIndexedModel = getattr(mq, mq_name)
+                mq_obj: MeasurableBase = getattr(mq, mq_name)
                 for tag in mq_obj.model_dump():
                     lst = [] # type:ignore
                     self._history[tag] = lst
@@ -143,7 +218,7 @@ class System(BaseModel, ABC):
             algebraic_size = self._params["algebraic_size"]
         )
         self.measurable_quantities.algebraic_states.update_from_array(initial_algebraic_array)
-        self.usable_quantities._initialize()
+
     def _construct_fast_params(self) -> None:
         """
         overwrites System's method of the same name to support numba njit decoration
@@ -205,7 +280,7 @@ class System(BaseModel, ABC):
         self._history['time'].append(self._t)
 
 
-    def _pre_integration_step(self) -> Tuple[NDArray, NDArray]:
+    def _pre_integration_step(self) -> tuple[NDArray, NDArray]:
         """
         Handles the control loop logic before integration.
 
@@ -425,7 +500,7 @@ class System(BaseModel, ABC):
         return controller.mode
 
     @cached_property
-    def controller_dictionary(self) -> Dict[str, "Controller"]:
+    def controller_dictionary(self) -> dict[str, "ControllerBase"]:
         return_dict = {}
         for controller in self.usable_quantities.controllers:
             return_dict.update({controller.cv_tag : controller})
@@ -435,7 +510,7 @@ class System(BaseModel, ABC):
         return return_dict
 
     @cached_property
-    def cv_tag_list(self) -> List[str]:
+    def cv_tag_list(self) -> list[str]:
         return list(self.controller_dictionary.keys())
 
     @property
@@ -444,12 +519,12 @@ class System(BaseModel, ABC):
         return self._t
 
     @property
-    def measured_history(self) -> Dict[str, Any]:
+    def measured_history(self) -> dict[str, Any]:
         """Returns historized measurements and calculations."""
 
-        sensors_detail: Dict[str, List[TagData]] = {}
-        calculations_detail: Dict[str, List[TagData]] = {}
-        history: Dict[str, Any] = {
+        sensors_detail: dict[str, list[TagData]] = {}
+        calculations_detail: dict[str, list[TagData]] = {}
+        history: dict[str, Any] = {
             "sensors": sensors_detail,
             "calculations": calculations_detail,
         }
@@ -465,16 +540,16 @@ class System(BaseModel, ABC):
         return history
 
     @property
-    def history(self) -> Dict[str, List]:
+    def history(self) -> dict[str, list]:
         """Returns a trimmed copy of the full history dictionary."""
         if not self.record_history:
             return {}
         return self._history
 
     @property
-    def setpoint_history(self) -> Dict[str, Dict[str, List]]:
+    def setpoint_history(self) -> dict[str, dict[str, list]]:
         """Returns historized controller setpoints keyed by ``cv_tag``."""
-        history: Dict[str, Dict[str, List]] = {}
+        history: dict[str, dict[str, list]] = {}
         for controller in self.usable_quantities.controllers:
             history.update(controller.sp_history)
         return history

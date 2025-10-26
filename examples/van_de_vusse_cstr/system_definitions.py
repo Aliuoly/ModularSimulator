@@ -1,12 +1,12 @@
-from enum import Enum
-from typing import Annotated, ClassVar, Dict, Mapping
+
+from typing import Annotated, Mapping
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import ConfigDict, Field
 
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
 from modular_simulation.framework.system import System
-from modular_simulation.usables import Calculation, Constant, MeasuredTag, OutputTag
+from modular_simulation.usables import CalculationBase, Constant, MeasuredTag, OutputTag
 from astropy.units import Unit
 
 
@@ -50,7 +50,7 @@ class VanDeVusseConstants(Constants):
     Fj: Annotated[float, Unit("L/s")]
 
 
-class HeatDutyCalculation(Calculation):
+class HeatDutyCalculation(CalculationBase):
     """Calculate the instantaneous heat duty transferred between jacket and reactor."""
 
     heat_duty_tag: OutputTag
@@ -64,8 +64,8 @@ class HeatDutyCalculation(Calculation):
     def _calculation_algorithm(
         self,
         t: float,
-        inputs_dict: Dict[str, float],
-    ) -> Dict[str, float]:
+        inputs_dict: dict[str, float],
+    ) -> dict[str, float]:
         Tk = inputs_dict[self.Tk_tag]
         T = inputs_dict[self.T_tag]
 

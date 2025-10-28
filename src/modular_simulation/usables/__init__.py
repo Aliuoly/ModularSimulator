@@ -13,7 +13,8 @@ from .controllers import (
     PIDController,
     BangBangController,
     Trajectory,
-    FirstOrderTrajectoryController
+    FirstOrderTrajectoryController,
+    ControllerMode
 )
 from .usable_quantities import UsableQuantities
 from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
@@ -25,6 +26,7 @@ UsableQuantities.model_rebuild(_types_namespace={
     'TagData': TagData,
 })
 __all__ = [
+    "ControllerMode",
     "ControllerBase",
     "Trajectory",
     "PIDController",

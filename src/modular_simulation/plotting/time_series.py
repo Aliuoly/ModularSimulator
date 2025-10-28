@@ -84,7 +84,9 @@ def plot_triplet_series(
     style: str = "line",
     line_kwargs: Mapping[str, Any] | None = None,
     bad_kwargs: Mapping[str, Any] | None = None,
-    time_converter: Callable = lambda v: v
+    time_converter: Callable = lambda v: v,
+    t_start: float = 0.0, # in the converted unit
+    t_end: float = np.inf, # in the converted unit
 ) -> list[Any]:
     """Plot a :class:`TagData` series on ``ax``.
 
@@ -115,6 +117,9 @@ def plot_triplet_series(
 
     times, values, ok = _extract_series(samples)
     times = time_converter(times)
+    keep_ind = (times > t_start) * (times < t_end)
+    values = values[keep_ind]
+    times = times[keep_ind]
     artists: list[Any] = []
 
     if times.size == 0:

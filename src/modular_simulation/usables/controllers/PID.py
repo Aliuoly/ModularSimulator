@@ -10,7 +10,13 @@ class PIDController(ControllerBase):
     A simple Proportional-Integral-Derivative controller.
     The control output is return according to the time-domain formulation
 
-    u(t) = Kp * (e(t) + 1/Ti * ∫(e*dt) + Td/dt * de(t)/dt)
+    position form : u(t) = Kp * (e(t) + 1/Ti * ∫(e*dt) + Td * de(t)/dt)
+    velocity form : du(t)/dt = Kp * (de(t)/dt + 1/Ti * e + Td * d^2e(t)/dt^2)
+
+    which is represented in the discrete form
+
+    position form : u(k) = Kp * (e(k) + dt/Ti * sum(e) + Td/dt * (e(k)-e(k-1)))
+    velocity form : u(k) = u(k-1) + Kp * [(e(k)-e(k-1)) + dt/Ti * e + Td/dt * (e(k)-2e(k-1)+e(k-2))]
 
     an optional filter may be applied to the derivative term to smooth out
     taking the derivative of a noisy signal.
@@ -52,10 +58,18 @@ class PIDController(ControllerBase):
             "if 1, corresponds to classic PID. if 0, corresponds to I-PD."
         )
     )
+    velocity_form: bool = Field(
+        default = False,
+        description=(
+            "Whether to use the velocity form of the PID formulation."
+        )
+    )
 
     # additional PID only private attributes
+    _last_u: float|None = PrivateAttr(default = None)
     _last_t: float = PrivateAttr(default=0.0)
     _last_error: float|NDArray = PrivateAttr(default=0.0)
+    _last_last_error: float|NDArray = PrivateAttr(default=0.0)
     _integral: float|NDArray = PrivateAttr(default=0.0)
     _filtered_derivative: float|NDArray = PrivateAttr(default = 0.0)
 
@@ -69,6 +83,8 @@ class PIDController(ControllerBase):
         PID control algorithm for SISO systems. As such, only handles scalar cv and sp."""
         dt = t - self._last_t
         self._last_t = t
+        if self._last_u is None:
+            self._last_u = self._u0
         
         error = sp - cv
         PD_error = self.setpoint_weight * sp - cv
@@ -82,36 +98,51 @@ class PIDController(ControllerBase):
         self._filtered_derivative = alpha * (PD_error - self._last_error) + (1-alpha) * self._filtered_derivative
         
         # PID control law
-        p_term = self.Kp * PD_error
-        i_term = self.Kp / self.Ti * self._integral
-        d_term = self.Kp * self.Td / dt * self._filtered_derivative
-        output = p_term + i_term + d_term + self._u0 # initial setpoint u0 accounted for in PID
-        overflow, underflow = output - self.mv_range[1], output - self.mv_range[0]
-        saturated = "No"
-        if overflow > 0 and self.Ti != float('inf'):
-            # we are overflowing the range, reduce integral and output to match upper range
-            output -= overflow
-            # out = p_term + d_term + i_term
-            # limited_out = p_term + d_term + limited_i_term
-            # out - limited_out = overflow = i_term - limited_i_term
-            # limited_i_term = i_term - overflow
-            # Kp/Ti*limited_integral = Kp/Ti*intergral - overflow
-            # limited_integral = integral - overflow * Ti/Kp
-            self._integral += -overflow * self.Ti / self.Kp # since overflow > 0, this decreases integral.
-            saturated = "Overflow"
-        if underflow < 0 and self.Ti != float('inf'):
-            # we are underflowing the range, increase integral and output to match lower range
-            output -= underflow
-            self._integral += -underflow * self.Ti / self.Kp #since underflow < 0, this increases integral. 
-            saturated = "Underflow"
-        # check if saturated - if so, limit the integral term
-        logger.debug(
-            # scientific notation takes up 4 spaces by itself, and due to sign of the number another 1 space is possible
-            # and from the decimal point another space is taken. thus, need at least 6 + decimal place many spaces
-            # so leave 5 spaces free. e.g., %6.1e is ok, since max space = 6, use 1 for decimal, 4 for scientific notation, 1 for sign
-            "%-12.12s PID | sat=%-10.10s t=%8.1f cv=%8.2f sp=%8.2f err=%10.2e P=%10.2e I=%10.2e D=%10.2e out=%8.2f",
-            self.cv_tag, saturated, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, output,
-        )
+        if self.velocity_form:
+            p_term = self.Kp * (PD_error - self._last_error)
+            i_term = self.Kp / self.Ti * dt * error
+            d_term = self.Kp * self.Td / dt * (PD_error - 2*self._last_error + self._last_last_error)
+            output = p_term + i_term + d_term + self._last_u
+            logger.debug(
+                # scientific notation takes up 4 spaces by itself, and due to sign of the number another 1 space is possible
+                # and from the decimal point another space is taken. thus, need at least 6 + decimal place many spaces
+                # so leave 5 spaces free. e.g., %6.1e is ok, since max space = 6, use 1 for decimal, 4 for scientific notation, 1 for sign
+                "%-12.12s PID | sat=%-10.10s t=%8.1f cv=%8.2f sp=%8.2f err=%10.2e P=%10.2e I=%10.2e D=%10.2e out=%8.2f",
+                self.cv_tag, False, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, output,
+            )
+        else:
+            p_term = self.Kp * PD_error
+            i_term = self.Kp / self.Ti * self._integral
+            d_term = self.Kp * self.Td / dt * self._filtered_derivative
+            output = p_term + i_term + d_term + self._u0 # initial setpoint u0 accounted for in PID
+            overflow, underflow = output - self.mv_range[1], output - self.mv_range[0]
+            saturated = "No"
+            if overflow > 0 and self.Ti != float('inf'):
+                # we are overflowing the range, reduce integral and output to match upper range
+                output -= overflow
+                # out = p_term + d_term + i_term
+                # limited_out = p_term + d_term + limited_i_term
+                # out - limited_out = overflow = i_term - limited_i_term
+                # limited_i_term = i_term - overflow
+                # Kp/Ti*limited_integral = Kp/Ti*intergral - overflow
+                # limited_integral = integral - overflow * Ti/Kp
+                self._integral += -overflow * self.Ti / self.Kp # since overflow > 0, this decreases integral.
+                saturated = "Overflow"
+            if underflow < 0 and self.Ti != float('inf'):
+                # we are underflowing the range, increase integral and output to match lower range
+                output -= underflow
+                self._integral += -underflow * self.Ti / self.Kp #since underflow < 0, this increases integral. 
+                saturated = "Underflow"
+            # check if saturated - if so, limit the integral term
+            logger.debug(
+                # scientific notation takes up 4 spaces by itself, and due to sign of the number another 1 space is possible
+                # and from the decimal point another space is taken. thus, need at least 6 + decimal place many spaces
+                # so leave 5 spaces free. e.g., %6.1e is ok, since max space = 6, use 1 for decimal, 4 for scientific notation, 1 for sign
+                "%-12.12s PID | sat=%-10.10s t=%8.1f cv=%8.2f sp=%8.2f err=%10.2e P=%10.2e I=%10.2e D=%10.2e out=%8.2f",
+                self.cv_tag, saturated, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, output,
+            )
         # Ensure output is non-negative (e.g., flow rate can't be negative)
+        self._last_last_error = self._last_error
         self._last_error = PD_error
+        self._last_u = output
         return output

@@ -406,7 +406,7 @@ class ControllerBase(BaseModel, ABC):
     def sp_history(self) -> dict[str, list[TagData]]:
         """Return a mapping of cascade level to historized setpoint samples."""
         history: dict[str, list[TagData]] = {}
-        controller: Optional["ControllerBase"] = self
+        controller: ControllerBase|None = self
         while controller is not None:
             history[f"{controller.cv_tag}.sp"] = controller._sp_history
             controller = controller.cascade_controller

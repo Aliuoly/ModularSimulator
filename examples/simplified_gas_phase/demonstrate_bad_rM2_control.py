@@ -34,11 +34,37 @@ normal_system = create_system(
 )
 
 if __name__ == '__main__':
+    # run till steady state
+    normal_system.extend_controller_trajectory("F_cat").hold(100,8.0) 
     normal_system.step(12 * Unit("hour"))
-    # extend controller still uses dt units
-    normal_system.extend_controller_trajectory("rM2").hold(3600.).hold(3600., 0.25)
-    normal_system.extend_controller_trajectory("pM1").hold(3600.*6).hold(3600., 680)
+
+    # cycle 1
+    normal_system.extend_controller_trajectory("rM2").hold(3600.).hold(3600., 0.20)
+    #normal_system.extend_controller_trajectory("pM1").hold(3600.*6).hold(3600., 680)
+    normal_system.step(6 * Unit("hour"))
+    normal_system.extend_controller_trajectory("rM2").hold(3600.).hold(3600., 0.30)
+    normal_system.step(6 * Unit("hour"))
+    # reset to steady state at new cat rate
+    #normal_system.extend_controller_trajectory("pM1").hold(3600., 700)
+    normal_system.extend_controller_trajectory("F_cat").ramp(-2.0, ramprate = 1/3600.) # ramp dow 2 kg over 2 hours
     normal_system.step(12 * Unit("hour"))
+    # cycle 2
+    normal_system.extend_controller_trajectory("rM2").hold(3600.).hold(3600., 0.20)
+    #normal_system.extend_controller_trajectory("pM1").hold(3600.*6).hold(3600., 680)
+    normal_system.step(6 * Unit("hour"))
+    normal_system.extend_controller_trajectory("rM2").hold(3600.).hold(3600., 0.30)
+    normal_system.step(6 * Unit("hour"))
+    # reset to steady state at new cat rate
+    #normal_system.extend_controller_trajectory("pM1").hold(3600., 700)
+    normal_system.extend_controller_trajectory("F_cat").ramp(-2.0, ramprate = 1/3600.) # ramp dow 2 kg over 2 hours
+    normal_system.step(12 * Unit("hour"))
+    # cycle 3
+    normal_system.extend_controller_trajectory("rM2").hold(3600.).hold(3600., 0.20)
+    #normal_system.extend_controller_trajectory("pM1").hold(3600.*6).hold(3600., 680)
+    normal_system.step(6 * Unit("hour"))
+    normal_system.extend_controller_trajectory("rM2").hold(3600.).hold(3600., 0.30)
+    normal_system.step(6 * Unit("hour"))
+
     history = normal_system.measured_history
     sensor_hist = history["sensors"]
     calculations_hist = history["calculations"]
@@ -49,7 +75,7 @@ if __name__ == '__main__':
     axes = axes.flatten()
 
     ax = axes[0]
-    ploter = partial(plot_triplet_series, t_start = 12, t_end = 24)
+    ploter = partial(plot_triplet_series, t_start = 12)
     ploter(ax, sensor_hist["F_m1"], label="F_m1",
                         line_kwargs={"color": "tab:blue"}, 
                         time_converter=lambda t: t/3600.) # seconds to hours
@@ -105,8 +131,9 @@ if __name__ == '__main__':
     lns1, labs1 = ax.get_legend_handles_labels()
     ax.legend(lns1, labs1, loc="best")
     ax = axes[6]
-    ploter(ax, sensor_hist["F_cat"], label="Fcat",
-                        line_kwargs={"color": "royalblue"}, style='step', 
+    ploter(ax, sensor_hist["F_cat"], label="Fcat",style='step', 
+                        time_converter=lambda t: t/3600.) # seconds to hours
+    ploter(ax, sensor_hist["effective_cat"], label="Fcat", style='step', 
                         time_converter=lambda t: t/3600.) # seconds to hours
     
     ax.set_title("F_cat")

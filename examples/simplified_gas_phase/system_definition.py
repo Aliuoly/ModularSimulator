@@ -19,7 +19,7 @@ class GasPhaseReactorStates(States):
     n_monomer: Annotated[float, Unit("mol")] = 800 * 0.4
     n_comonomer: Annotated[float, Unit("mol")] = 800 * 0.13
     n_total: Annotated[float, Unit("mol")] = 800.
-    effective_cat: Annotated[float, Unit("kg")] = 6.0
+    effective_cat: Annotated[float, Unit("kg/h")] = 6.0
 
 class GasPhaseReactorControlElements(ControlElements):
     """Externally manipulated feed and valve positions."""
@@ -116,7 +116,7 @@ class GasPhaseReactorSystem(System):
         eff_cat = y[y_map["effective_cat"]][0]
 
         monomer_rates = algebraic[algebraic_map["monomer_rates"]]
-        cat_time_constant = k[k_map["cat_time_constant"]][0]
+        cat_time_constant = k[k_map["cat_time_constant"]][0] * 3600 # convert to seconds
 
         F_cat = u[u_map["F_cat"]][0] # keep kg/hr
         F_m1 = u[u_map["F_m1"]][0] / monomer_mw / 3600. # from kg/h to kmol/s

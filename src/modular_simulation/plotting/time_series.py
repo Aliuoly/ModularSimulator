@@ -85,8 +85,8 @@ def plot_triplet_series(
     line_kwargs: Mapping[str, Any] | None = None,
     bad_kwargs: Mapping[str, Any] | None = None,
     time_converter: Callable = lambda v: v,
-    t_start: float = 0.0, # in the converted unit
-    t_end: float = np.inf, # in the converted unit
+    t_start: float | tuple[float,...] = 0.0, # in the converted unit
+    t_end: float | tuple[float,...] = np.inf, # in the converted unit
 ) -> list[Any]:
     """Plot a :class:`TagData` series on ``ax``.
 
@@ -114,10 +114,21 @@ def plot_triplet_series(
     -------
     list of Matplotlib artists added to the axes.
     """
-
+    
     times, values, ok = _extract_series(samples)
     times = time_converter(times)
-    keep_ind = (times > t_start) * (times < t_end)
+    keep_ind = np.zeros(len(times), dtype = np.bool)
+    if isinstance(t_start, tuple):
+        assert isinstance(t_end, tuple), "if t_start is a tuple, t_end must also be one"
+        assert len(t_start) == len(t_end), "t_start and t_end must have equal length"
+        assert all([t_start[i] < t_end[i] for i in range(len(t_start))]), (
+            "if t_start and t_end are tuples, each matching index forms a t start t end pair, "
+            "so make sure each pair has t_end > t_start"
+        )
+        for i in range(len(t_start)):
+            keep_ind += (times > t_start[i]) * (times < t_end[i])
+    else:
+        keep_ind = (times > t_start) * (times < t_end)
     values = values[keep_ind]
     times = times[keep_ind]
     artists: list[Any] = []

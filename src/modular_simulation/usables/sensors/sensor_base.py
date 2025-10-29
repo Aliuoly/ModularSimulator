@@ -54,20 +54,19 @@ class SensorBase(BaseModel, ABC):
             "the standard deviation of the measurement noise, defined as "
             "a fraction of the true value of measurement."
         ))
-    
     faulty_probability: float = Field(
         default = 0.0, 
         ge=0.0, lt=1.0,
         description = "probability for the sensor to err (stall or spike)"
-        )
-    
+    )
     faulty_aware: bool = Field(
         default = False,
         description = (
             "whether or not the sensor knows it has erred. "
             "if True, the .ok field of the measurement result will be set automatically. "
             "if False, the .ok field of the measurement will not be set by the sensor routine. "
-        ))
+        )
+    )
     instrument_range: tuple[float,float] = Field(
         default_factory = lambda : (-float('inf'), float('inf')),
         description = (
@@ -158,7 +157,8 @@ class SensorBase(BaseModel, ABC):
             self._get_processed_value(t = t, raw_value = raw_value), 
             *self.instrument_range
             )
-        processed_value = self._sensor_dynamics(processed_value, t)
+        if self.time_constant > 1e-12:
+            processed_value = self._sensor_dynamics(processed_value, t)
         
         # 4. Apply noise and faults to the processed value
         final_value, is_faulty = self._apply_noise_and_faults(processed_value)
@@ -174,12 +174,11 @@ class SensorBase(BaseModel, ABC):
         if self._last_measurement is None:
             self._last_measurement = new_value
         dt = t - self._last_t
-        if dt < 1e-12:
-            return self._last_measurement
-        lamb = dt / (self.time_constant + dt)
+        lamb = 1 - np.exp(-dt / self.time_constant)
         self._last_t = t
         self._last_measurement = lamb * new_value + (1-lamb) * self._last_measurement
         return self._last_measurement
+    
     @property
     def _last_value(self) -> TagData:
         return self._tag_info.data

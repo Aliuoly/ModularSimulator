@@ -57,7 +57,12 @@ def wrap_cv_getter_as_sp_getter(cv_getter):
 
 
 class ControllerMode(IntEnum):
-    TRACKING = -1
+    """
+    TRACKING: CV's SP = CV's PV Always. SP cannot be changed - always follows PV.
+    AUTO    : CV's SP is provided by sp_trajectory. 
+    CASCADE : CV's SP is provided by a cascade controller.
+    """
+    TRACKING = -1 
     AUTO    = 1
     CASCADE = 2
 
@@ -271,7 +276,10 @@ class ControllerBase(BaseModel, ABC):
         operating mode for the supplied configuration.
         """
         logger.debug(f"Initializing '{self.cv_tag}' controller.")
-        
+        # initialization happens at highest cascade level first, and then
+        # changes mode back to the configured mode. 
+        controller_mode = self.mode
+        self.mode = ControllerMode.CASCADE
         # A. check if is final control element and initialize mv setter if is
         if not is_final_control_element:
             self._is_final_control_element = False
@@ -299,6 +307,9 @@ class ControllerBase(BaseModel, ABC):
                 control_elements = control_elements, 
                 is_final_control_element=False,
                 )
+        
+        #revert back to configured mode
+        self.change_control_mode(controller_mode)
         
 
     def update(self, t: float) -> TagData:

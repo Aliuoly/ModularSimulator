@@ -4,7 +4,7 @@ from pydantic import BaseModel, PrivateAttr, ConfigDict
 from modular_simulation.framework.utils import create_system
 from modular_simulation.measurables import States, AlgebraicStates, Constants, ControlElements
 import numpy as np
-from modular_simulation.framework.system import System
+from modular_simulation.framework.system_old import System
 
 
 class Plant(BaseModel):

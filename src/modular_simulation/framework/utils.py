@@ -1,7 +1,7 @@
 from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
 from modular_simulation.usables.usable_quantities import UsableQuantities
 from typing import Any,  TYPE_CHECKING
-from modular_simulation.framework.system import System
+from modular_simulation.framework.system_old import System
 if TYPE_CHECKING:
     from modular_simulation.measurables import States, AlgebraicStates, ControlElements, Constants
     from modular_simulation.usables import SensorBase, ControllerBase, CalculationBase

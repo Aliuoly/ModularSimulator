@@ -3,7 +3,7 @@ import pytest
 from astropy.units import Quantity, Unit
 
 from modular_simulation.framework.utils import create_system
-from modular_simulation.framework.system import System
+from modular_simulation.framework.system_old import System
 from modular_simulation.usables.controllers.controller_base import ControllerBase, ControllerMode
 from modular_simulation.usables.controllers.trajectory import Trajectory
 from modular_simulation.usables.sensors.sampled_delayed_sensor import SampledDelayedSensor

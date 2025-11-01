@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 from pydantic import ConfigDict, Field
 
 from modular_simulation.measurables import AlgebraicStates, Constants, ControlElements, States
-from modular_simulation.framework.system import System
+from modular_simulation.framework.system_old import System
 from modular_simulation.usables import CalculationBase, Constant, MeasuredTag, OutputTag
 from astropy.units import Unit
 

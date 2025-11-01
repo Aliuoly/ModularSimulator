@@ -1,19 +1,17 @@
 from numpy.typing import NDArray
 import numpy as np
 from abc import ABC, abstractmethod
-from pydantic import BaseModel, Field, ConfigDict, PrivateAttr, field_serializer, field_validator
-from typing import TYPE_CHECKING, Any
+from pydantic import (
+    BaseModel, ConfigDict,
+    Field, PrivateAttr, 
+)
+from typing import Any
 from collections.abc import Callable
-from astropy.units import UnitBase, Unit
 from modular_simulation.usables.tag_info import TagData, TagInfo
+from modular_simulation.measurables.process_model import ProcessModel
+from modular_simulation.utils.typing import StateValue, SerializableUnit
+from modular_simulation.validation.exceptions import SensorConfigurationError
 
-if TYPE_CHECKING:
-    from modular_simulation.measurables import MeasurableQuantities, MeasurableBase
-
-def make_measurement_getter(object: "MeasurableBase", tag: str, converter:Callable) -> Callable[[], float|NDArray]:
-    def measurement_getter() -> float | NDArray:
-        return converter(getattr(object, tag))
-    return measurement_getter
 
 
 class SensorBase(BaseModel, ABC):
@@ -32,7 +30,7 @@ class SensorBase(BaseModel, ABC):
     measurement_tag: str = Field(
         ...,
         description = "tag of the state or control element to measure."
-        )
+    )
     alias_tag: str | None = Field(
         default = None,
         description = (
@@ -41,11 +39,11 @@ class SensorBase(BaseModel, ABC):
             "then, a usable with tag 'lab_MI' will be available, while 'cumm_MI' would not be available."
         )
     )
-    unit: str|UnitBase = Field(
+    unit: SerializableUnit = Field(
         description = "Unit of the measured quantity. Will be parsed with Astropy if is a string. "
     )
-    description: str|None = Field(
-        default = None,
+    description: str = Field(
+        default = "No description provided.",
         description = "Description of the sensor's measurement."
     )
     coefficient_of_variance: float = Field(
@@ -53,7 +51,8 @@ class SensorBase(BaseModel, ABC):
         description = (
             "the standard deviation of the measurement noise, defined as "
             "a fraction of the true value of measurement."
-        ))
+        )
+    )
     faulty_probability: float = Field(
         default = 0.0, 
         ge=0.0, lt=1.0,
@@ -67,11 +66,11 @@ class SensorBase(BaseModel, ABC):
             "if False, the .ok field of the measurement will not be set by the sensor routine. "
         )
     )
-    instrument_range: tuple[float,float] = Field(
+    instrument_range: tuple[StateValue, StateValue] = Field(
         default_factory = lambda : (-float('inf'), float('inf')),
         description = (
             "the range of value this sensor can return. "
-            "If true value is beyong the range, it is clipped and returned."
+            "If true value is beyong the range, it is clipped and returned. "
         )
     )
     time_constant: float = Field(
@@ -82,57 +81,56 @@ class SensorBase(BaseModel, ABC):
             "based on this time constant to mimic sensor dynamics. "
         )
     )
-    random_seed: int = Field(0)
+    random_seed: int = Field(
+        default = 0,
+        description = "Random seed for signal noise injection"
+    )
 
+    #----construction time initialized----
     _rng: np.random.Generator = PrivateAttr()
     _tag_info: TagInfo = PrivateAttr()
-    _last_measurement: float|NDArray|None = PrivateAttr(default = None)
-    _last_t: float = PrivateAttr(default = 0)
-    _initialized: bool = PrivateAttr(default = False)
-    _measurement_getter: Callable[[], float | NDArray] = PrivateAttr()
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    @field_validator("unit", mode = 'before')
-    @classmethod
-    def convert_unit(cls, unit: str|UnitBase) -> UnitBase:
-        if isinstance(unit, str):
-            return Unit(unit)
-        return unit
+    #----commission time initialized----
+    _measurement_getter: Callable[[], StateValue] = PrivateAttr()
+    _measurement: StateValue = PrivateAttr() # all internal calculation that requires the previous measurement should use this
+    _time: float = PrivateAttr()             # all internal calculation that requires the previous timestamp should use this
+    _initialized: bool = PrivateAttr(default = False)
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     
     def model_post_init(self, context: Any) -> None:
         self._rng = np.random.default_rng(self.random_seed)
-        if self.alias_tag is None:
+        self._tag_info = TagInfo(tag = self.alias_tag, unit = self.unit, description = self.description)
+        if self.alias_tag is None: 
             self.alias_tag = self.measurement_tag
-        self._tag_info = TagInfo(
-            tag = self.alias_tag,
-            unit = self.unit,
-            description = "" if self.description is None else self.description
-        )
 
-    def _initialize(self, measurable_quantities: "MeasurableQuantities") -> None:
-        """Resolve the measurement source and prime the sensor state.
-
-        The measurable quantities container has already validated that the
-        requested ``measurement_tag`` exists.  This routine simply locates the
-        owning model, builds a unit-aware getter callable, and performs an
-        initial measurement so ``_tag_info`` contains a populated
-        :class:`TagData` sample before the simulation loop starts.
+    def commission(self, process: ProcessModel) -> None:
         """
-        search_order = list(measurable_quantities.model_dump())
-        
-        for category in search_order:
-            owner = getattr(measurable_quantities, category)
-            if owner is not None and hasattr(owner, self.measurement_tag):
-                converter = measurable_quantities.tag_unit_info[self.measurement_tag].\
-                    get_converter(self._tag_info.unit)
-                self._measurement_getter = make_measurement_getter(owner, self.measurement_tag, converter)
-                self._initialized = True
-                self.measure(t = 0)
-                
-                return
+        Commission the sensor for the process (lol)
+        Resolve the measurement source and prime the sensor state.
+        Note that all necessary sensor states (last measurements, times, etc.)
+        are initialized here as well, so no subsequent operations
+        will check for "if self.something is None"
+        """
+        desired_state = self.measurement_tag
+        state_info = process.state_info_dict.get(desired_state)
+        if state_info is None:
+            raise SensorConfigurationError(
+                f"'{desired_state}' sensor's desired measurement doesn't exist in the process model."
+            )
+        if not self.unit.is_equivalent(state_info.unit):
+            raise SensorConfigurationError(
+                f"'{desired_state}' sensor's desired unit '{self.unit}' is not compatible "
+                f"with the measured state's unit '{state_info.unit}'."
+            )
 
-    # --- Template Method ---
-    def measure(self, t: float) -> TagData:
+        self._measurement_getter = process.make_converted_getter(desired_state, self.unit)
+        self._t = process.t
+        self._measurement = self._measurement_getter()
+        self._initialized = True
+        self.measure(t = self._t, force=True) # flush the update logic
+    
+    def measure(self, t: float, *, force: bool = False) -> TagData:
         """Execute the measurement pipeline and return the resulting :class:`TagData`.
 
         The method enforces initialization, optionally reuses the most recent
@@ -145,43 +143,28 @@ class SensorBase(BaseModel, ABC):
                 "Tried to call 'measure' before the system orchestrated the various quantities. "
                 "Make sure this sensor is part of a system and the system has been constructed."
             )
-        # 1. Decide if a new measurement should be taken
-        if not self._should_update(t) and self._last_value is not None:
-            return self._last_value
-
-        # 2. Get the true, raw value from the system. 
+        if not self._should_update(t) and not force:
+            return self._tag_info.data
+        
         raw_value = self._measurement_getter()
-
-        # 3. Apply subclass-specific processing (e.g., time delay) to the true value
+        if self.time_constant > 1e-12:
+            raw_value = self._sensor_dynamics(raw_value, t)
         processed_value = np.clip(
             self._get_processed_value(t = t, raw_value = raw_value), 
             *self.instrument_range
-            )
-        if self.time_constant > 1e-12:
-            processed_value = self._sensor_dynamics(processed_value, t)
-        
-        # 4. Apply noise and faults to the processed value
+        )
         final_value, is_faulty = self._apply_noise_and_faults(processed_value)
 
-        # 5. Create and store the new measurement. Notice is_faulty is not used. 
-        #     This is to simulate the fact that the sensor itself doesnt know its faulty yet. 
-        #     If you want to use it though, change it lol. 
         ok = True if not self.faulty_aware else (not is_faulty)
         self._tag_info.data = TagData(time = t, value = final_value, ok = ok)
         return self._tag_info.data
     
-    def _sensor_dynamics(self, new_value: float|NDArray, t: float):
-        if self._last_measurement is None:
-            self._last_measurement = new_value
-        dt = t - self._last_t
-        lamb = 1 - np.exp(-dt / self.time_constant)
+    def _sensor_dynamics(self, new_value: StateValue, t: float):
+        dt = t - self._t
+        lamb = dt / (dt + self.time_constant) # approximation
         self._last_t = t
-        self._last_measurement = lamb * new_value + (1-lamb) * self._last_measurement
-        return self._last_measurement
-    
-    @property
-    def _last_value(self) -> TagData:
-        return self._tag_info.data
+        self._measurement = lamb * new_value + (1-lamb) * self._measurement
+        return self._measurement
     
     @abstractmethod
     def _should_update(self, t: float) -> bool:
@@ -219,15 +202,12 @@ class SensorBase(BaseModel, ABC):
         faulty = False
         if self._rng.random() < self.faulty_probability:
             faulty = True
-            if self._last_value is not None:
-                # A fault occurred, simulate what kind
-                # 1. frozen value
-                if self._rng.random() < 0.5:
-                    return self._last_value.value, faulty
-                # 2. spike
-                value = self._last_value.value * (0.5 + self._rng.random())
-                return value, faulty
-            # No previous measurement to fall back on, so we let it pass but flag it
+            # A fault occurred, simulate what kind
+            # 1. frozen value
+            if self._rng.random() < 0.5:
+                return self._measurement, faulty
+            # 2. spike
+            value *= (0.5 + self._rng.random())
             return value, faulty
 
         # If not faulty, apply noise
@@ -242,7 +222,3 @@ class SensorBase(BaseModel, ABC):
     @property
     def measurement_history(self) -> list[TagData]:
         return list(self._tag_info.history)
-
-    @field_serializer("unit", mode="plain")
-    def _serialize_unit(self, unit: UnitBase) -> str:
-        return str(unit)

@@ -1,480 +1,313 @@
-from collections.abc import Callable
-import bisect
+from __future__ import annotations
 import math
-import numpy as np
-from astropy.units import UnitBase, Unit #type: ignore
-from dataclasses import dataclass
-from pydantic import BaseModel, Field, PrivateAttr, field_serializer, field_validator, ConfigDict
-from dataclasses import replace
+from bisect import bisect_right
+from pydantic.dataclasses import dataclass
+from pydantic import PlainSerializer, BeforeValidator
+from dataclasses import field
+from typing import overload, Annotated
+from modular_simulation.utils.typing import TimeValue, StateValue, PerTimeValue
+from modular_simulation.utils.wrappers import second, second_value
 
-Number = int | float
-
-# ------------------------------
-# Utilities
-# ------------------------------
-
-def _clamp(x: float, lo: float | None = None, hi: float | None = None) -> float:
-    if lo is not None:
-        x = max(lo, x)
-    if hi is not None:
-        x = min(hi, x)
-    return x
-
-# Hash-based, grid-sampled noise so evaluation is O(1) without state.
-# We use a seeded LCG keyed by integer time bins and optionally interpolate.
-
+# ---- Stateless hashy noise for deterministic RW ----
 def _noise_unit(seed: int, k: int) -> float:
-    # simple 32-bit LCG for reproducibility
-    a = 1664525
-    c = 1013904223
-    m = 2 ** 32
+    a, c, m = 1664525, 1013904223, 2**32
     x = (seed + k) & 0xFFFFFFFF
     x = (a * x + c) % m
-    # map to (-1, 1)
-    return (float(x) / (m - 1)) * 2.0 - 1.0
+    return (float(x) / (m - 1)) * 2.0 - 1.0  # (-1, 1)
 
 
 def _noise_interp(seed: int, x: float) -> float:
-    # x is in bins; we linear-interp between integer bins for continuity
     k0 = math.floor(x)
-    k1 = k0 + 1
     r0 = _noise_unit(seed, k0)
-    r1 = _noise_unit(seed, k1)
-    frac = x - k0
-    return (1 - frac) * r0 + frac * r1
+    r1 = _noise_unit(seed, k0 + 1)
+    f = x - k0
+    return (1 - f) * r0 + f * r1
 
 
-# ------------------------------
-# Segment definitions
-# ------------------------------
-
-@dataclass(frozen=True)
-class Segment:
-    """Base segment describing a portion of a setpoint trajectory timeline.
-
-    Subclasses implement :meth:`eval` to compute the setpoint value at time
-    ``t`` given the setpoint at the beginning of the segment.
+@dataclass(config={"arbitrary_types_allowed": True})
+class Trajectory:
     """
-    t0: float  # start time of segment (absolute)
-    duration: float  # duration of the segment; float('inf') for open-ended
+    Minimal piecewise setpoint trajectory with trimming.
 
-    def eval(self, t: float, y0: float) -> float:
-        raise NotImplementedError
+    - Values: unitless floats (caller handles value units if desired).
+    - Time: astropy Quantity for all public time/duration parameters.
+    - Internals: seconds (float) in two primitive lists: _knots_t, _knots_y.
+    - Ops: set, step, ramp, hold, random_walk
+    - Trimming: an internal clock t0; all ops call _gc() to discard history.
 
-    def t1(self) -> float:
-        return self.t0 + self.duration
-
-
-@dataclass(frozen=True)
-class Hold(Segment):
-    """Trajectory segment that maintains a constant output value."""
-    value: float
-
-    def eval(self, t: float, y0: float) -> float:
-        return self.value
-
-
-@dataclass(frozen=True)
-class Step(Segment):
-    """Trajectory segment that applies an instantaneous offset to ``y0``."""
-    magnitude: float
-
-    def eval(self, t: float, y0: float) -> float:
-        return y0 + self.magnitude
-
-
-@dataclass(frozen=True)
-class Ramp(Segment):
-    """Trajectory segment that linearly interpolates to a new setpoint."""
-    magnitude: float  # total change over duration (can be +/-)
-
-    def eval(self, t: float, y0: float) -> float:
-        # linear interpolation from y0 to y0 + magnitude over [t0, t1]
-        if self.duration <= 0:
-            return y0 + self.magnitude
-        frac = (t - self.t0) / self.duration
-        frac = 0.0 if frac < 0 else (1.0 if frac > 1.0 else frac)
-        return y0 + frac * self.magnitude
-
-
-@dataclass(frozen=True)
-class RandomWalk(Segment):
-    """Trajectory segment that emulates a bounded random walk.
-
-    The segment samples a deterministic pseudo-random Field to produce
-    repeatable noise without maintaining state between evaluations.  The
-    resulting value can be clamped to an optional min/max.
-    """
-    std: float = 0.1
-    dt: float = 1.0  # grid period for the underlying noise Field
-    clamp_min: float | None = None
-    clamp_max: float | None = None
-    seed: int = 0
-
-    def eval(self, t: float, y0: float) -> float:
-        # cumulative sum of zero-mean increments; here we emulate a RW
-        # by integrating a continuous noise Field over [t0, t]
-        if t <= self.t0:
-            return y0
-        # integrate via trapezoid over one step for O(1) closed form approx:
-        # y(t) = y0 + std * sqrt(dt) * W where W is scaled noise integral.
-        # We approximate the integral as (n steps)*mean(noise) * dt.
-        # For responsiveness, just use the noise value at (t - t0)/dt.
-        x = (t - self.t0) / self.dt
-        inc = _noise_interp(self.seed, x)
-        y = y0 + self.std * math.sqrt(self.dt) * inc
-        return _clamp(y, self.clamp_min, self.clamp_max)
-
-
-# ------------------------------
-# Trajectory class
-# ------------------------------
-
-class Trajectory(BaseModel):
-    """Composable setpoint profile made of piecewise time segments.
-
-    Trajectories expose fluent builders (``hold``/``step``/``ramp``/``random_walk``)
-    and can be modified on-line via :meth:`set_now`.  History arrays are
-    maintained alongside cached breakpoints and starting values to keep
-    evaluation amortized :math:`O(1)` for monotonic time progression.
+    Semantics:
+      - set(value, t=None): from time t onward hold 'value'. If t is None, uses current end time.
+      - step(mag): instantaneous jump at current end time.
+      - ramp(mag, duration): linear change over 'duration' starting at end time.
+      - hold(duration, value=None): keep value (or set to 'value' first) and append a flat segment.
+      - random_walk(std, duration, dt, clamp=(min,max), seed): cumulative RW knots, deterministic.
     """
     y0: float
-    unit: UnitBase|str
-    t0: float = 0.0
-    segments: list[Segment] = Field(default_factory=list)
+    t0: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),]
 
-    # fast-path caches
-    _breaks: list[float] = PrivateAttr(default_factory=list)
-    _cursor: int = PrivateAttr(default=0)
-    _last_value: float | None = PrivateAttr(default=None)
-    _start_vals: list[float] = PrivateAttr(default_factory=list)  # y at each segment start (O(1) eval)
+    _knots_t: list[float] = field(init=False)
+    _knots_y: list[float] = field(init=False)
 
-    # historization and bookkeeping for fast set_now
-    _history_times: list[float] = PrivateAttr(default_factory=list)
-    _history_values: list[Number] = PrivateAttr(default_factory=list)
-    _last_set_time: float | None = PrivateAttr(default=None)
-    _last_set_value: Number | None = PrivateAttr(default=None)
-    _max_retained_segments: int = PrivateAttr(default=1)
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    # --------------------------
-    # Builder / mutators (chainable)
-    # --------------------------
-    @field_validator("unit", mode = 'before')
-    @classmethod
-    def convert_unit(cls, unit: str|UnitBase) -> UnitBase:
-        if isinstance(unit, str):
-            return Unit(unit)
-        return unit
-    
-    def clone(self) -> "Trajectory":
-        out = Trajectory(y0 = self.y0, unit = self.unit, t0 = self.t0, segments = list(self.segments))
-        out._breaks = list(self._breaks)
-        out._start_vals = list(self._start_vals)
-        out._history_times = list(self._history_times)
-        out._history_values = list(self._history_values)
-        out._last_set_time = self._last_set_time
-        out._last_set_value = self._last_set_value
-        return out
+    def __post_init__(self):
+        self._knots_t = [self.t0] # already in seconds due to validation in SerializableTimeValue
+        self._knots_y = [float(self.y0)]
 
     # --------------------------
-    # Historization helpers
+    # Public API
     # --------------------------
 
-    def _record_history_entry(self, t: float, value: Number) -> None:
-        """Append or update a historized setpoint sample at time ``t``."""
-        if self._history_times:
-            if t < self._history_times[-1] - 1e-12:
-                # keep history sorted even if times go slightly backwards
-                idx = bisect.bisect_left(self._history_times, t)
-                self._history_times.insert(idx, t)
-                self._history_values.insert(idx, value)
-                return
-            if abs(t - self._history_times[-1]) <= 1e-12:
-                self._history_values[-1] = value
-                return
-        self._history_times.append(t)
-        self._history_values.append(value)
+    def __call__(self, t: TimeValue) -> float:
+        """Evaluate trajectory at time t (Quantity)."""
+        ts = second(t)
+        ti, yi = self._knots_t, self._knots_y
 
-    def _history_value_at(self, t: float) -> Number:
-        if not self._history_times:
-            return self.y0
-        idx = bisect.bisect_right(self._history_times, t) - 1
-        if idx < 0:
-            return self.y0
-        return self._history_values[idx]
+        # fast bounds
+        j = bisect_right(ti, ts)
+        if j == 0:
+            return yi[0]
+        if j == len(ti):
+            return yi[-1]
 
-    def history(self) -> dict[str, np.ndarray]:
-        """Return historized setpoint samples as NumPy arrays."""
-        return {
-            "time": np.asarray(self._history_times, dtype=float),
-            "value": np.asarray(self._history_values, dtype=float),
-        }
-    def writer(self, time_getter: Callable[[], float]) -> Callable[[Number], None]:
-        """Return a callable that writes setpoints at the time provided by ``time_getter``."""
+        # linear interp (right-hand at steps because of bisect_right)
+        tL, tR = ti[j - 1], ti[j]
+        yL, yR = yi[j - 1], yi[j]
+        if tR == tL:
+            return yR
+        f = (ts - tL) / (tR - tL)
+        return yL + f * (yR - yL)
 
-        def _write(value: Number) -> None:
-            t = time_getter()
-            if t is None:
-                raise RuntimeError("Cannot write to trajectory without a valid time reference.")
-            self.set_now(float(t), float(value))
-
-        return _write
-    def last_setpoint(self) -> Number:
-        if self._last_set_value is not None:
-            return self._last_set_value
-        if self._history_values:
-            return self._history_values[-1]
-        if self.segments:
-            idx = len(self.segments) - 1
-            seg = self.segments[idx]
-            return seg.eval(seg.t0, self._start_vals[idx])
-        return self.y0
-
-    def current_value(self, t: float) -> float:
-        if self._last_set_time is not None and t >= self._last_set_time - 1e-12:
-            if self._last_set_value is not None:
-                return float(self._last_set_value)
-        return float(self.eval(t))
-
-    def _can_append_at_end(self, t: float) -> bool:
-        end_t = self._end_time()
-        if t < end_t - 1e-12:
-            return False
-        return True
-
-    def hold(self, duration: float, value: float | None = None) -> "Trajectory":
-        if value is None:
-            value = self.peek_end_value()
-        t = self._end_time()
-        self._append(Hold(t, duration, value))
-        return self
-
-    def step(self, magnitude: float) -> "Trajectory":
-        t = self._end_time()
-        self._append(Step(t, 0.0, magnitude))
-        return self
-
-    def ramp(self, magnitude: float | None = None, *, duration: float | None = None, ramprate: float | None = None) -> "Trajectory":
-        if magnitude is None and duration is None and ramprate is None:
-            raise ValueError("Provide magnitude+duration, or magnitude+ramprate, or duration+ramprate")
-        if magnitude is None:
-            magnitude = ramprate * duration  # type: ignore
-        if duration is None:
-            duration = abs(magnitude / ramprate)  # type: ignore
-        t = self._end_time()
-        self._append(Ramp(t, duration, magnitude))
-        return self
-
-    def random_walk(self, std: float = 0.1, *, duration: float = 1.0, dt: float = 1.0, min: float | None = None, max: float | None = None, seed: int = 0) -> "Trajectory":
-        t = self._end_time()
-        self._append(RandomWalk(t, duration, std, dt, min, max, seed))
-        return self
-
-    # O(1) inner-loop retarget: no deletion, just append a Hold at t
-    def set_now(self, t: float, value: float) -> "Trajectory":
-        """Append a hold segment starting at ``t`` with the provided value.
-
-        When ``t`` is at or beyond the current end time the operation is O(1).
-        Otherwise the future of the trajectory is trimmed before appending the
-        new hold segment, which is O(n) in the number of retained segments.
+    def set(self, value: float, t: TimeValue|None = None) -> Trajectory:
         """
-        if not self._can_append_at_end(t):
-            self.trim_future(t)
-
-        if self.segments:
-            last_seg = self.segments[-1]
-            prev_start = last_seg.t0
-            prev_value = last_seg.eval(min(t, last_seg.t1()), self._start_vals[-1])
-            # remove segments of 0 duration at the end where we are about to append to 
-
-        else:
-            prev_start = self.t0
-            prev_value = self.y0
-
-        self._record_history_entry(prev_start, prev_value)
-
-        if len(self.segments) > self._max_retained_segments:
-            drop = len(self.segments) - self._max_retained_segments
-            del self.segments[:drop]
-            del self._start_vals[:drop]
-            self._rebuild_breaks()
-        
-        
-        self._append(Hold(t0 = t, duration = 0, value = value), start_value=prev_value)
-        self._record_history_entry(t, value)
-        self._last_set_time = t
-        self._last_set_value = value
-        return self
-    
-
-
-    def trim_future(self, t: float) -> "Trajectory":
-        """Drop segments starting after time ``t`` and clip any active segment."""
-        if not self.segments:
-            return self
-        new_segments: list[Segment] = []
-        for seg in self.segments:
-            if seg.t0 < t < seg.t1():
-                # clip ongoing segment
-                new_dur = t - seg.t0
-                seg = replace(seg, duration=new_dur)  # type: ignore
-                new_segments.append(seg)
-            elif seg.t1() <= t:
-                new_segments.append(seg)
-        self.segments = new_segments
-        self._rebuild_breaks()
+        Redefine future from time t to a constant 'value'.
+        If t is None, use the current end time.
+        """
+        ts = self.end_time_s() if t is None else second(t)
+        self._clip_at(ts)
+        self._append_knot(ts, float(value))
+        self._gc()
         return self
 
-    # --------------------------
-    # Evaluation
-    # --------------------------
+    def step(self, magnitude: float) -> Trajectory:
+        """Instantaneous jump at current end time by 'magnitude'."""
+        t_end, y_end = self.end()
+        self._append_knot(t_end, y_end + float(magnitude))
+        self._gc()
+        return self
 
-    def __call__(self, t: float) -> float:
-        return self.eval(t)
+    @overload
+    def ramp(self, magnitude: float, *, duration: TimeValue, rate: None = None) -> Trajectory: ...
+    @overload
+    def ramp(self, magnitude: float, *, duration: None = None, rate: "PerTimeValue") -> Trajectory: ...
 
-    def eval(self, t: float) -> float:
-        if not self.segments:
-            return self.y0
-        # fast path: monotone time forward
-        if self._last_value is not None and self._cursor < len(self.segments):
-            seg = self.segments[self._cursor]
-            if seg.t0 <= t < seg.t1():
-                y = seg.eval(t, self._start_vals[self._cursor])
-                self._last_value = y
-                return y
-            if t >= seg.t1():
-                while self._cursor + 1 < len(self.segments) and t >= self.segments[self._cursor].t1():
-                    self._cursor += 1
-                seg = self.segments[min(self._cursor, len(self.segments)-1)]
-                y = seg.eval(t, self._start_vals[self._cursor])
-                self._last_value = y
-                return y
-        if self._breaks and t < self._breaks[0]:
-            y_hist = float(self._history_value_at(t))
-            self._last_value = y_hist
-            self._cursor = 0
-            return y_hist
-        # general path: binary search
-        idx = bisect.bisect_right(self._breaks, t) - 1
-        idx = max(0, min(idx, len(self.segments)-1))
-        y = self.segments[idx].eval(t, self._start_vals[idx])
-        self._cursor = idx
-        self._last_value = y
-        return y
+    def ramp(
+        self,
+        magnitude: float,
+        *,
+        duration: TimeValue | None = None,
+        rate: PerTimeValue | None = None
+    ) -> Trajectory:
+        """
+        Create a trajectory segment that linearly interpolates to a new setpoint.
 
-    # --------------------------
-    # Introspection & internals
-    # --------------------------
+        Exactly one of ``duration`` or ``rate`` must be provided.
 
-    def _end_time(self) -> float:
-        return self.t0 if not self.segments else self.segments[-1].t1()
+        If ``duration`` is specified, the segment linearly changes by ``magnitude``
+        over the given duration. If ``rate`` is specified instead, the duration
+        is computed as ``abs(magnitude / rate)``. Negative magnitudes produce
+        downward ramps, while negative rates are treated as positive speeds with
+        direction implied by ``magnitude``.
 
-    def peek_end_value(self) -> float:
-        if not self.segments:
-            return self.y0
-        idx = len(self.segments) - 1
-        t = math.nextafter(self.segments[-1].t1(), -math.inf)
-        return self.segments[idx].eval(t, self._start_vals[idx])
+        Parameters
+        ----------
+        magnitude : float
+            Total change in the setpoint value over the ramp.
+        duration : TimeValue, optional
+            Duration of the ramp segment (e.g., ``10 * u.s``). Mutually exclusive
+            with ``rate``.
+        rate : PerTimeValue, optional
+            Ramp rate in units of 1/time (e.g., ``0.2 / u.s``). Mutually exclusive
+            with ``duration``.
 
-    def _append(self, seg: Segment, *, start_value: float | None = None) -> None:
-        # append must be at the current end time to keep cached starts valid
-        if not self._can_append_at_end(seg.t0):
-            self.trim_future(seg.t0)
-        # compute start value using previous tail
-        if start_value is None:
-            if self.segments:
-                prev_idx = len(self.segments) - 1
-                y_prev_end = self.segments[prev_idx].eval(self.segments[prev_idx].t1(), self._start_vals[prev_idx])
-            else:
-                y_prev_end = self.y0
+        Returns
+        -------
+        Trajectory
+            The updated trajectory with the new ramp segment appended.
+        """
+        if duration is not None:
+            dur_s = second(duration)
+            if dur_s < 0:
+                raise ValueError("duration must be non-negative")
+        elif rate is not None:
+            dur_s = abs(float(magnitude) / rate.to("1/second").value)
         else:
-            y_prev_end = start_value
-        self.segments.append(seg)
-        self._start_vals.append(y_prev_end)
-        if self._breaks:
-            if seg.t0 < self._breaks[-1] - 1e-12:
-                self._rebuild_breaks()
-            else:
-                self._breaks.append(seg.t1())
+            raise ValueError("Provide exactly one of 'duration' or 'rate'.")
+
+        t0, y0 = self.end()
+        if dur_s == 0.0:
+            self._append_knot(t0, y0 + float(magnitude))
         else:
-            self._breaks = [seg.t0, seg.t1()]
-        self._cursor = len(self.segments) - 1
-        self._last_value = None
+            self._append_knot(t0 + dur_s, y0 + float(magnitude))
 
-    def _rebuild_breaks(self, recompute_starts: bool = False) -> None:
-        self._breaks = [s.t0 for s in self.segments] + ([self.segments[-1].t1()] if self.segments else [self.t0])
-        self._cursor = 0
-        self._last_value = None
-        if recompute_starts:
-            self._start_vals = []
-            y = self.y0
-            for s in self.segments:
-                self._start_vals.append(y)
-                y = s.eval(s.t1(), y)
-    @field_serializer("unit", mode="plain")
-    def _serialize_unit(self, unit: UnitBase) -> str:
-        return str(unit)
-    @field_serializer("segments", mode="plain")
-    def _serialize_segments(self, segments: list[Segment]) -> list:
-        # subclass of segments all get interpreted as base 'Segment',
-        # which will throw unimplemented error if used as is. 
-        # therefore, serialization must lose info on future
-        # segments:
-        return []
-    @field_serializer("y0", mode="plain")
-    def _serialize_y0(self, y0: float) -> float:
-        # y0 is to take on the last applicable setpoint
-        # of the existing trajectory. 
-        # unless ofcourse no last value exists yet
-        if self._last_value is None:
-            return self.y0
-        return self._last_value
-    @field_serializer("t0", mode="plain")
-    def _serialize_t0(self, t0:float) -> float:
-        # t0 will be forced to 0 in case it wasnt before
-        # which, I don't think is allowed... not that I've tried. 
-        return 0.0
+        self._gc()
+        return self
 
-# ------------------------------
-# Multi-channel convenience wrapper
-# ------------------------------
+    def hold(self, duration: TimeValue, value: float | None = None) -> Trajectory:
+        """
+        Keep the (optionally provided) value for 'duration' time.
+        Equivalent to: (set(value) if provided). then append flat for duration.
+        """
+        if value is not None:
+            # Set at end time without changing time
+            self.set(value, None)
+        # Just extend in time by duration, value stays at last knot
+        dur_s = second(duration)
+        if dur_s < 0:
+            raise ValueError("duration must be non-negative")
+        t_end, y_end = self.end()
+        if dur_s == 0.0:
+            # no-op in time, but explicit flat knot keeps semantics clear
+            self._append_knot(t_end, y_end)
+        else:
+            self._append_knot(t_end + dur_s, y_end)
+        self._gc()
+        return self
 
-@dataclass
-class MultiTrajectory:
-    tracks: list[Trajectory]
+    def random_walk(
+        self,
+        std: float = 0.1,
+        *,
+        duration: TimeValue,
+        dt: TimeValue = second(1.0),
+        clamp: tuple[float | None, float | None] = (None, None),
+        seed: int = 0,
+    ) -> Trajectory:
+        """
+        Append a bounded random-walk segment.
 
-    def __call__(self, t: float) -> np.ndarray:
-        return np.array([tr(t) for tr in self.tracks])
+        - Deterministic, state-free noise via hash-based LCG + linear interp.
+        - Increments ~ std * sqrt(dt) * noise_interp(...)
+        - Adds knots every 'dt' up to 'duration'.
+        """
+        D = second(duration)
+        h = second(dt)
+        if D < 0 or h <= 0:
+            raise ValueError("duration must be >= 0 and dt must be > 0")
 
-    def track(self, i: int) -> Trajectory:
-        return self.tracks[i]
+        t, y = self.end()
+        steps = max(1, int(math.ceil(D / h)))
+        lo, hi = clamp
 
+        for k in range(1, steps + 1):
+            x = k  # “bin” index
+            inc = std * math.sqrt(h) * _noise_interp(seed, x)
+            y = y + inc
+            if lo is not None and y < lo:
+                y = lo
+            if hi is not None and y > hi:
+                y = hi
+            self._append_knot(t + min(k * h, D), y)
 
-# ------------------------------
-# Example usage
-# ------------------------------
-if __name__ == "__main__":
-    # Build a trajectory
-    T = (Trajectory(y0=0.0, unit = "m3", t0=0.0)
-         .hold(1.0, value=0.0)
-         .step(5.0)
-         .ramp(magnitude=5.0, ramprate=1.0)  # duration = 5s
-         .random_walk(std=0.1, duration=10.0, dt=0.5, min=0.0, max=12.0, seed=42)
-         .hold(3.0))
+        self._gc()
+        return self
 
-    ts = np.linspace(0, 25, 101, dtype = np.float64)
-    ys = np.array([T(t) for t in ts])
-    print(f"y(0..25): mean={ys.mean():.3f}, min={ys.min():.3f}, max={ys.max():.3f}")
+    def clone(self) -> Trajectory:
+        t = Trajectory(self._knots_y[0], second(self._knots_t[0]))
+        t._knots_t = self._knots_t.copy()
+        t._knots_y = self._knots_y.copy()
+        t.t0 = self.t0
+        return t
 
-    # Cascade update: outer loop updates inner-loop SP every 0.1s
-    inner = Trajectory(y0=ys[0], unit = "m2", t0=0.0)
-    for k, t in enumerate(ts):
-        sp = T(t)
-        inner.set_now(t, sp)  # O(1) append + clear future
-        _ = inner(t)  # controller pulls inner(t)
+    # --------------------------
+    # Trimming / clock
+    # --------------------------
 
-    # Vector example (e.g., pressure & temperature)
-    M = MultiTrajectory([T.clone(), Trajectory(y0=2.0, unit = "m3").ramp(magnitude=-1.0, duration=10.0)])
-    yv = M(3.3)
-    print("vector at t=3.3:", yv)
+    def advance_clock(self, t: TimeValue) -> None:
+        """
+        Move internal trimming time forward to t, and drop history.
+        """
+        if t > self.t0:
+            self.t0 = t
+            self._gc()
+
+    # --------------------------
+    # Introspection
+    # --------------------------
+
+    def start(self) -> tuple[float, float]:
+        return self._knots_t[0], self._knots_y[0]
+
+    def end(self) -> tuple[float, float]:
+        return self._knots_t[-1], self._knots_y[-1]
+
+    def end_time_s(self) -> float:
+        return self._knots_t[-1]
+
+    def times_seconds(self) -> list[float]:
+        return self._knots_t.copy()
+
+    def values(self) -> list[float]:
+        return self._knots_y.copy()
+
+    # --------------------------
+    # Internals
+    # --------------------------
+
+    def _append_knot(self, t_s: float, y: float) -> None:
+        if t_s < self._knots_t[-1]:
+            raise RuntimeError("Internal: non-monotonic append; call _clip_at first.")
+        self._knots_t.append(t_s)
+        self._knots_y.append(float(y))
+
+    def _clip_at(self, t_s: float) -> None:
+        """
+        Ensure a knot at t_s (interpolated if inside a segment),
+        then drop future knots past t_s.
+        """
+        ti, yi = self._knots_t, self._knots_y
+        j = bisect_right(ti, t_s)
+
+        if j == 0:
+            # Insert new front knot at t_s with y(t_s) (which equals first y)
+            y = self.__call__(second(t_s))
+            self._knots_t = [t_s]
+            self._knots_y = [float(y)]
+            return
+
+        if j == len(ti):
+            if t_s > ti[-1]:
+                # extend with a hold up to t_s, then keep that knot
+                self._append_knot(t_s, yi[-1])
+            # else equal to last—nothing to do
+            return
+
+        tL, tR = ti[j - 1], ti[j]
+        if t_s == tR:
+            self._knots_t = ti[: j + 1]
+            self._knots_y = yi[: j + 1]
+            return
+
+        # between knots: insert interpolated knot and truncate
+        y_clip = self.__call__(second(t_s))
+        self._knots_t = ti[:j] + [t_s]
+        self._knots_y = yi[:j] + [float(y_clip)]
+
+    def _gc(self) -> None:
+        """
+        Trim all knots earlier than t0. Keep trajectory valid by
+        re-anchoring at (t0, y(t0)) as the first knot.
+        """
+        tmin = self.t0
+        ti, yi = self._knots_t, self._knots_y
+
+        if tmin <= ti[0]:
+            return  # nothing to drop
+
+        j = bisect_right(ti, tmin)
+        # Evaluate value at tmin for a clean new start
+        y0 = self.__call__(second(tmin))
+        # Keep all knots with t >= tmin, but ensure first knot is exactly at tmin
+        tail_t = [t for t in ti[j:] if t >= tmin]
+        tail_y = yi[j:]
+
+        self._knots_t = [tmin] + tail_t
+        self._knots_y = [float(y0)] + tail_y

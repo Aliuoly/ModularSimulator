@@ -1,11 +1,13 @@
-from pydantic import Field, PrivateAttr
-import numpy as np
-from modular_simulation.usables.controllers.controller_base import ControllerBase
-from numpy.typing import NDArray
 import logging
+from collections import deque
+from typing import Annotated
+from pydantic import Field, PrivateAttr, PlainSerializer, BeforeValidator
+from modular_simulation.usables.controllers.controller_base import ControllerBase
+from modular_simulation.utils.typing import TimeValue, StateValue, PerTimeValue
+from modular_simulation.utils.wrappers import second, second_value
 logger = logging.getLogger(__name__)
-class PIDController(ControllerBase):
 
+class PIDController(ControllerBase):
     """
     A simple Proportional-Integral-Derivative controller.
     The control output is return according to the time-domain formulation
@@ -15,7 +17,7 @@ class PIDController(ControllerBase):
 
     which is represented in the discrete form
 
-    position form : u(k) = Kp * (e(k) + dt/Ti * sum(e) + Td/dt * (e(k)-e(k-1)))
+    position form : u(k) = Kp * (e(k) + 1/Ti * sum(e*dt) + Td/dt * (e(k)-e(k-1)))
     velocity form : u(k) = u(k-1) + Kp * [(e(k)-e(k-1)) + dt/Ti * e + Td/dt * (e(k)-2e(k-1)+e(k-2))]
 
     an optional filter may be applied to the derivative term to smooth out
@@ -27,13 +29,13 @@ class PIDController(ControllerBase):
         gt = 0,
         description = "Proportional gain"
         )
-    Ti: float = Field(
-        default = float('inf'),
+    Ti: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
+        default = second(float('inf')),
         gt = 0,
         description = "Integral time constant"
         )
-    Td: float = Field(
-        default = 0.0,
+    Td: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
+        default = second(0.0),
         ge = 0,
         description = "Derivative time constant"
     )
@@ -41,8 +43,8 @@ class PIDController(ControllerBase):
         default = False,
         description = "If True, the controller assumes that higher control output -> lower pv."
     )
-    derivative_filter_tc: float = Field(
-        default = 0.0,
+    derivative_filter_tc: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
+        default = second(0.0),
         ge = 0.0,
         description = "Time constant of the derivative filter used to smooth out derivative action"
     )
@@ -66,27 +68,33 @@ class PIDController(ControllerBase):
     )
 
     # additional PID only private attributes
-    _last_u: float|None = PrivateAttr(default = None)
-    _last_t: float = PrivateAttr(default=0.0)
-    _last_error: float|NDArray = PrivateAttr(default=0.0)
-    _last_last_error: float|NDArray = PrivateAttr(default=0.0)
-    _integral: float|NDArray = PrivateAttr(default=0.0)
-    _filtered_derivative: float|NDArray = PrivateAttr(default = 0.0)
+    _error_queue: deque[StateValue] = PrivateAttr(default_factory = lambda: deque([0.0, 0.0], maxlen = 2))
+    _integral: StateValue = PrivateAttr(default=0.0)
+    _filtered_derivative: StateValue = PrivateAttr(default = 0.0)
+
+    def _post_commission(self, system):
+        # if positional form, sets the integral such that the
+        # control action will stay constant if the error is 0
+        if not self.velocity_form:
+            # u(k) = Kp * (e(k) + 1/Ti * sum(e*dt) + Td/dt * (e(k)-e(k-1)))
+            # error and de 0, with sum(e*dt) = integral, gives
+            # u(k) = Kp * 1/Ti * integral
+            # integral = u * Ti/Kp
+            self._integral = self._control_action.value * self.Ti / self.Kp
 
     def _control_algorithm(
             self,
-            t: float,
-            cv: float | NDArray[np.float64],
-            sp: float | NDArray[np.float64],
-            ) -> float | NDArray[np.float64]:
+            t: TimeValue,
+            cv: StateValue,
+            sp: StateValue,
+            ) -> StateValue:
         """
-        PID control algorithm for SISO systems. As such, only handles scalar cv and sp."""
-        dt = t - self._last_t
-        self._last_t = t
-        if self._last_u is None:
-            self._last_u = self._u0
+        PID control algorithm for SISO systems. As such, only handles scalar cv and sp.
+        """
+        dt = t - self.t
         
         error = sp - cv
+        last_error, last_last_error = self._error_queue
         PD_error = self.setpoint_weight * sp - cv
         if self.inverted:
             error = -error
@@ -95,14 +103,14 @@ class PIDController(ControllerBase):
         # first order approximation of the timec onstant -> filter factor
         # valid enough so whatever. 
         alpha = dt / (dt + self.derivative_filter_tc) 
-        self._filtered_derivative = alpha * (PD_error - self._last_error) + (1-alpha) * self._filtered_derivative
+        self._filtered_derivative = alpha * (PD_error - self._error_queue[1]) + (1-alpha) * self._filtered_derivative
         
         # PID control law
         if self.velocity_form:
-            p_term = self.Kp * (PD_error - self._last_error)
+            p_term = self.Kp * (PD_error - last_error)
             i_term = self.Kp / self.Ti * dt * error
-            d_term = self.Kp * self.Td / dt * (PD_error - 2*self._last_error + self._last_last_error)
-            output = p_term + i_term + d_term + self._last_u
+            d_term = self.Kp * self.Td / dt * (PD_error - 2*last_error + last_last_error)
+            output = p_term + i_term + d_term + self._control_action.value
             logger.debug(
                 # scientific notation takes up 4 spaces by itself, and due to sign of the number another 1 space is possible
                 # and from the decimal point another space is taken. thus, need at least 6 + decimal place many spaces
@@ -114,7 +122,7 @@ class PIDController(ControllerBase):
             p_term = self.Kp * PD_error
             i_term = self.Kp / self.Ti * self._integral
             d_term = self.Kp * self.Td / dt * self._filtered_derivative
-            output = p_term + i_term + d_term + self._u0 # initial setpoint u0 accounted for in PID
+            output = p_term + i_term + d_term 
             overflow, underflow = output - self.mv_range[1], output - self.mv_range[0]
             saturated = "No"
             if overflow > 0 and self.Ti != float('inf'):
@@ -141,8 +149,5 @@ class PIDController(ControllerBase):
                 "%-12.12s PID | sat=%-10.10s t=%8.1f cv=%8.2f sp=%8.2f err=%10.2e P=%10.2e I=%10.2e D=%10.2e out=%8.2f",
                 self.cv_tag, saturated, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, output,
             )
-        # Ensure output is non-negative (e.g., flow rate can't be negative)
-        self._last_last_error = self._last_error
-        self._last_error = PD_error
-        self._last_u = output
+        self._error_queue.appendleft(PD_error)
         return output

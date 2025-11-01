@@ -1,9 +1,10 @@
 import numpy as np
 from modular_simulation.usables.sensors.sensor_base import SensorBase, TagData
+from modular_simulation.utils.typing import TimeValue, StateValue
+from modular_simulation.utils.wrappers import second, second_value
 import collections
-from numpy.typing import NDArray
-from pydantic import Field, PrivateAttr
-from dataclasses import asdict
+from pydantic import Field, PrivateAttr, PlainSerializer, BeforeValidator
+from typing import Annotated
 
 
 class SampledDelayedSensor(SensorBase):
@@ -11,13 +12,13 @@ class SampledDelayedSensor(SensorBase):
     A sensor with a set sampling frequency, measurement deadtime, and gaussian noise.
     """
     
-    deadtime: float = Field(
+    deadtime: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
         0.0,
         ge = 0.0,
         description = "The measurement deadtime (a.k.a delay) in system units"
     )
 
-    sampling_period: float = Field(
+    sampling_period: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
         0.0,
         ge = 0.0,
         description = "The sampling period of the sensor in system units. " \
@@ -25,52 +26,49 @@ class SampledDelayedSensor(SensorBase):
     )
 
     _sample_queue: collections.deque[TagData] = PrivateAttr(default_factory=collections.deque)
-    _last_t_updated: float|None = PrivateAttr(default = None)
 
-    def _should_update(self, t: float) -> bool:
+    def _should_update(self, t: TimeValue) -> bool:
         """
-        SensorBase specific logic to determine if a new measurement should be processed and returned
+        SampledDelayedSensor should update when a new sample, as determined by 
+        the configured sampling time and measurement deadtime, is available. 
         """
-        new_sample_available = True # default to do update if no last measurement
-        if self._last_value is not None:
-            if self._last_t_updated is None:
-                self._last_t_updated = t-self.sampling_period
-            expected_available_t = self._last_t_updated + self.sampling_period
-            new_sample_available = t >= expected_available_t
+        if t > self._t + self.sampling_period:
+            return True
+        return False
+
+    def _get_sample(self, target_t: TimeValue) -> tuple[TagData, bool]:
+        """Consume and return the latest sample with time ≤ target_t.
+        If none are available, set the successful flag to False
+        """
+        successful = True
+        # Fast-path: empty queue
+        if not self._sample_queue:
+            return self._tag_info.data, not successful
+
+        # Pop samples while they are valid
+        last_valid_sample = None
+        while self._sample_queue and self._sample_queue[0].time <= target_t:
+            last_valid_sample = self._sample_queue.popleft()
+
+        # If we found at least one valid sample, update and return it
+        if last_valid_sample is not None:
+            return last_valid_sample, successful
+
+        # Otherwise, no new sample is ready yet
+        return self._tag_info.data, not successful
+    
+    def _get_processed_value(self, raw_value: StateValue, t: TimeValue) -> tuple[StateValue, bool]:
+        """
+        Retrieves the time-delayed measurement value by looking it up in
+        the sample queue. 
+        1. Appends new sample to queue for future iterations.
+        2. Looks up the time-delayed sample and returns it. 
+        """
+        self._sample_queue.append(TagData(t, raw_value))
         
-        return new_sample_available
-
-    def _get_processed_value(self, raw_value: float | NDArray[np.float64], t: float) -> float | NDArray[np.float64]:
-        """
-        Takes the possibly faulty and noisy value and applies subclass-specific logic,
-        such as time delays, filtering, etc.
-        """
-        # process value and append to queue
-        measurement = TagData(t, raw_value)
-        self._sample_queue.append(measurement)
-
-        # determine the timestamp of the measurement to be returned
         target_t = t - self.deadtime
+        return_tagdata, successful = self._get_sample(target_t)
 
-        # Remove samples that are too old.
-        # when the oldest sample in queue has timestamp > target_t,
-        # then the last removed sample 
-        #   (which was the last available sample with timestamp <= target_t) 
-        #       is to be returned. 
-        # notice that this would return a value that is not yet supposed to
-        # be available if, to begin with, all samples in queue
-        # have timestamp > target_t. 
-        # this should be allowed when t <= 0 ONLY (if t < 1e-12)
-        # for initialization behavior
-        # anyways, is not implemented, so is a potential bug.  TODO: SEE BEFORE
-        
-        return_sample = self._sample_queue.popleft()
-        while len(self._sample_queue) > 1 and self._sample_queue[0].time <= target_t:
-            return_sample = self._sample_queue.popleft()
-        # reappend the sample just in case
-        self._sample_queue.appendleft(return_sample)
-
-        self._last_t_updated = t
-        return return_sample.value
+        return return_tagdata.value, successful
 
         

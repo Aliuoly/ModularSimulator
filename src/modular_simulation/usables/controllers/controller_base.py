@@ -1,60 +1,35 @@
 from __future__ import annotations # without this cant type hint the cascade controller properly
 from abc import ABC, abstractmethod
 import math
-from typing import Callable, TYPE_CHECKING, Optional
-from numpy.typing import NDArray
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Annotated
 import numpy as np
 from enum import IntEnum
-from pydantic import BaseModel, PrivateAttr, Field, ConfigDict, SerializeAsAny
+from astropy.units import Quantity
+from pydantic import BaseModel, PrivateAttr, Field, ConfigDict, SerializeAsAny, BeforeValidator, PlainSerializer
 from modular_simulation.usables.tag_info import TagData, TagInfo
 from modular_simulation.usables.controllers.trajectory import Trajectory
 from modular_simulation.validation.exceptions import ControllerConfigurationError
-from astropy.units import Quantity, UnitBase, UnitConversionError #type: ignore
+from modular_simulation.utils.typing import TimeValue, StateValue, PerTimeValue
+from modular_simulation.utils.wrappers import second, second_value
+from modular_simulation.measurables.process_model import ProcessModel
 if TYPE_CHECKING:
-    from modular_simulation.measurables import ControlElements
-    from modular_simulation.usables import UsableQuantities
+    from modular_simulation.framework import System
 import logging
 logger = logging.getLogger(__name__)
 
 def do_nothing_mv_setter(value):
     pass
 
-def make_mv_setter(control_elements: "ControlElements", tag: str, unit_converter:Callable[[float],float]):
-    
-    def mv_setter(value) -> None:
-        setattr(control_elements, tag, unit_converter(value))
-    return mv_setter
-
-def make_cv_getter(raw_tag_info: TagInfo, desired_tag_info: TagInfo):
-    if raw_tag_info.unit != desired_tag_info.unit:
-        if raw_tag_info.unit.is_equivalent(desired_tag_info.unit):
-            converter = raw_tag_info.unit.get_converter(desired_tag_info.unit)
-            def cv_getter() -> TagData:
-                return TagData(
-                    raw_tag_info.data.time, 
-                    converter(raw_tag_info.data.value),
-                    raw_tag_info.data.ok
-                )
-            return cv_getter
-        else:
-            raise ControllerConfigurationError(
-                f"Tried to convert tag '{raw_tag_info.tag}' from '{raw_tag_info.unit}' to '{desired_tag_info.unit}' and failed. "
-                "Make sure these units are compatible. "
-            )
-    else:
-        def cv_getter() -> TagData:
-            return raw_tag_info.data
-        return cv_getter
-
 def wrap_cv_getter_as_sp_getter(cv_getter):
     """
     Turns a cv_getter, which takes no arguments, 
         into a sp_getter, which takes t as argument
     """
-    def sp_getter(t: float):
+    def sp_getter(t: TimeValue):
         return cv_getter()
+    
     return sp_getter
-
 
 class ControllerMode(IntEnum):
     """
@@ -67,15 +42,66 @@ class ControllerMode(IntEnum):
     CASCADE = 2
 
 class ControllerBase(BaseModel, ABC):
-    """Shared infrastructure for feedback controllers operating on usable tags.
-
-    The base class translates between system measurements, setpoint
-    trajectories, cascade controllers, and manipulated variables.  Subclasses
-    provide the actual control law via :meth:`_control_algorithm`, while this
-    class handles unit conversion, MV range enforcement, first-order setpoint
-    ramping, historization, and automatic mode transitions between AUTO,
-    CASCADE, and TRACKING.
     """
+    Shared infrastructure for feedback controllers operating on usable tags.
+
+    This base class implements the common infrastructure underlying all feedback
+    controllers. It mediates between system measurements, setpoint trajectories,
+    cascade controller outputs, and process actuators. Subclasses define only the
+    core control law via :meth:`_control_algorithm`, while the base class manages
+    the rest — including unit conversion, manipulated variable (MV) range
+    enforcement, setpoint ramping, historization, and automatic mode transitions
+    between AUTO, CASCADE, and TRACKING.
+
+    Under the hood, the base class provides the following mechanisms:
+
+    **1. Measurement and Actuation Interface**
+
+    - **PV retrieval:** via linkage to bound sensors or calculation outputs.
+    - **SP retrieval:** via local :class:`Trajectory` or the output of a cascade controller.
+    - **MV actuation:** via a bound setter to the :class:`ProcessModel`'s controlled state.
+
+    If the controller's MV unit differs from the process model's internal state unit,
+    the setter automatically performs the necessary conversion.
+
+    **2. Model-Based Control Support - should be done in the controller subclass
+
+    The class should natively supports model-based controllers (e.g., IMC) by managing
+    the conversion between controller units and internal model units. This enables
+    operations such as:
+
+        controller_input (MV, controller units)
+            → model_input (model units)
+            → model prediction (PV, model units)
+            → converter
+            → PV (controller units)
+            → residual = SP - PV_prediction
+
+    When the final control output is computed, it is automatically converted and
+    written to the process model.
+
+    **3. Converter Infrastructure**
+
+    The following converters are automatically configured and applied as needed:
+
+    +---------------------------------------------+----------------------------------------------+
+    | Conversion Path                             | Purpose                                      |
+    +=============================================+==============================================+
+    | MV (measured unit) → MV (process model unit) | For writing the final control output to the  |
+    |                                             | process model.                               |
+    +---------------------------------------------+----------------------------------------------+
+    | MV (measured unit) → MV (model unit)         | For use in model-based control calculations. |
+    +---------------------------------------------+----------------------------------------------+
+    | PV (model unit) → PV (measured unit)         | For reconciling model predictions with the   |
+    |                                             | controller's observed process values.        |
+    +---------------------------------------------+----------------------------------------------+
+
+    In essence, the base class abstracts away all translation and coordination
+    between physical measurements, model-based predictions, and manipulated
+    variables, allowing controller subclasses to focus solely on implementing
+    their specific control law.
+    """
+
     mv_tag: str = Field(
         ..., 
         description="The tag of the ControlElement corresponding to the " \
@@ -88,7 +114,7 @@ class ControllerBase(BaseModel, ABC):
     sp_trajectory: Trajectory = Field(
         ..., 
         description="A Trajectory instance defining the setpoint (SP) over time.")
-    mv_range: tuple[float, float] = Field(
+    mv_range: tuple[StateValue, StateValue] = Field(
         ...,
         description = (
             "Lower and upper bound of the manipulated variable, in that order. "
@@ -97,12 +123,12 @@ class ControllerBase(BaseModel, ABC):
             "measured unit of mv_tag or making a conversion calculation separately."
         )
     )
-    ramp_rate: float | None = Field(
+    ramp_rate: Annotated[PerTimeValue, BeforeValidator(second), PlainSerializer(second_value),] | None = Field(
         default=None,
         description=(
-            "Optional rate limit for the controller setpoint in units per second. "
-            "When provided, the requested setpoint from the trajectory will be ramped "
-            "towards the target at no more than this rate during each update."
+            "Optional ramp rate limit for the controller setpoint. "
+            "Must be provided as a 'per time' unitized Quantity, where "
+            "the numerator of the Quantity is assumed to be the unit of the " 
         ),
     )
     cascade_controller: SerializeAsAny[ControllerBase | None] = Field(
@@ -122,82 +148,56 @@ class ControllerBase(BaseModel, ABC):
             "If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
         )
     )
+    period: Annotated[Quantity, BeforeValidator(second), PlainSerializer(second_value),] = Field(
+        default = Quantity(1e-12, "second"),
+        description = (
+            "minimum execution period of the controller. Controlelr will execute "
+            "as frequently as possible such that the time between execution is as "
+            "close to this value as possible. "
+        )
+    )
     _is_final_control_element: bool = PrivateAttr(default = True)
-    _sp_getter: Callable[[float], TagData] = PrivateAttr()
+    _sp_getter: Callable[[TimeValue], TagData] = PrivateAttr()
     _cv_getter: Callable[[], TagData] = PrivateAttr()
-    _mv_setter: Callable[[float|NDArray], None] = PrivateAttr()
+    _mv_setter: Callable[[StateValue], None] = PrivateAttr()
+    _initialized: bool = PrivateAttr(default = False)
+    _control_action: TagData = PrivateAttr()
     _sp_tag_info: TagInfo = PrivateAttr()
-    _last_output: TagData = PrivateAttr()
-    _u0: float | NDArray = PrivateAttr(default = 0.)
-    _sp_history: list[TagData] = PrivateAttr(default_factory = list)
-    _mv_system_unit: UnitBase = PrivateAttr()
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
-
-    def _make_sp_tag_info(self, tag_infos: list[TagInfo]):
-        """Construct SP tag metadata and convert MV limits into system units."""
-        for tag_info in tag_infos:
-            if tag_info.tag == self.cv_tag:
-                self._sp_tag_info = TagInfo(
-                    tag = f"{self.cv_tag}.sp", 
-                    unit = self.sp_trajectory.unit,
-                    description = f"setpoint for {self.cv_tag}"
+    
+    def _make_cv_getter(self, available_tag_info_dict: dict[str, TagInfo]) -> None:
+        cv_tag_info = available_tag_info_dict.get(self.cv_tag)
+        if cv_tag_info is None:
+            raise ControllerConfigurationError(
+                f"Could not find controlled variable '{self.cv_tag}' for '{self.cv_tag}' controller "
+                "in measurements nor calculation outputs. "
+            )
+        self._cv_getter = cv_tag_info.make_converted_data_getter(cv_tag_info.unit)
+        
+    def _make_mv_setter(
+        self,
+        process: ProcessModel,
+        available_tag_info_dict: dict[str, TagInfo],
+        is_final_control_element: bool
+        ) -> None:
+        mv_tag_info = available_tag_info_dict.get(self.mv_tag)
+        if mv_tag_info is None:
+            raise ControllerConfigurationError(
+                f"Could not find manipuated variable '{self.mv_tag}' for '{self.cv_tag}' controller "
+                "in measurements nor calculation outputs. "
+            )
+        if is_final_control_element:
+            # search for the raw tag in case the mv tag is an alias
+            control_element_name = mv_tag_info._raw_tag
+            mv_state_metadata = process.state_metadata_dict.get(control_element_name)
+            if mv_state_metadata is None:
+                raise ControllerConfigurationError(
+                    f"Could not find control element '{self.mv_tag}' for '{self.cv_tag}' controller in process model."
                 )
-            if tag_info.tag == self.mv_tag: 
-                self._mv_system_unit = tag_info.unit
-                
-        return self._sp_tag_info
-    
-    def _initialize_cv_getter(
-        self,
-        tag_infos: list[TagInfo]
-        ) -> None:
-        # validation already done during quantity initiation. No error checking here. 
-        for tag_info in tag_infos:
-            if tag_info.tag == self.cv_tag:
-                self._cv_getter = make_cv_getter(
-                    raw_tag_info = tag_info,
-                    desired_tag_info = self._sp_tag_info
-                    )
-                break
-    def _initialize_non_final_control_element_mv_setter(
-        self,
-        tag_infos : list[TagInfo]
-        ) -> None:
-        # validation already done during quantity initiation. No error checking here. 
-        for tag_info in tag_infos:
-            if tag_info.tag == self.mv_tag:
-                # set the '0 point' value with whatever the measurement is
-                self._u0 = tag_info.data.value
-                self._mv_setter = do_nothing_mv_setter
-                break
-        
-        self._last_output = TagData(time = 0, value = self._u0, ok = True)
-        
-    def _initialize_mv_setter(
-        self,
-        control_elements: "ControlElements",
-        tag_infos: list[TagInfo],
-        ) -> None:
-        # validation already done during quantity initiation. No error checking here. 
-
-        for control_element_name in control_elements.model_dump():
-            if control_element_name == self.mv_tag:
-                # set the '0 point' value with whatever the measurement is
-                
-                for tag_info in tag_infos:
-                    if tag_info.tag == self.mv_tag:
-                        unit_converter = tag_info.unit.get_converter(
-                            control_elements.tag_unit_info[tag_info.tag]
-                        )
-                        backwards_converter = control_elements.tag_unit_info[tag_info.tag].get_converter(
-                            tag_info.unit
-                        )
-                        self._u0 = backwards_converter(getattr(control_elements, control_element_name))
-                        self._mv_setter = make_mv_setter(control_elements, self.mv_tag, unit_converter)
-                        break
-                
-        self._last_output = TagData(time = 0, value = self._u0, ok = True)
-    
+            self._mv_setter = process.make_converted_setter(control_element_name, mv_tag_info.unit)
+        else:
+            self._mv_setter = do_nothing_mv_setter
+            
     def change_control_mode(self, mode: ControllerMode | str) -> None:
         """public facing method for changing controller mode"""
         self._change_control_mode(mode, initialization = False)
@@ -257,15 +257,11 @@ class ControllerBase(BaseModel, ABC):
             if self.cascade_controller is not None:
                 self.cascade_controller._change_control_mode(ControllerMode.TRACKING, initialization)
         
-        
-            
         # if no cascade controller, the setpoint of this controller
         # will be provided by the sp_trajectory
-    def _initialize(
+    def commission(
         self,
-        tag_infos: list[TagInfo], 
-        usable_quantities: "UsableQuantities", # kept for IMC intiialization. I hate it. 
-        control_elements: "ControlElements",
+        system: System,
         is_final_control_element: bool = True,
         ) -> None:
         """Wire the controller into orchestrated quantities and validate modes.
@@ -280,15 +276,11 @@ class ControllerBase(BaseModel, ABC):
         # changes mode back to the configured mode. 
         controller_mode = self.mode
         self.mode = ControllerMode.CASCADE
-        # A. check if is final control element and initialize mv setter if is
+        
         if not is_final_control_element:
             self._is_final_control_element = False
-            self._initialize_non_final_control_element_mv_setter(tag_infos)
-        else:
-            self._initialize_mv_setter(control_elements, tag_infos)
-        
-        # B. initialize cv_getter
-        self._initialize_cv_getter(tag_infos)
+        self._make_mv_setter(system.process_model, system.tag_info_dict, is_final_control_element)
+        self._make_cv_getter(system.tag_info_dict)
 
         # C. do control mode validation for initialization (i.e., change from cascade to appropriate one if CASCADE not applicable.)
         self._change_control_mode(self.mode, initialization=True)
@@ -301,18 +293,40 @@ class ControllerBase(BaseModel, ABC):
                 self.cascade_controller._change_control_mode(ControllerMode.TRACKING)
                 logger.debug(f"'{self.cv_tag}' controller not in CASCADE mode -> cascade controller forced to TRACKING. ")
             
-            self.cascade_controller._initialize(
-                tag_infos = tag_infos, 
-                usable_quantities = usable_quantities,
-                control_elements = control_elements, 
+            self.cascade_controller.commission(
+                system = system,
                 is_final_control_element=False,
                 )
         
         #revert back to configured mode
         self.change_control_mode(controller_mode)
-        
 
-    def update(self, t: float) -> TagData:
+        #now run post commission hook in case it is implemented
+        postfix = ".sp" if is_final_control_element else ".csp"
+        mv_type = "final control element" if is_final_control_element else "cascade controller"
+        self._sp_tag_info = TagInfo(
+            tag = f"{self.cv_tag}{postfix}", 
+            unit = system.tag_info_dict[self.cv_tag].unit,
+            description = f"setpoint for {self.cv_tag} ({mv_type})"
+        )
+        system.update_tag_info_dict(self._sp_tag_info.tag, self._sp_tag_info)
+
+        # make the control action default to starting state value
+        mv_tag_info = system.tag_info_dict[self.mv_tag]
+        mv_state_unit = system.process_model.state_metadata_dict[mv_tag_info._raw_tag].unit
+        self._control_action = TagData(
+            time = system.time,
+            value = mv_tag_info.make_converted_data_getter(mv_state_unit)(),
+            ok = True
+        )
+        
+        self._post_commission(system)
+        self._initialized = True
+        
+    def _post_commission(self, system: System):
+        pass
+
+    def update(self, t: TimeValue) -> TagData:
         """Run one control-cycle update and return the applied MV value.
 
         The routine pulls the latest controlled-variable reading, sources the
@@ -322,28 +336,22 @@ class ControllerBase(BaseModel, ABC):
         cascade chain.
         """
         # 0. check dt -> if 0, skip all and return _last_output
-        if t - self._last_output.time < 1e-12:
-            return self._last_output
+        if not self._initialized:
+            raise RuntimeError(f"{self.cv_tag} controller not commissioned.")
+        
+        last_control_action = self._control_action
+        if t - last_control_action.time < self.period:
+            return last_control_action
         # 1. get controlled variable (aka pv). Is always a Triplet
         cv = self._cv_getter()
-        # IF TRACKING - set sp = pv and return last control output exactly. 
-        # and append to history since that gets skipped. 
-        # also handle the case more cascade levels are present
-        # in which case, they all get skipped as well since the
-        # .update method never gets called (since it is used as the _sp_getter only when lower loop is CASCADE)
+        
         if self.mode == ControllerMode.TRACKING:
             self.sp_trajectory.set_now(t = t, value = cv.value)
-            self._sp_history.append(cv)
+            self._sp_tag_info.data = cv
             if self.cascade_controller is not None:
                 self.cascade_controller.update(t)
-            return self._last_output
-        
-        if cv is None:
-            raise RuntimeError(
-                f"ControllerBase '{self.cv_tag}' not initialized. "
-            )
-        # 2. get set point. If is a from a cascade controller, is a Triplet
-        #       if is not from a cascade controller, is a float or NDArray from sp_trajectory(t)
+            return last_control_action
+
         sp = self._sp_getter(t)
         
         if isinstance(sp, TagData):
@@ -351,44 +359,47 @@ class ControllerBase(BaseModel, ABC):
             # so we go ahead and update trajectory with cascade setpoint
             sp_val = sp.value
             proceed = sp.ok and cv.ok
-            self._sp_history.append(sp)
-            self.sp_trajectory.set_now(t = t, value = sp_val)
+            self._sp_tag_info.data = sp
+            self.sp_trajectory.set(t = t, value = sp_val)
         else:
             sp_val = sp
             proceed = cv.ok
             #setpoint from sp_trajectory quality is always good (user sets it)
-            self._sp_history.append(TagData(t, sp_val, True)) 
+            self._sp_tag_info.data = TagData(t, sp_val, True)
         
         # if setpoint or cv quality is bad, skip controller update and return last value
         if not proceed:
-            return self._last_output
+            last_control_action.ok = False
+            return last_control_action
 
         # compute control output
         control_output = self._control_algorithm(t = t, cv = cv.value, sp = sp_val)
         if np.isnan(control_output):
-            raise ValueError(
-                f"{self.cv_tag} controller output is NAN!"
+            logger.warning(
+                "'{cv}' controller returned an invalid value '{value}'. "
+                "Holding previous control action. "
             )
+            last_control_action.ok = False
+            return last_control_action
+        
         control_output = np.clip(control_output, *self.mv_range)
         ramp_output = self._apply_mv_ramp(
-            t0 = self._last_output.time, mv0 = self._last_output.value, mv_target = control_output, t_now = t
+            t0 = last_control_action.time, mv0 = last_control_action.value, mv_target = control_output, t_now = t
             )
         if self._is_final_control_element:
             self._mv_setter(ramp_output)
 
-        # do misc things like set _last_output, make sp track PV (if TRACKING mode), update sp_trajectory with cascade sp (if CASCADE mode)
-        self._last_output = TagData(time = t, value = ramp_output, ok = True) # TODO: figure out what to do with quality for MV - seems to always be OK.
+        self._control_action = TagData(time = t, value = ramp_output, ok = True) # TODO: figure out what to do with quality for MV - seems to always be OK.
 
-        return self._last_output
+        return self._control_action
 
     def _apply_mv_ramp(
             self,
-            t0: float,
-            mv0: float | NDArray,
-            mv_target: float | NDArray,
-            t_now: float
-            ) -> float | NDArray:
-        """Ramp-limit the manipulated variable according to ``ramp_rate``."""
+            t0: TimeValue,
+            mv0: StateValue,
+            mv_target: StateValue,
+            t_now: TimeValue
+            ) -> StateValue:
         if self.ramp_rate is None:
             return mv_target
 
@@ -406,19 +417,18 @@ class ControllerBase(BaseModel, ABC):
     @abstractmethod
     def _control_algorithm(
             self,
-            t: float,
-            cv: float | NDArray,
-            sp: float | NDArray,
-            ) -> float | NDArray:
+            t: TimeValue,
+            cv: StateValue,
+            sp: StateValue,
+            ) -> StateValue:
         """The actual control algorithm. To be implemented by subclasses."""
         pass
     
     @property
-    def sp_history(self) -> dict[str, list[TagData]]:
-        """Return a mapping of cascade level to historized setpoint samples."""
-        history: dict[str, list[TagData]] = {}
-        controller: ControllerBase|None = self
-        while controller is not None:
-            history[f"{controller.cv_tag}.sp"] = controller._sp_history
-            controller = controller.cascade_controller
-        return history
+    def sp_history(self) -> dict[str, TagData]:
+        return {self._sp_tag_info.tag: self._sp_tag_info.history}
+
+    @property
+    def t(self) -> TimeValue:
+        return self._control_action.time
+    

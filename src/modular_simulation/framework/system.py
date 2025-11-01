@@ -1,58 +1,37 @@
-from abc import ABC, abstractmethod
-from pydantic import BaseModel, Field, PrivateAttr, ConfigDict, model_validator
-from numpy.typing import NDArray, ArrayLike
-from typing import Any, TYPE_CHECKING
-from collections.abc import Mapping, Callable
+from abc import ABC
+from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
+from typing import Any
+from collections.abc import Callable
 from scipy.integrate import solve_ivp #type: ignore
 from functools import cached_property
-from operator import attrgetter
 from numba.typed.typeddict import Dict as NDict #type: ignore
 from numba import types, jit #type: ignore
 import warnings
-from astropy.units import Quantity #type: ignore
-from modular_simulation.usables import SensorBase, ControllerBase, CalculationBase
-from modular_simulation.usables.usable_quantities import UsableQuantities
-from modular_simulation.usables.controllers.controller_base import ControllerMode
-from modular_simulation.measurables.measurable_base import MeasurableBase
+from modular_simulation.usables import (
+    SensorBase, 
+    ControllerBase, 
+    CalculationBase, 
+    ControllerMode, 
+    Trajectory,
+    TagData,
+    
+)
+from modular_simulation.usables.tag_info import TagInfo
 from modular_simulation.measurables.process_model import ProcessModel
+from modular_simulation.utils.wrappers import second
+from modular_simulation.utils.typing import TimeValue, StateValue
 from modular_simulation.validation.exceptions import (
     SensorConfigurationError, 
     ControllerConfigurationError
 )
-from modular_simulation.utils.typing import StateValue
-if TYPE_CHECKING:
-    from modular_simulation.usables import TagData
-    from modular_simulation.usables import ControllerBase, Trajectory
 import logging
 from tqdm import tqdm #type: ignore
 logger = logging.getLogger(__name__)
 
-class System(BaseModel, ABC):
+class System(BaseModel):
     """
-    Abstract base class for a simulation system focused on readability and ease of use.
-
-    This class provides the core simulation loop and a clear contract for defining
-    the dynamics of a system. It is designed to handle systems of Differential-Algebraic
-    Equations (DAEs) by recalculating algebraic states statelessly within each
-    internal step of the ODE solver. This is NOT a robust/rigorous DAE system framework,
-    as fundamentally, a ODE solver is used. It should work well enough for most systems though. 
-
-    Subclasses must implement the `rhs` and `_calculate_algebraic_values` static methods,
-    which operate on standard Python dictionaries and Pydantic objects, making them
-    easy to write and debug.
-
-    Attributes:
-        measurable_quantities (MeasurableQuantities): A container for all state, control,
-            and algebraic variables that can be measured or recorded.
-        usable_quantities (UsableQuantities): Defines how sensors and calculations
-            are used to generate measurements from the system's state.
-        
-        solver_options (dict[str, Any]): A dictionary of options passed directly to
-            SciPy's `solve_ivp` function.
-        _t (float): The current simulation time.
-        _history (list[dict]): A log of the system's state at each time step.
     """
-    dt: Quantity = Field(
+    dt: TimeValue = Field(
         default = ...,
         description = (
             "How often the system's sensors, calculations, and controllers update. "
@@ -108,8 +87,9 @@ class System(BaseModel, ABC):
         )
     )
 
-    _history: dict[str, list[ArrayLike]] = PrivateAttr(default_factory = dict)
-    _t: float = PrivateAttr(default = 0.)
+    _history: dict[str, list[StateValue]] = PrivateAttr(default_factory = dict)
+    _dt_in_seconds: float = PrivateAttr()
+    _t_in_seconds: float = PrivateAttr() 
     _params: dict[str, Any] = PrivateAttr() # NDict for numba implementation, dict[str, slice] otherwise
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
@@ -117,7 +97,6 @@ class System(BaseModel, ABC):
     # add private attrs
     _history_slots: list[tuple[Callable[[Any], Any], list]] = PrivateAttr(default_factory=list)
 
-    @model_validator(mode = 'after')
     def _validate(self):
         exception_group = []
         exception_group.extend(self._validate_sensors_resolvable())
@@ -128,13 +107,6 @@ class System(BaseModel, ABC):
                 "errors encountered during usable quantity instantiation:", 
                 exception_group
                 )
-        for sensor in self.sensors:
-            sensor.link_to_process(self.process_model)
-        for controller in self.controllers:
-            controller.link_to_process(self.process_model)
-        for calculation in self.calculations:
-            calculation.link_to_process(self.process_model)
-        return self
     
     def _validate_sensors_resolvable(self):
         exception_group = []
@@ -174,9 +146,13 @@ class System(BaseModel, ABC):
             )
         return exception_group
     
-    def model_post_init(self, contex: Any) -> None:
+    def model_post_init(self, context: Any) -> None:
+        
+        self._validate()
+
         model = self.process_model
-        self._t = model.t
+        self._t_in_seconds = model.t
+        self._dt_in_seconds = self.dt.to_value("second")
 
         if self.use_numba:
             self._construct_fast_params()
@@ -206,6 +182,14 @@ class System(BaseModel, ABC):
             algebraic_size = self._params["algebraic_size"]
         )
         model.algebraic_view.update_from_array(initial_algebraic_array)
+
+        
+        for sensor in self.sensors:
+            sensor.commission(self.time, model)
+        for controller in self.controllers:
+            controller.commission(self)
+        for calculation in self.calculations:
+            calculation.wire_inputs(self.time, self.tag_info_dict)
 
     def _construct_fast_params(self) -> None:
         """
@@ -265,7 +249,7 @@ class System(BaseModel, ABC):
         # simple tight loop: call getter, append to pre-bound list
         for getter, lst in self._history_slots:
             lst.append(getter()) #type:ignore[call-arg]
-        self._history['time'].append(self._t)
+        self._history['time'].append(self._t_in_seconds)
 
     def _update_components(self) -> None:
         """
@@ -275,14 +259,15 @@ class System(BaseModel, ABC):
         sets the new values for the control elements, and returns the initial state
         array for the solver.
         """
+        t = self.time
         for s in self.sensors:
-            s.measure(self._t) 
+            s.measure(t) 
         for c in self.calculations:
-            c.calculate(self._t)
+            c.calculate(t)
         for c in self.controllers:
-            c.update(self._t)
+            c.update(t)
     
-    def step(self, duration: Quantity|None = None) -> None:
+    def step(self, duration: TimeValue|None = None) -> None:
         """
         The main public method to advance the simulation by one time step.
 
@@ -323,9 +308,10 @@ class System(BaseModel, ABC):
         differential_view = self.process_model.differential_view
         y = differential_view.to_array()
         u = self.process_model.controlled_view.to_array()
+        end_t = self._t_in_seconds + self._dt_in_seconds
         result = solve_ivp(
             fun = self.process_model._rhs_wrapper,
-            t_span = (self._t, self._t + self.dt.value),
+            t_span = (self._t_in_seconds, end_t),
             y0 = y,
             args = (u, k, y_map, u_map, k_map, algebraic_map, algebraic_values_function, rhs_function, algebraic_size),
             **self.solver_options
@@ -338,8 +324,8 @@ class System(BaseModel, ABC):
             final_y, u, k, y_map, u_map, k_map, algebraic_map, algebraic_size
         )
         self.process_model.algebraic_view.update_from_array(final_algebraic_values)
-        
-        self._t += self.dt.value
+        self.process_model.t = end_t
+        self._t_in_seconds = end_t
         self._update_history()
     
     def extend_controller_trajectory(self, cv_tag: str, value: float | None = None) -> "Trajectory":
@@ -365,14 +351,14 @@ class System(BaseModel, ABC):
             )
         active_trajectory = controller.sp_trajectory
         if value is None:
-            value = active_trajectory(self._t)
+            value = active_trajectory(self._t_in_seconds)
 
-        old_value = active_trajectory(self._t)
-        active_trajectory.set_now(self._t, value)
-        new_value = active_trajectory(self._t)
+        old_value = active_trajectory(self._t_in_seconds)
+        active_trajectory.set(t = self._t_in_seconds, value = value)
+        new_value = active_trajectory(self._t_in_seconds)
         logger.info("Setpoint trajectory for '%(tag)s' controller changed at time %(time)0.0f " \
                         "from %(old)0.1e to %(new)0.1e",
-                        {'tag': cv_tag, 'time': self._t, 'old': old_value, 'new': new_value})
+                        {'tag': cv_tag, 'time': self._t_in_seconds, 'old': old_value, 'new': new_value})
         return active_trajectory
 
     def set_controller_mode(self, cv_tag: str, mode: ControllerMode | str) -> ControllerMode:
@@ -387,7 +373,26 @@ class System(BaseModel, ABC):
         return controller.mode
     
     @cached_property
-    def controller_dictionary(self) -> dict[str, "ControllerBase"]:
+    def tag_info_dict(self) -> dict[str, TagInfo]:
+        """
+        does not include the controller sp tags due to order of definition.
+        controller sp tag info is created AFTER this property is accessed. 
+        Instead, controllers will call the update_tag_info_dict once
+        they are ready with their sp tag info.
+        """
+        info_dict = {}
+        for s in self.sensors:
+            info_dict[s.alias_tag] = s._tag_info
+        for c in self.calculations:
+            info_dict.update(c._output_tag_info_dict)
+        return info_dict
+    
+    def update_tag_info_dict(self, tag: str, tag_info: TagInfo) -> None:
+        """updates the tag_info_dict after it has been constructed"""
+        self.tag_info_dict[tag] =  tag_info
+
+    @cached_property
+    def controller_dictionary(self) -> dict[str, ControllerBase]:
         return_dict = {}
         for controller in self.controllers:
             return_dict.update({controller.cv_tag : controller})
@@ -401,9 +406,9 @@ class System(BaseModel, ABC):
         return list(self.controller_dictionary.keys())
     
     @property
-    def time(self) -> float:
+    def time(self) -> TimeValue:
         """Return the current simulation time."""
-        return self._t
+        return second(self._t_in_seconds)
 
     @property
     def measured_history(self) -> dict[str, Any]:

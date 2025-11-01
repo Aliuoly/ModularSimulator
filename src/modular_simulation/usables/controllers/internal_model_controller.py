@@ -1,13 +1,16 @@
-from typing import Callable, Any, Protocol, Annotated
-from numpy.typing import NDArray
-from pydantic import Field, PrivateAttr, BaseModel, BeforeValidator
-from astropy.units import Quantity #type: ignore
+from __future__ import annotations
+from collections.abc import Callable
+from typing import Any, Annotated, TYPE_CHECKING
+from pydantic import Field, PrivateAttr, BaseModel, BeforeValidator, PlainSerializer
 from modular_simulation.usables.controllers.controller_base import ControllerBase
-from modular_simulation.usables import CalculationBase
-from modular_simulation.usables.tag_info import TagInfo
+from modular_simulation.usables.calculations.calculation_base import CalculationBase
 from modular_simulation.validation.exceptions import ControllerConfigurationError
+from modular_simulation.utils.typing import TimeValue, StateValue
+from modular_simulation.utils.wrappers import second, second_value
+from modular_simulation.utils.bounded_minimize import bounded_minimize
 import logging
-from modular_simulation.utils import bounded_minimize
+if TYPE_CHECKING:
+    from modular_simulation.framework.system import System
 logger = logging.getLogger(__name__)
 
 def convert_calculation_to_str(calculation_name: type[CalculationBase] | str) -> str:
@@ -27,11 +30,6 @@ class CalculationModelPath(BaseModel):
     calculation_name: Annotated[str, BeforeValidator(convert_calculation_to_str)]
     method_name: str
 
-class IMCModel(Protocol):
-    """Protocol describing call signature for IMC internal models."""
-    def __call__(self, input: Quantity) -> float | NDArray:
-        ...
-
 class InternalModelController(ControllerBase):
     """Internal Model Control (IMC) implementation for SISO loops.
 
@@ -50,58 +48,55 @@ class InternalModelController(ControllerBase):
             "and returns the predicted controlled variable's value. "
         )
     )
-    sp_filter_factor: float = Field(
+    sp_filter_tc: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
         default = 1.0,
         gt = 0.0,
         le = 1.0,
-        description = "first order filter factor on setpoint changes. "
+        description = "first order filter time constant on the setpoint. "
     )
     solver_options: dict[str, Any] = Field(
         default = {"tol": 1e-3, "max_iter": 25},
         description="optional arguments for the minimize_scalar solver from scipy."
     )
 
-    _filtered_sp: float|None = PrivateAttr(default = None)
-    _mv_range_in_model_units: tuple[float, float] = PrivateAttr()
-    _mv_converter_from_model_units_to_system_units: Callable = PrivateAttr()
+    _filtered_sp: StateValue = PrivateAttr()
+    _mv_range_in_model_units: tuple[StateValue, StateValue] = PrivateAttr()
+    _mv_converter_from_model_unit_to_controller_unit: Callable[[StateValue], StateValue] = PrivateAttr()
 
-    def _initialize(
-            self, 
-            tag_infos: list[TagInfo],
-            usable_quantities, # kept for IMC intiialization. I hate it. 
-            control_elements, 
-            is_final_control_element = True):
-        """override the controller _initialize method to do some additional work in setting model"""
-        # first do the normal initialize though
-        super()._initialize(tag_infos, usable_quantities, control_elements, is_final_control_element)
-        # and now set the model
-        # look through the available calculations and grab the right one
-        # also grab the unit info so we can pass in the model input
-        # with the units the calculation expects. 
-        for calculation in usable_quantities.calculations:
-            if calculation.calculation_name == self.model.calculation_name:
-                self._internal_model = getattr(calculation, self.model.method_name)
-                self._mv_converter_from_model_units_to_system_units = \
-                    calculation._input_tag_info_dict[self.mv_tag].unit.get_converter(
-                        self._mv_system_unit
-                    )
-                self._mv_range_in_model_units = (
-                    self._mv_converter_from_model_units_to_system_units(self.mv_range[0]),
-                    self._mv_converter_from_model_units_to_system_units(self.mv_range[1])
-                )
-                return 
-        # if we didn't return, raise error
-        raise ControllerConfigurationError(
-            f"Could not find the model for '{self.cv_tag}' controller. "
+    def _post_commission(self, system: System):
+        self._filtered_sp = self._sp_tag_info.data.value
+        mv_controller_unit = system.tag_info_dict[self.mv_tag].unit
+        found_calculation = [
+            c for c in system.calculations
+            if c.name == self.model.calculation_name 
+            ]
+        if len(found_calculation) > 1:
+            raise ControllerConfigurationError(
+                f"'{self.cv_tag}' controller's internal model could not be resolved. "
+                "Multiple calculations have names matching the specified model name. "
+                "Make sure the calculation names are unique. "
+            )
+        elif len(found_calculation) == 0:
+            raise ControllerConfigurationError(
+                f"'{self.cv_tag}' controller's internal model could not be resolved. "
+                "No calculation have name matching the specified model name. "
+            )
+        calculation = found_calculation[0]
+        self._internal_model = getattr(calculation, self.model.method_name)
+        self._mv_converter_from_model_unit_to_controller_unit = \
+            calculation._tag_metadata_dict[self.mv_tag].unit.get_converter(
+                mv_controller_unit
+            )
+        self._mv_range_in_model_units = (
+            self._mv_converter_from_model_unit_to_controller_unit(self.mv_range[0]),
+            self._mv_converter_from_model_unit_to_controller_unit(self.mv_range[1])
         )
 
-
-    # ------------------------------------------------------------------------
     def _control_algorithm(self,
-        t: float,
-        cv: float,
-        sp: float,
-        ) -> float:
+        t: TimeValue,
+        cv: StateValue,
+        sp: StateValue,
+        ) -> StateValue:
         """Solve for the MV that minimizes the squared prediction error.
 
         The requested setpoint is optionally low-pass filtered, then SciPy's
@@ -110,11 +105,9 @@ class InternalModelController(ControllerBase):
         residual ``(model(u) - sp)**2`` and the final MV is converted back to
         system units before being returned.
         """
-
-        if self._filtered_sp is None:
-            sp_effective = sp
-        else:
-            sp_effective = self.sp_filter_factor * sp + (1 - self.sp_filter_factor) * self._filtered_sp
+        dt = t - self.t
+        ff = dt / (dt + self.sp_filter_tc)
+        sp_effective = ff * sp + (1 - ff) * self._filtered_sp
         self._filtered_sp = sp_effective
 
         # --- 2  build the residual function f(u) = model(u) - y_set ----------
@@ -128,4 +121,4 @@ class InternalModelController(ControllerBase):
             "%-12.12s IMC | t=%8.1f cv=%8.2f sp=%8.2f out=%8.2f, cv_pred_at_out=%8.2f, offset=%8.2f",
             self.cv_tag, t, cv, sp, output, internal_model(output), offset
         )
-        return self._mv_converter_from_model_units_to_system_units(output)
+        return self._mv_converter_from_model_unit_to_controller_unit(output)

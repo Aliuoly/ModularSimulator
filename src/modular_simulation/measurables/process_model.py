@@ -1,9 +1,9 @@
 from __future__ import annotations
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-from pydantic.dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, PlainSerializer, BeforeValidator
+from dataclasses import field, dataclass
 import numpy as np
 from numpy.typing import NDArray
-from typing import Annotated, TypeAlias
+from typing import Annotated
 from functools import cached_property
 from astropy.units import UnitBase, Unit
 from collections.abc import Callable
@@ -11,8 +11,7 @@ from abc import ABC, abstractmethod
 from enum import IntEnum
 from modular_simulation.validation.exceptions import MeasurableConfigurationError
 from modular_simulation.utils import extract_unique_metadata
-from modular_simulation.utils.typing import StateValue, SerializableUnit
-from astropy.units.typing import UnitLike
+from modular_simulation.utils.typing import StateValue, ArrayIndex
 
 class StateType(IntEnum):
     DIFFERENTIAL = 0
@@ -20,8 +19,7 @@ class StateType(IntEnum):
     CONTROLLED   = 2
     CONSTANT     = 3
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra='forbid'))
-class StateInfo:
+class StateMetadata(BaseModel):
     """
     Represents information about a model state, including its type, unit, and description
 
@@ -34,24 +32,29 @@ class StateInfo:
     :vartype description: str = ""
     """
     type: StateType
-    unit: SerializableUnit = ""
+    unit: Annotated[
+        UnitBase,
+        BeforeValidator(lambda u: u if isinstance(u, UnitBase) else Unit(u)),
+        PlainSerializer(lambda u: str(u)),
+    ] = ""
     description: str = ""
+    model_config = ConfigDict(extra='allow',arbitrary_types_allowed=True)
 
-ArrayIndex: TypeAlias = int|slice
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra='forbid'))
+
+@dataclass
 class CategorizedStateView:
     model: ProcessModel
     state_type: StateType
     
-    _index_map: dict[str, ArrayIndex] = PrivateAttr()
+    _index_map: dict[str, ArrayIndex] = field(default_factory=dict, init=False)
 
-    def model_post_init(self, context) -> None:
+    def __post_init__(self) -> None:
         start = 0
         self._index_map: dict[str, ArrayIndex] = {}
-        for name, info in self.model.state_info_dict.items():
+        for name, info in self.model.state_metadata_dict.items():
             if info.type != self.state_type:
                 continue
-            value = getattr(self, name)
+            value = getattr(self.model, name)
             if np.ndim(value) == 0:  # scalar
                 self._index_map[name] = start
                 start += 1
@@ -92,11 +95,11 @@ class CategorizedStateView:
     @cached_property
     def array_size(self) -> int:
         max_index = 0
-        for item in self._index_map.items():
+        for item in self._index_map.values():
             if isinstance(item, int):
-                max_index = max(max_index, item)
+                max_index = max(max_index, item+1)
             elif isinstance(item, slice):
-                max_index = max(max_index, item.stop)
+                max_index = max(max_index, item.stop+1)
         return max_index
         
 
@@ -107,17 +110,18 @@ class ProcessModel(BaseModel, ABC):
     """
     t: Annotated[float, Unit("second")] = Field(
         default = 0.0, 
-        description = "Current 'ground truth' time of the dynamic system"
+        description = "Current 'ground truth' time of the dynamic system. ALWAYS in units of seconds. "
     )
 
-    _state_info_dict: dict[str, StateInfo]
+    _state_metadata_dict: dict[str, StateMetadata] = PrivateAttr()
     model_config = ConfigDict(extra = 'forbid')
     
     def model_post_init(self, context):
-        """Validate that each field is annotated with exactly one StateInfo."""
-        self._state_info_dict = {
-            name: extract_unique_metadata(field, StateInfo, name, MeasurableConfigurationError)
+        """Validate that each field is annotated with exactly one StateMetadata."""
+        self._state_metadata_dict = {
+            name: extract_unique_metadata(field, StateMetadata, name, MeasurableConfigurationError)
             for name, field in self.__class__.model_fields.items()
+            if name != "t"
         }
     
     #------ public abstract methods ------
@@ -225,11 +229,11 @@ class ProcessModel(BaseModel, ABC):
             )
     
     #------ public methods ------
-    def categorized_state_info_dict(self, type: StateType):
-        return {name: info for name, info in self.state_info_dict.items() if info.type == type}
+    def categorized_state_metadata_dict(self, type: StateType):
+        return {name: info for name, info in self.state_metadata_dict.items() if info.type == type}
     
     def make_converted_getter(self, field_name: str, target_unit: UnitBase|str|None = None) -> Callable[[], StateValue]:
-        current_unit = self.state_info_dict[field_name].unit
+        current_unit = self.state_metadata_dict[field_name].unit
 
         if target_unit is None:
             target_unit = current_unit
@@ -247,7 +251,7 @@ class ProcessModel(BaseModel, ABC):
         return converted_getter
 
     def make_converted_setter(self, field_name: str, source_unit: UnitBase) -> Callable[[float], None]:
-        current_unit = self.state_info_dict[field_name].unit
+        current_unit = self.state_metadata_dict[field_name].unit
 
         if source_unit is None:
             source_unit = current_unit
@@ -283,12 +287,12 @@ class ProcessModel(BaseModel, ABC):
         return CategorizedStateView(self, StateType.CONSTANT)
 
     @cached_property
-    def state_info_dict(self) -> dict[str, StateInfo]:
+    def state_metadata_dict(self) -> dict[str, StateMetadata]:
         """dictionary of info for all available states"""
-        return self._state_info_dict
+        return self._state_metadata_dict
     
     @cached_property
     def state_list(self) -> list[str]:
         """list of measurable states' names ('tag list')"""
-        return list(self.state_info_dict.keys())
+        return list(self.state_metadata_dict.keys())
     

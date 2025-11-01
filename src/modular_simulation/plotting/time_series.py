@@ -35,7 +35,7 @@ def triplets_to_arrays(samples: Sequence[TagData]) -> tuple[np.ndarray, np.ndarr
     ok = np.empty(len(samples), dtype=bool)
 
     for idx, sample in enumerate(samples):
-        times[idx] = float(sample.time)
+        times[idx] = float(sample.time.value)
         values[idx] = _coerce_scalar(sample.value)
         ok[idx] = bool(sample.ok)
     return times, values, ok

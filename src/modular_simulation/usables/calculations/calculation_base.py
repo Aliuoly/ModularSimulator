@@ -1,51 +1,47 @@
 from abc import ABC, abstractmethod
-from typing import Any, Annotated, TypeAlias
+from typing import Annotated, TypeAlias
 from numpy.typing import NDArray
-from dataclasses import asdict
 from collections.abc import Callable
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
-from modular_simulation.validation.exceptions import CalculationDefinitionError
-from modular_simulation.usables.tag_info import TagInfo, TagData
-from astropy.units import UnitBase #type: ignore
 from enum import IntEnum
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, PlainSerializer, BeforeValidator
+from astropy.units import UnitBase, Unit
+from modular_simulation.validation.exceptions import CalculationDefinitionError, CalculationConfigurationError
+from modular_simulation.usables.tag_info import TagInfo, TagData
+from modular_simulation.utils.typing import StateValue, TimeValue
+from modular_simulation.utils import extract_unique_metadata
 
-def ensure_list(value: Any) -> Any:  
-    if not isinstance(value, list):  
-        return [value]
-    else:
-        return value
-
-
-def make_converted_input_getter(raw_tag_info: TagInfo, desired_tag_info: TagInfo):
-    if raw_tag_info.unit.is_equivalent(desired_tag_info.unit):
-        converter = raw_tag_info.unit.get_converter(desired_tag_info.unit)
-
-        def input_getter() -> TagData:
-            return TagData(
-                raw_tag_info.data.time,
-                converter(raw_tag_info.data.value),
-                raw_tag_info.data.ok,
-            )
-
-        return input_getter
-    raise CalculationDefinitionError(
-        f"Tried to convert tag '{raw_tag_info.tag}' from '{raw_tag_info.unit}' to '{desired_tag_info.unit}' and failed. "
-        "Make sure these units are compatible. "
-    )
     
 class TagType(IntEnum):
     INPUT = 1
     OUTPUT = 2
     CONSTANT = 3
 
-class TagMetadata:
-    def __init__(self, type: TagType, unit: UnitBase, description: str | None = None):
-        self.unit = unit
-        self.description = description
-        self.type = type
+
+
+class TagMetadata(BaseModel):
+    """
+    Represents information about a model state, including its type, unit, and description
+
+    :var type: The type of the tag (e.g., input, output, constant)
+    :vartype type: TagType
+    :var unit: The unit associated with the tag's value. Defaults to unitless ("").
+    :vartype unit: SerializableUnit
+    :var description: A brief description of the tag. Use this rather than inline comment where applicable.
+                        Defaults to empty string ("").
+    :vartype description: str = ""
+    """
+    type: TagType
+    unit: Annotated[
+        UnitBase,
+        BeforeValidator(lambda u: u if isinstance(u, UnitBase) else Unit(u)),
+        PlainSerializer(lambda u: str(u)),
+    ] = ""
+    description: str = ""
+    model_config = ConfigDict(extra='allow',arbitrary_types_allowed=True)
+
 
 TagAnnotation: TypeAlias = Annotated[str, TagMetadata]
-ConstantAnnotation: TypeAlias = Annotated[float | NDArray, TagMetadata]
+ConstantAnnotation: TypeAlias = Annotated[StateValue, TagMetadata]
 
 # Default tag aliases used throughout the examples.  Users can always opt to
 # specify their own :class:`Annotated` types with custom units and descriptions
@@ -63,61 +59,37 @@ class CalculationBase(BaseModel, ABC):
         default = None,
         description = "Name of the calculation - optional."
     )
-    _last_results: dict[str, TagData] = PrivateAttr(default_factory = dict)
-    _input_data_getters: dict[str, Callable[[], TagData]] = PrivateAttr(default_factory=dict)
-    _last_input_data_dict: dict[str, TagData] = PrivateAttr(default_factory=dict)
-    _last_input_value_dict: dict[str, float | NDArray] = PrivateAttr(default_factory=dict)
-    _output_tag_info_dict: dict[str, TagInfo] = PrivateAttr(default_factory=dict)
-    _input_tag_info_dict: dict[str, TagInfo] = PrivateAttr(default_factory=dict)
+
+    #-----construction time defined-----
+    _tag_metadata_dict: dict[str, TagMetadata] = PrivateAttr()
+    _output_tag_info_dict: dict[str, TagInfo] = PrivateAttr()
+
+    #-----initialization (wiring) time defined-----
+    _t: TimeValue = PrivateAttr() 
+    _input_data_getters: dict[str, Callable[[], TagData]] = PrivateAttr()
+    _input_data_dict: dict[str, TagData] = PrivateAttr()
+    _input_value_dict: dict[str, StateValue] = PrivateAttr()
     _initialized: bool = PrivateAttr(default = False)
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    @model_validator(mode = 'after')
-    def _categorize_fields(self):
-        for field_name, field_info in self.__class__.model_fields.items():
-            if field_name == 'name':
-                continue
-            try:
-                metadata = field_info.metadata[0]
-            except Exception as ex:
-                raise CalculationDefinitionError(
-                    f"Field '{field_name}' in calculation '{self.__class__.__name__}' is not properly annotated. "
-                    "Be sure to use the 'Annotated' type hint with 'TagMetadata' as the metadata. "
-                ) from ex
-            
-            if isinstance(metadata, TagMetadata):
-                tag_info = TagInfo(
-                    tag = getattr(self, field_name),
-                    unit = metadata.unit,
-                    description = metadata.description
-                )
-                if metadata.type == TagType.OUTPUT:
-                    self._output_tag_info_dict[tag_info.tag] = tag_info
-                elif metadata.type == TagType.INPUT:
-                    self._input_tag_info_dict[tag_info.tag] = tag_info
-                elif metadata.type == TagType.CONSTANT:
-                    pass # constants don't need to be stored in a special way
-                else:
-                    raise CalculationDefinitionError(
-                        f"Field '{field_name}' in calculation '{self.__class__.__name__}' has an invalid TagType."
-                    )
-            else:
-                raise CalculationDefinitionError(
-                    f"Field '{field_name}' in calculation '{self.__class__.__name__}' is missing TagMetadata annotation."
-                )
-        return self
-    
-    @property
-    def calculation_name(self):
+    def model_post_init(self, context):
         if self.name is None:
-            return self.__class__.__name__
-        return self.name
+            self.name = self.__class__.__name__
+
+        self._tag_metadata_dict = {
+            field_name: extract_unique_metadata(field, TagInfo, field_name, CalculationDefinitionError)
+            for field_name, field in self.__class__.model_fields.items() 
+            if field_name != "name"
+        }
+        self._output_tag_info_dict = {
+            tag: TagInfo(tag = tag, unit = metadata.unit, description = metadata.description)
+            for tag, metadata in self._tag_metadata_dict.items()
+            if metadata.type == TagType.OUTPUT
+        }
+
     
-    def _initialize(
-            self,
-            tag_infos: list[TagInfo],
-            ) -> None:
+    def wire_inputs(self, t: TimeValue, available_tag_info_dict: dict[str, TagInfo]) -> None:
         """
         Links calculation inputs to tag info instances
         and creates a simple callable for it.
@@ -125,27 +97,36 @@ class CalculationBase(BaseModel, ABC):
         so they are not NANs.
         Validation is already done so no error handling is placed here. 
         """
-        for input_tag, input_tag_info in self._input_tag_info_dict.items():
-            for tag_info in tag_infos:
-                if tag_info.tag == input_tag: 
-                    self._input_data_getters[input_tag] = make_converted_input_getter(
-                        raw_tag_info = tag_info, 
-                        desired_tag_info = input_tag_info
-                    )
-                    break
+        input_tag_metadata_dict = {
+            tag: metadata for tag, metadata in self._tag_metadata_dict.items()
+            if metadata.type == TagType.INPUT
+        }
+        for input_field, input_tag_metadata in input_tag_metadata_dict.items():
+            input_tag = getattr(self, input_field)
+            found_tag_info = available_tag_info_dict.get(input_tag)
+            if found_tag_info is None:
+                raise CalculationConfigurationError(
+                    f"'{self.name}' calculation's input field {input_field} = '{input_tag}' "
+                    "was not found amongst the available tags. Double check the tag spelling "
+                    "and that it corresponds to either a sensor measurement or a calculation output."
+                )
+            self._input_data_getters[input_tag] = found_tag_info.make_converted_data_getter(
+                target_unit = input_tag_metadata.unit
+            )
+        self._t = t
         self._initialized = True
-        self.calculate(t = 0)
+        self.calculate(t = t)
         
     def _update_input_triplets(self) -> None:
-        tag_data_dict = self._last_input_data_dict
+        tag_data_dict = self._input_data_dict
         for tag_name, tag_data_getter in self._input_data_getters.items():
             tag_data_dict[tag_name] = tag_data_getter()
 
     def _update_input_values(self) -> dict[str, float | NDArray]:
-        value_dict = self._last_input_value_dict
-        for tag_name, tag_data in self._last_input_data_dict.items():
+        value_dict = self._input_value_dict
+        for tag_name, tag_data in self._input_data_dict.items():
             value_dict[tag_name] = tag_data.value
-        return self._last_input_value_dict
+        return self._input_value_dict
 
     @property
     def ok(self) -> bool:
@@ -153,18 +134,14 @@ class CalculationBase(BaseModel, ABC):
         whether or not the calculation quality is ok. If any of the inputs are not ok,  
             the calculationis also not ok.
         """
-        possible_faulty_inputs_oks = [input_value.ok for input_value in self._last_input_data_dict.values()]
+        possible_faulty_inputs_oks = [input_value.ok for input_value in self._input_data_dict.values()]
         return any(possible_faulty_inputs_oks) if possible_faulty_inputs_oks else True
 
     @abstractmethod
-    def _calculation_algorithm(
-        self, 
-        t: float, 
-        inputs_dict: dict[str, float | NDArray]
-        ) -> dict[str, float | NDArray]:
+    def _calculation_algorithm(self, t: TimeValue, inputs_dict: dict[str, StateValue]) -> dict[str, StateValue]:
         pass    
 
-    def calculate(self, t: float) -> TagData:
+    def calculate(self, t: TimeValue) -> TagData:
         """public facing method to get the calculation result"""
         if not self._initialized:
             raise RuntimeError(
@@ -175,9 +152,13 @@ class CalculationBase(BaseModel, ABC):
         self._update_input_values()
         outputs_dict = self._calculation_algorithm(
             t=t,
-            inputs_dict=self._last_input_value_dict,
+            inputs_dict=self._input_value_dict,
         )
         
         for output_tag, output_value in outputs_dict.items():
             tag_data = TagData(time = t, value = output_value, ok = self.ok)
             self._output_tag_info_dict[output_tag].data = tag_data
+
+    @property
+    def outputs(self) -> dict[str, TagData]:
+        return {tag: data for tag, data in self._output_tag_info_dict.items()}

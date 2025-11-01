@@ -1,15 +1,16 @@
-from numpy.typing import NDArray
 import numpy as np
 from abc import ABC, abstractmethod
 from pydantic import (
     BaseModel, ConfigDict,
     Field, PrivateAttr, 
+    PlainSerializer, BeforeValidator
 )
-from typing import Any
+from astropy.units import Unit, UnitBase
+from typing import Any, Annotated
 from collections.abc import Callable
 from modular_simulation.usables.tag_info import TagData, TagInfo
 from modular_simulation.measurables.process_model import ProcessModel
-from modular_simulation.utils.typing import StateValue, SerializableUnit
+from modular_simulation.utils.typing import StateValue, TimeValue
 from modular_simulation.validation.exceptions import SensorConfigurationError
 
 
@@ -39,7 +40,11 @@ class SensorBase(BaseModel, ABC):
             "then, a usable with tag 'lab_MI' will be available, while 'cumm_MI' would not be available."
         )
     )
-    unit: SerializableUnit = Field(
+    unit: Annotated[
+        UnitBase,
+        BeforeValidator(lambda u: u if isinstance(u, UnitBase) else Unit(u)),
+        PlainSerializer(lambda u: str(u)),
+    ] = Field(
         description = "Unit of the measured quantity. Will be parsed with Astropy if is a string. "
     )
     description: str = Field(
@@ -92,19 +97,25 @@ class SensorBase(BaseModel, ABC):
 
     #----commission time initialized----
     _measurement_getter: Callable[[], StateValue] = PrivateAttr()
-    _measurement: StateValue = PrivateAttr() # all internal calculation that requires the previous measurement should use this
-    _time: float = PrivateAttr()             # all internal calculation that requires the previous timestamp should use this
+    # all internal calculation that requires the previous measurement and timestamp should use these
+    # these may or may not be equivalent to _tag_info.data.value and .t
+    _measurement: StateValue = PrivateAttr() 
+    _t: TimeValue = PrivateAttr()                # all internal calculation that requires the previous timestamp should use this
     _initialized: bool = PrivateAttr(default = False)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
     def model_post_init(self, context: Any) -> None:
         self._rng = np.random.default_rng(self.random_seed)
-        self._tag_info = TagInfo(tag = self.alias_tag, unit = self.unit, description = self.description)
+        self._tag_info = TagInfo(
+            tag = self.alias_tag, 
+            unit = self.unit, 
+            description = self.description,
+            _raw_tag = self.measurement_tag)
         if self.alias_tag is None: 
             self.alias_tag = self.measurement_tag
 
-    def commission(self, process: ProcessModel) -> None:
+    def commission(self, t: TimeValue, process: ProcessModel) -> None:
         """
         Commission the sensor for the process (lol)
         Resolve the measurement source and prime the sensor state.
@@ -113,7 +124,7 @@ class SensorBase(BaseModel, ABC):
         will check for "if self.something is None"
         """
         desired_state = self.measurement_tag
-        state_info = process.state_info_dict.get(desired_state)
+        state_info = process.state_metadata_dict.get(desired_state)
         if state_info is None:
             raise SensorConfigurationError(
                 f"'{desired_state}' sensor's desired measurement doesn't exist in the process model."
@@ -125,12 +136,12 @@ class SensorBase(BaseModel, ABC):
             )
 
         self._measurement_getter = process.make_converted_getter(desired_state, self.unit)
-        self._t = process.t
+        self._t = t
         self._measurement = self._measurement_getter()
         self._initialized = True
         self.measure(t = self._t, force=True) # flush the update logic
     
-    def measure(self, t: float, *, force: bool = False) -> TagData:
+    def measure(self, t: TimeValue, *, force: bool = False) -> TagData:
         """Execute the measurement pipeline and return the resulting :class:`TagData`.
 
         The method enforces initialization, optionally reuses the most recent
@@ -149,25 +160,28 @@ class SensorBase(BaseModel, ABC):
         raw_value = self._measurement_getter()
         if self.time_constant > 1e-12:
             raw_value = self._sensor_dynamics(raw_value, t)
-        processed_value = np.clip(
+        processed_value, successful = np.clip(
             self._get_processed_value(t = t, raw_value = raw_value), 
             *self.instrument_range
         )
+        if not successful:
+            return self._tag_info.data
+        
         final_value, is_faulty = self._apply_noise_and_faults(processed_value)
 
         ok = True if not self.faulty_aware else (not is_faulty)
         self._tag_info.data = TagData(time = t, value = final_value, ok = ok)
         return self._tag_info.data
     
-    def _sensor_dynamics(self, new_value: StateValue, t: float):
+    def _sensor_dynamics(self, new_value: StateValue, t: TimeValue):
         dt = t - self._t
         lamb = dt / (dt + self.time_constant) # approximation
-        self._last_t = t
+        self._t = t
         self._measurement = lamb * new_value + (1-lamb) * self._measurement
         return self._measurement
     
     @abstractmethod
-    def _should_update(self, t: float) -> bool:
+    def _should_update(self, t: TimeValue) -> bool:
         """
         Subclass hook that decides whether a fresh measurement is required.
 
@@ -178,17 +192,19 @@ class SensorBase(BaseModel, ABC):
         pass
 
     @abstractmethod
-    def _get_processed_value(self, t: float, raw_value: float | NDArray) -> float | NDArray:
+    def _get_processed_value(self, t: TimeValue, raw_value: StateValue) -> tuple[StateValue, bool]:
         """
         Transform the true value into the sensor's processed output.
 
         Subclasses should perform any latency simulation, biasing, filtering,
         or other transformations here and return a value with the same shape as
-        ``raw_value``.
+        ``raw_value``. 
+        Also must return a boolean indicating if processing was succesful.
+            True = success, False = failed
         """
         pass
 
-    def _apply_noise_and_faults(self, value: float | NDArray) -> tuple[float | NDArray, bool]:
+    def _apply_noise_and_faults(self, value: StateValue) -> tuple[StateValue, bool]:
         """
         Apply the configured stochastic noise and random faults.
 

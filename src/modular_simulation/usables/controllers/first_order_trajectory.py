@@ -1,7 +1,14 @@
-from typing import Callable
-from pydantic import Field, PrivateAttr
+from __future__ import annotations
+from typing import TYPE_CHECKING, Annotated
+from collections.abc import Callable
+from pydantic import Field, PrivateAttr, PlainSerializer, BeforeValidator
 from modular_simulation.usables.controllers.controller_base import ControllerBase
 from modular_simulation.validation.exceptions import ControllerConfigurationError
+from modular_simulation.utils.typing import TimeValue, StateValue
+from modular_simulation.utils.wrappers import second, second_value
+if TYPE_CHECKING:
+    from modular_simulation.framework.system import System
+from astropy.units import Quantity
 import logging
 logger = logging.getLogger(__name__)
 
@@ -23,46 +30,44 @@ class FirstOrderTrajectoryController(ControllerBase):
             "open_loop_time_constant can be measured or a constant. "
         )
     )
-    open_loop_time_constant: float | str = Field(
+    open_loop_time_constant: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] | str = Field(
         ...,
         description = (
-            "if a float is provided, this is the constant open_loop_time_constant used by "
+            "if a TimeValue is provided, this is the constant open_loop_time_constant used by "
             "the controller. If a string is provided, the string is assumed to be a calculation output tag "
             "defined as part of the usable_quantities of the system. "
         )
     )
 
-    _get_open_loop_tc: Callable[[], float] = PrivateAttr()
-    _t: float = PrivateAttr(default = 0.)
+    _get_open_loop_tc: Callable[[], TimeValue] = PrivateAttr()
     # ------------------------------------------------------------------------
-    def _initialize(self, tag_infos, usable_quantities, control_elements, is_final_control_element = True):
-        # do whatever normal initialization first
-        super()._initialize(tag_infos, usable_quantities, control_elements, is_final_control_element)
-        # and then resolve the open_loop_time_constant thing
+    def _post_commission(self, system: System):
+        # resolve the open_loop_time_constant thing
         if isinstance(self.open_loop_time_constant, str):
-            for sensor in usable_quantities.sensors:
-                if sensor.alias_tag == self.open_loop_time_constant:
-                    self._get_open_loop_tc = lambda tag_info = sensor._tag_info: tag_info.data.value
-                    return
-
-            for calculation in usable_quantities.calculations:
-                available_tags = calculation._output_tag_info_dict.keys()
-                if self.open_loop_time_constant in available_tags:
-                    tag_info = calculation._output_tag_info_dict[self.open_loop_time_constant]
-                    self._get_open_loop_tc = lambda tag_info = tag_info: tag_info.data.value
-                    return
-                        
-            # if not found, raise error
-            raise ControllerConfigurationError(
+            found_tag_info = system.tag_info_dict.get(self.open_loop_time_constant)
+            if found_tag_info is None:
+                raise ControllerConfigurationError(
                 f"The configured open loop time constant tag '{self.open_loop_time_constant}' "
                 "was not found in the defined measurements or calculations. "
             )
+            if not isinstance(found_tag_info, Quantity):
+                raise ControllerConfigurationError(
+                f"The configured open loop time constant tag '{self.open_loop_time_constant}' "
+                "was found to not be a astropy.units.Quantity"
+            )
+            def tc_getter() -> TimeValue:
+                return Quantity(found_tag_info.data.value, found_tag_info.unit)
+            self._get_open_loop_tc = tc_getter
+        else:
+            def tc_getter() -> TimeValue:
+                return self.open_loop_time_constant
+            self._get_open_loop_tc = tc_getter
 
     def _control_algorithm(self,
-        t: float,
-        cv: float,
-        sp: float,
-        ) -> float:
+        t: TimeValue,
+        cv: StateValue,
+        sp: StateValue,
+        ) -> StateValue:
         """Compute the MV required to hit the desired next CV sample.
 
         The algorithm derives the desired CV trajectory based on the requested
@@ -71,9 +76,7 @@ class FirstOrderTrajectoryController(ControllerBase):
         """
         open_loop_tc = self._get_open_loop_tc()
         closed_loop_tc = open_loop_tc * self.closed_loop_time_constant_fraction
-        dt = t - self._t
-        if dt < 1e-12:
-            return self._last_output.value
+        dt = t - self.t
         alpha_desired = dt / (dt + closed_loop_tc) # approximation
         alpha = dt / (dt + open_loop_tc)
         desired_next_value = alpha_desired * sp + (1-alpha_desired) * cv

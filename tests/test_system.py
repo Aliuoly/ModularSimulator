@@ -1,151 +1,90 @@
-import numpy as np
 import pytest
-from astropy.units import Quantity, Unit
 
-from modular_simulation.framework.utils import create_system
-from modular_simulation.framework.system_old import System
-from modular_simulation.usables.controllers.controller_base import ControllerBase, ControllerMode
-from modular_simulation.usables.controllers.trajectory import Trajectory
-from modular_simulation.usables.sensors.sampled_delayed_sensor import SampledDelayedSensor
-
-from conftest import (
-    ThermalAlgebraic,
-    ThermalConstants,
-    ThermalControlElements,
-    ThermalStates,
-    UNIT_TEMPERATURE,
-)
+from modular_simulation.framework.system import System
+from modular_simulation.usables import SampledDelayedSensor, PIDController, Trajectory, ControllerMode
+from modular_simulation.validation.exceptions import SensorConfigurationError, ControllerConfigurationError
 
 
-class HeaterSystem(System):
-    @staticmethod
-    def calculate_algebraic_values(y, u, k, y_map, u_map, k_map, algebraic_map, algebraic_size):
-        algebraic = np.zeros(algebraic_size)
-        temp = float(y[y_map["temperature"]][0])
-        heater = float(u[u_map["heater_power"]][0]) if u_map else 0.0
-        ambient = float(k[k_map["ambient_temperature"]][0])
-        heat_flux = heater - (temp - ambient)
-        algebraic[algebraic_map["heat_flux"]] = heat_flux
-        return algebraic
-
-    @staticmethod
-    def rhs(t, y, u, k, algebraic, u_map, y_map, k_map, algebraic_map):
-        dy = np.zeros_like(y)
-        tau = float(k[k_map["time_constant"]][0])
-        heat_flux = float(algebraic[algebraic_map["heat_flux"]][0])
-        dy[y_map["temperature"]] = heat_flux / tau
-        return dy
-
-
-class SimpleController(ControllerBase):
-    def _control_algorithm(self, t, cv, sp):  # type: ignore[override]
-        return self._u0 + (sp - cv)
-
-
-@pytest.fixture()
-def heater_system():
-    dt = Quantity(1.0, Unit("s"))
-    states = ThermalStates()
-    controls = ThermalControlElements(heater_power=10.0)
-    algebraic = ThermalAlgebraic()
-    constants = ThermalConstants(ambient_temperature=295.0, time_constant=5.0)
-
-    temp_sensor = SampledDelayedSensor(
+def _make_basic_sensor():
+    return SampledDelayedSensor(
         measurement_tag="temperature",
-        alias_tag="temp_meas",
-        sampling_period=0.0,
-        deadtime=0.0,
-        coefficient_of_variance=0.0,
-    )
-    mv_sensor = SampledDelayedSensor(
-        measurement_tag="heater_power",
-        alias_tag="heater_power",
-        sampling_period=0.0,
-        deadtime=0.0,
-        coefficient_of_variance=0.0,
+        unit="K",
     )
 
-    system = create_system(
-        system_class=HeaterSystem,
-        dt=dt,
-        initial_states=states,
-        initial_controls=controls,
-        initial_algebraic=algebraic,
-        system_constants=constants,
-        sensors=[temp_sensor, mv_sensor],
-        calculations=[],
-        controllers=[],
-        use_numba=False,
-        record_history=True,
-        solver_options={"method": "RK45", "rtol": 1e-9, "atol": 1e-9},
-    )
-    return system
 
-
-def test_system_step_advances_state(heater_system):
-    system = heater_system
-    system.step(duration=Quantity(3.0, Unit("s")))
-
-    expected = (300.0 - (295.0 + 10.0)) * np.exp(-3.0 / 5.0) + (295.0 + 10.0)
-    assert system.measurable_quantities.states.temperature == pytest.approx(expected, rel=1e-4)
-    assert system.time == pytest.approx(3.0)
-
-    history = system.history
-    assert "temperature" in history
-    assert len(history["temperature"]) == 3
-
-    measured = system.measured_history["sensors"]["temp_meas"]
-    assert len(measured) >= 3
-
-
-def test_controller_management_in_system(heater_system, heater_mv_range):
-    dt = Quantity(1.0, Unit("s"))
-    states = ThermalStates()
-    controls = ThermalControlElements(heater_power=10.0)
-    algebraic = ThermalAlgebraic()
-    constants = ThermalConstants(ambient_temperature=295.0, time_constant=5.0)
-
-    sensor = SampledDelayedSensor(
-        measurement_tag="temperature",
-        alias_tag="temp_meas",
-        sampling_period=0.0,
-        deadtime=0.0,
-        coefficient_of_variance=0.0,
-    )
-    mv_sensor = SampledDelayedSensor(
-        measurement_tag="heater_power",
-        alias_tag="heater_power",
-        sampling_period=0.0,
-        deadtime=0.0,
-        coefficient_of_variance=0.0,
-    )
-
-    controller = SimpleController(
+def _make_pid_controller(setpoint: float = 310.0):
+    return PIDController(
+        cv_tag="temperature",
         mv_tag="heater_power",
-        cv_tag="temp_meas",
-        sp_trajectory=Trajectory(y0=300.0, unit=UNIT_TEMPERATURE),
-        mv_range=heater_mv_range,
+        sp_trajectory=Trajectory(setpoint),
+        Kp=1.5,
+        Ti=4.0,
+        mv_range=(0.0, 25.0),
+        period=0.0,
     )
 
-    system = create_system(
-        system_class=HeaterSystem,
-        dt=dt,
-        initial_states=states,
-        initial_controls=controls,
-        initial_algebraic=algebraic,
-        system_constants=constants,
+
+def test_system_step_updates_measurements_and_state(thermal_process_model):
+    sensor = _make_basic_sensor()
+    mv_sensor = SampledDelayedSensor(measurement_tag="heater_power", unit="K/s")
+    controller = _make_pid_controller(315.0)
+    system = System(
+        dt=1.0,
+        process_model=thermal_process_model,
         sensors=[sensor, mv_sensor],
-        calculations=[],
         controllers=[controller],
-        use_numba=False,
+        calculations=[],
         record_history=False,
-        solver_options={"method": "RK45", "rtol": 1e-9, "atol": 1e-9},
+        show_progress=False,
     )
 
-    assert controller.cv_tag in system.controller_dictionary
-    new_mode = system.set_controller_mode("temp_meas", "tracking")
-    assert new_mode == ControllerMode.TRACKING
+    system.set_controller_mode("temperature", ControllerMode.AUTO)
+    thermal_process_model.t = system.dt
+    system.step()
 
-    system.set_controller_mode("temp_meas", ControllerMode.AUTO)
-    trajectory = system.extend_controller_trajectory("temp_meas", value=310.0)
-    assert trajectory(0.0) == pytest.approx(310.0)
+    assert thermal_process_model.temperature > 300.0
+    assert system.history == {}
+    measured_history = system.measured_history
+    assert "sensors" in measured_history
+    assert sensor.alias_tag in measured_history["sensors"]
+    assert len(measured_history["sensors"][sensor.alias_tag]) >= 1
+
+
+def test_system_validation_catches_bad_sensor(thermal_process_model):
+    bad_sensor = SampledDelayedSensor(measurement_tag="invalid", unit="K")
+
+    with pytest.raises(ExceptionGroup) as excinfo:
+        System(
+            dt=1.0,
+            process_model=thermal_process_model,
+            sensors=[bad_sensor],
+            controllers=[],
+            calculations=[],
+            show_progress=False,
+        )
+
+    assert any(isinstance(err, SensorConfigurationError) for err in excinfo.value.exceptions)
+
+
+def test_system_validation_catches_bad_controller(thermal_process_model):
+    sensor = _make_basic_sensor()
+    bad_controller = PIDController(
+        cv_tag="temperature",
+        mv_tag="invalid_mv",
+        sp_trajectory=Trajectory(310.0),
+        Kp=1.0,
+        Ti=3.0,
+        mv_range=(0.0, 10.0),
+    )
+
+    with pytest.raises(ExceptionGroup) as excinfo:
+        System(
+            dt=1.0,
+            process_model=thermal_process_model,
+            sensors=[sensor],
+            controllers=[bad_controller],
+            calculations=[],
+            show_progress=False,
+        )
+
+    assert any(isinstance(err, ControllerConfigurationError) for err in excinfo.value.exceptions)

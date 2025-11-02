@@ -17,15 +17,6 @@ from .controllers import (
     ControllerMode,
     MVController
 )
-from .usable_quantities import UsableQuantities
-from modular_simulation.measurables.measurable_quantities import MeasurableQuantities
-UsableQuantities.model_rebuild(_types_namespace={
-    'SensorBase': SensorBase,
-    'CalculationBase': CalculationBase,
-    'ControllerBase': ControllerBase,
-    'MeasurableQuantities': MeasurableQuantities,
-    'TagData': TagData,
-})
 __all__ = [
     "ControllerMode",
     "ControllerBase",
@@ -42,5 +33,4 @@ __all__ = [
     "TagData",
     "TagMetadata",
     "TagType",
-    "UsableQuantities",
 ]

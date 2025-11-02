@@ -14,7 +14,7 @@ sensors=[
     ),
     SampledDelayedSensor(
         measurement_tag = "F_in",
-        unit = "L/s",
+        unit = "L/minute",
         coefficient_of_variance=0.05
     ),
     SampledDelayedSensor(
@@ -39,8 +39,8 @@ controllers=[
         cv_tag="B",
         mv_tag="F_in",
         sp_trajectory=Trajectory(0.5, t0=0.0),
-        Kp=1.0e-1,
+        Kp=1.0e-1*60,
         Ti=minute(2),
-        mv_range=(0, 100),
+        mv_range=(0, 100*60),
     )
 ]

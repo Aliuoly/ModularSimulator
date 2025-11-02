@@ -1,16 +1,20 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Annotated, TypeAlias
+from typing import TYPE_CHECKING
 from numpy.typing import NDArray
 from collections.abc import Callable
 from dataclasses import dataclass
 from astropy.units import Unit, UnitBase
 from enum import IntEnum
+import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from modular_simulation.validation.exceptions import CalculationDefinitionError, CalculationConfigurationError
 from modular_simulation.usables.tag_info import TagInfo, TagData
 from modular_simulation.utils.typing import StateValue, Seconds, SerializableUnit
 from modular_simulation.utils import extract_unique_metadata
-from modular_simulation.utils.wrappers import second_value
+
+if TYPE_CHECKING:
+    from modular_simulation.framework.system import System
 
 def TypeAliasFunction(object):
     return type(object)
@@ -94,8 +98,34 @@ class CalculationBase(BaseModel, ABC):
             if metadata.type == TagType.OUTPUT
         }
 
+    def retrieve_specific_input(self, tag_name: str) -> TagData:
+        """
+        Get the TagData for a given input tag name
+        """
+        if tag_name not in self._input_data_dict:
+            raise CalculationConfigurationError(
+                f"'{self.name}' calculation's input tag '{tag_name}' was not found amongst the wired inputs. "
+                "Make sure the calculation has been wired to a system and the tag name is correct."
+            )
+        return self._input_data_dict[tag_name]
     
-    def wire_inputs(self, t: Seconds, available_tag_info_dict: dict[str, TagInfo]) -> None:
+    def retrieve_specific_output(self, tag_name: str) -> TagData:
+        """
+        Get the TagData for a given output tag name
+        """
+        if tag_name not in self._output_tag_info_dict:
+            raise CalculationConfigurationError(
+                f"'{self.name}' calculation's output tag '{tag_name}' was not found amongst the defined outputs. "
+                "Make sure the tag name is correct."
+            )
+        return self._output_tag_info_dict[tag_name].data
+    
+    def _pre_wire_inputs(self, system: System) -> tuple[Exception|None, bool]:
+        """
+        Hook for any pre-wiring steps that need to be done before inputs are wired.
+        """
+        return None, True
+    def wire_inputs(self, system: System) -> tuple[CalculationConfigurationError|None, bool]:
         """
         Links calculation inputs to tag info instances
         and creates a simple callable for it.
@@ -103,7 +133,11 @@ class CalculationBase(BaseModel, ABC):
         so they are not NANs.
         Validation is already done so no error handling is placed here. 
         """
-        t = second_value(t)
+        error, successful = self._pre_wire_inputs(system)
+        if not successful:
+            return error, successful
+        t = system.time
+        available_tag_info_dict = system.tag_info_dict
         input_field_metadata_dict = {
             field: metadata for field, metadata in self._field_metadata_dict.items()
             if metadata.type == TagType.INPUT
@@ -112,10 +146,18 @@ class CalculationBase(BaseModel, ABC):
             input_tag = getattr(self, input_field)
             found_tag_info = available_tag_info_dict.get(input_tag)
             if found_tag_info is None:
-                raise CalculationConfigurationError(
+                error = CalculationConfigurationError(
                     f"'{self.name}' calculation's input field {input_field} = '{input_tag}' "
                     "was not found amongst the available tags. Double check the tag spelling "
                     "and that it corresponds to either a sensor measurement or a calculation output."
+                )
+                return error, False # failed to wire inputs, return not successful
+            if not found_tag_info.unit.is_equivalent(input_field_metadata.unit):
+                # this is a death sentence, raise error directly instead of returning
+                raise CalculationConfigurationError(
+                    f"'{self.name}' calculation's input field {input_field} = '{input_tag}' "
+                    f"was found, but its unit '{input_field_metadata.unit}' "
+                    f"is not compatible with {found_tag_info.tag}'s unit '{found_tag_info.unit}'. "
                 )
             self._input_data_getters[input_tag] = found_tag_info.make_converted_data_getter(
                 target_unit = input_field_metadata.unit
@@ -123,6 +165,16 @@ class CalculationBase(BaseModel, ABC):
         self._t = t
         self._initialized = True
         self.calculate(t = t)
+        # if somehow the calculation returned NAN, something went wrong and the
+        # commissioning failed. 
+        successful = True
+        for tag_info in self._output_tag_info_dict.values():
+            if np.isnan(tag_info.data.value):
+                error = CalculationConfigurationError(
+                    f"'{self.name}' calculation resulted in nan during initialization."
+                )
+                return error, not successful
+        return None, successful
         
     def _update_input_triplets(self) -> None:
         tag_data_dict = self._input_data_dict
@@ -167,5 +219,20 @@ class CalculationBase(BaseModel, ABC):
             self._output_tag_info_dict[output_tag].data = tag_data
 
     @property
+    def tag_metadata_dict(self) -> dict[str, TagMetadata]:
+        return {
+            getattr(self, field): metadata 
+            for field, metadata in self._field_metadata_dict.items() 
+            if metadata.type != TagType.CONSTANT
+        }
+    
+    @property
     def outputs(self) -> dict[str, TagData]:
         return {tag: data for tag, data in self._output_tag_info_dict.items()}
+    
+    @property
+    def history(self) -> dict[str, TagData]:
+        return {
+            tag: tag_info.history
+            for tag, tag_info in self._output_tag_info_dict.items()
+        }

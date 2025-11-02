@@ -1,6 +1,7 @@
 from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Annotated, TYPE_CHECKING
+import numpy as np
 from pydantic import Field, PrivateAttr, BaseModel, BeforeValidator
 from modular_simulation.usables.controllers.controller_base import ControllerBase
 from modular_simulation.usables.calculations.calculation_base import CalculationBase
@@ -63,7 +64,8 @@ class InternalModelController(ControllerBase):
     _mv_converter_from_model_unit_to_controller_unit: Callable[[StateValue], StateValue] = PrivateAttr()
 
     def _post_commission(self, system: System):
-        self._filtered_sp = self._sp_tag_info.data.value
+        # initialize filtered sp to be current pv
+        self._filtered_sp = system.tag_info_dict[self.cv_tag].data.value
         mv_controller_unit = system.tag_info_dict[self.mv_tag].unit
         found_calculation = [
             c for c in system.calculations
@@ -78,24 +80,28 @@ class InternalModelController(ControllerBase):
         elif len(found_calculation) == 0:
             raise ControllerConfigurationError(
                 f"'{self.cv_tag}' controller's internal model could not be resolved. "
-                "No calculation have name matching the specified model name. "
+                f"No calculation have name matching the specified model name '{self.model.calculation_name}'. "
+                f"Available calculations are: {', '.join([c.name for c in system.calculations])} "
             )
         calculation = found_calculation[0]
         self._internal_model = getattr(calculation, self.model.method_name)
         self._mv_converter_from_model_unit_to_controller_unit = \
-            calculation._tag_metadata_dict[self.mv_tag].unit.get_converter(
+            calculation.tag_metadata_dict[self.mv_tag].unit.get_converter(
                 mv_controller_unit
             )
+        converter_from_controller_unit_to_model_unit = mv_controller_unit.get_converter(
+                calculation.tag_metadata_dict[self.mv_tag].unit,
+            )
         self._mv_range_in_model_units = (
-            self._mv_converter_from_model_unit_to_controller_unit(self.mv_range[0]),
-            self._mv_converter_from_model_unit_to_controller_unit(self.mv_range[1])
+            converter_from_controller_unit_to_model_unit(self.mv_range[0]),
+            converter_from_controller_unit_to_model_unit(self.mv_range[1])
         )
 
     def _control_algorithm(self,
         t: Seconds,
         cv: StateValue,
         sp: StateValue,
-        ) -> StateValue:
+        ) -> tuple[StateValue, bool]:
         """Solve for the MV that minimizes the squared prediction error.
 
         The requested setpoint is optionally low-pass filtered, then SciPy's
@@ -120,4 +126,5 @@ class InternalModelController(ControllerBase):
             "%-12.12s IMC | t=%8.1f cv=%8.2f sp=%8.2f out=%8.2f, cv_pred_at_out=%8.2f, offset=%8.2f",
             self.cv_tag, t, cv, sp, output, internal_model(output), offset
         )
-        return self._mv_converter_from_model_unit_to_controller_unit(output)
+        successful = not np.isnan(offset)
+        return self._mv_converter_from_model_unit_to_controller_unit(output), successful

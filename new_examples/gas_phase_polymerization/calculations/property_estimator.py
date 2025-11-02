@@ -117,8 +117,8 @@ class PropertyEstimator(CalculationBase):
         # alittle special here, to avoid adding trivial calculations,
         # I am going to reach into the triplet dictionary and grab the 
         # time stamp of the lab sampling times
-        lab_MI_sample_time = float(self._last_input_data_dict[self.lab_MI_tag].time)
-        lab_density_sample_time = float(self._last_input_data_dict[self.lab_density_tag].time)
+        lab_MI_sample_time = float(self.retrieve_specific_input(self.lab_MI_tag).time)
+        lab_density_sample_time = float(self.retrieve_specific_input(self.lab_density_tag).time)
         if prod_rate < 5:
             cumm_MI_placeholder, cumm_density_placeholder = self.compute_yhat(self._x).flatten()
             return_dict = {
@@ -419,15 +419,15 @@ class PropertyEstimator(CalculationBase):
 
     def inst_MI_model(self, rH2: float):
         a1, b1, c1, d1 = self.MI_model_parameters
-        rM2 = self._last_input_value_dict["rM2"]
-        tau = self._last_input_value_dict["residence_time"]
+        rM2 = self.retrieve_specific_input("rM2").value
+        tau = self.retrieve_specific_input("residence_time").value
         return self._inst_MI_model_internal(rH2, rM2, tau, a1, b1, c1, d1)
 
     def inst_density_model(self, rM2: float):
         a1, b1, c1, d1 = self.MI_model_parameters
         a2, b2, c2, d2 = self.density_model_parameters
-        tau = self._last_input_value_dict["residence_time"]
-        rH2 = self._last_input_value_dict["rH2"]
+        tau = self.retrieve_specific_input("residence_time").value
+        rH2 = self.retrieve_specific_input("rH2").value
         inst_MI = self._inst_MI_model_internal(rH2, rM2, tau, a1, b1, c1, d1)
         return self._inst_density_model_internal(rM2, inst_MI, a2, b2, c2, d2)
 
@@ -437,11 +437,5 @@ class PropertyEstimator(CalculationBase):
     def _inst_density_model_internal(self, rM2, inst_MI, a2, b2, c2, d2):
         return (a2 + b2 * np.log(inst_MI) - (c2*rM2) ** d2) * 1000.0
 
-if __name__ == '__main__':
-    PropertyEstimator(
-        output_tags=["cumm_MI","cumm_density","inst_MI","inst_density"],
-        measured_input_tags=["mass_prod_rate", "lab_MI","lab_MI_sample_time","lab_density","lab_density_sample_time"],
-        calculated_input_tags=["residence_time","rM2","rH2"]
-    )
         
 

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, PlainSerializer, BeforeValidator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from dataclasses import field, dataclass
 import numpy as np
 from numpy.typing import NDArray
@@ -375,7 +375,9 @@ class ProcessModel(BaseModel, ABC):
                 return setattr(self, field_name, value)
             return setter
         
-        converter = current_unit.get_converter(source_unit)
+        # convert from the SOURCE that is calling this setter
+        # to the STATE(CURRENT) unit to be used in the rhs and algebraic calculations. 
+        converter = source_unit.get_converter(current_unit)
         def converted_setter(value) -> StateValue:
             return setattr(self, field_name, converter(value))
         return converted_setter

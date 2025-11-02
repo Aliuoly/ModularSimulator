@@ -1,5 +1,3 @@
-"""Energy balance process definition using the new :class:`ProcessModel` API."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -14,47 +12,51 @@ from modular_simulation.measurables import (
     StateMetadata as M,
 )
 from modular_simulation.utils.typing import ArrayIndex
+from functools import partial
 
 SQRT_L_PER_S = Unit("L") ** 0.5 / Unit("s")
 JOULE_PER_MOL_K = Unit("J") / (Unit("mol") * Unit("K"))
 JOULE_PER_LITER_K = Unit("J") / (Unit("L") * Unit("K"))
 JOULE_PER_S_K_L2 = Unit("J") / (Unit("s") * Unit("K") * Unit("L") ** 2)
 
-
+DIFFERENTIAL = partial(M, type=T.DIFFERENTIAL)
+ALGEBRAIC = partial(M, type=T.ALGEBRAIC)
+CONTROLLED = partial(M, type=T.CONTROLLED)
+CONSTANT = partial(M, type=T.CONSTANT)
 class EnergyBalanceProcessModel(ProcessModel):
     """Process model for an irreversible reaction with an energy balance."""
 
     # ---- Differential states ----
-    V: Annotated[float, M(type=T.DIFFERENTIAL, unit="L", description="system volume")]=100.0
-    A: Annotated[float, M(type=T.DIFFERENTIAL, unit="mol/L", description="concentration of A")]=1.0
-    B: Annotated[float, M(type=T.DIFFERENTIAL, unit="mol/L", description="concentration of B")]=0.0
-    T: Annotated[float, M(type=T.DIFFERENTIAL, unit="K", description="reactor temperature")]=300.0
-    T_J: Annotated[float, M(type=T.DIFFERENTIAL, unit="K", description="jacket temperature")]=300.0
+    V: Annotated[float, DIFFERENTIAL(unit="L", description="system volume")]=100.0
+    A: Annotated[float, DIFFERENTIAL(unit="mol/L", description="concentration of A")]=1.0
+    B: Annotated[float, DIFFERENTIAL(unit="mol/L", description="concentration of B")]=0.0
+    T: Annotated[float, DIFFERENTIAL(unit="K", description="reactor temperature")]=300.0
+    T_J: Annotated[float, DIFFERENTIAL(unit="K", description="jacket temperature")]=300.0
 
     # ---- Algebraic states ----
-    F_out: Annotated[float, M(type=T.ALGEBRAIC, unit="L/s", description="outlet volumetric flow")]=1.0
+    F_out: Annotated[float, ALGEBRAIC(unit="L/s", description="outlet volumetric flow")]=1.0
 
     # ---- Controlled states ----
-    F_in: Annotated[float, M(type=T.CONTROLLED, unit="L/s", description="inlet volumetric flow")]=1.0
-    T_J_in: Annotated[float, M(type=T.CONTROLLED, unit="K", description="jacket inlet temperature")]=300.0
+    F_in: Annotated[float, CONTROLLED(unit="L/s", description="inlet volumetric flow")]=1.0
+    T_J_in: Annotated[float, CONTROLLED(unit="K", description="jacket inlet temperature")]=300.0
 
     # ---- Constants ----
-    k0: Annotated[float, M(type=T.CONSTANT, unit="1/s", description="pre-exponential factor")]=1.5e9
-    activation_energy: Annotated[float, M(type=T.CONSTANT, unit="J/mol", description="activation energy")]=72500.0
-    gas_constant: Annotated[float, M(type=T.CONSTANT, unit=JOULE_PER_MOL_K, description="ideal gas constant")]=8.314
-    Cv: Annotated[float, M(type=T.CONSTANT, unit=SQRT_L_PER_S, description="outlet valve coefficient")]=2.0
-    CA_in: Annotated[float, M(type=T.CONSTANT, unit="mol/L", description="inlet concentration of A")]=2.0
-    T_in: Annotated[float, M(type=T.CONSTANT, unit="K", description="feed temperature")]=300.0
-    reaction_enthalpy: Annotated[float, M(type=T.CONSTANT, unit="J/mol", description="reaction enthalpy")]=825000.0
-    rho_cp: Annotated[float, M(type=T.CONSTANT, unit=JOULE_PER_LITER_K, description="heat capacity of reactor contents")]=4000.0
+    k0: Annotated[float, CONSTANT(unit="1/s", description="pre-exponential factor")]=1.5e9
+    activation_energy: Annotated[float, CONSTANT(unit="J/mol", description="activation energy")]=72500.0
+    gas_constant: Annotated[float, CONSTANT(unit=JOULE_PER_MOL_K, description="ideal gas constant")]=8.314
+    Cv: Annotated[float, CONSTANT(unit=SQRT_L_PER_S, description="outlet valve coefficient")]=2.0
+    CA_in: Annotated[float, CONSTANT(unit="mol/L", description="inlet concentration of A")]=2.0
+    T_in: Annotated[float, CONSTANT(unit="K", description="feed temperature")]=300.0
+    reaction_enthalpy: Annotated[float, CONSTANT(unit="J/mol", description="reaction enthalpy")]=825000.0
+    rho_cp: Annotated[float, CONSTANT(unit=JOULE_PER_LITER_K, description="heat capacity of reactor contents")]=4000.0
     overall_heat_transfer_coefficient: Annotated[
         float,
-        M(type=T.CONSTANT, unit=JOULE_PER_S_K_L2, description="overall heat transfer coefficient"),
+        CONSTANT(unit=JOULE_PER_S_K_L2, description="overall heat transfer coefficient"),
     ]=500000.0
-    heat_transfer_area: Annotated[float, M(type=T.CONSTANT, unit="L**2", description="heat transfer area")]=10.0
-    jacket_volume: Annotated[float, M(type=T.CONSTANT, unit="L", description="jacket volume")]=500000.0
-    jacket_rho_cp: Annotated[float, M(type=T.CONSTANT, unit=JOULE_PER_LITER_K, description="jacket heat capacity")]=3200.0
-    jacket_flow: Annotated[float, M(type=T.CONSTANT, unit="L/s", description="jacket volumetric flow")]=500.0
+    heat_transfer_area: Annotated[float, CONSTANT(unit="L**2", description="heat transfer area")]=10.0
+    jacket_volume: Annotated[float, CONSTANT(unit="L", description="jacket volume")]=500000.0
+    jacket_rho_cp: Annotated[float, CONSTANT(unit=JOULE_PER_LITER_K, description="jacket heat capacity")]=3200.0
+    jacket_flow: Annotated[float, CONSTANT(unit="L/s", description="jacket volumetric flow")]=500.0
 
     @staticmethod
     def calculate_algebraic_values(

@@ -1,10 +1,7 @@
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from typing import Any
 from collections.abc import Callable
-from scipy.integrate import solve_ivp #type: ignore
 from functools import cached_property
-from numba.typed.typeddict import Dict as NDict #type: ignore
-from numba import types, jit #type: ignore
 import warnings
 from modular_simulation.usables import (
     SensorBase, 
@@ -12,9 +9,8 @@ from modular_simulation.usables import (
     CalculationBase, 
     ControllerMode, 
     Trajectory,
-    TagData,
-    
 )
+
 from modular_simulation.usables.tag_info import TagInfo
 from modular_simulation.measurables.process_model import ProcessModel
 from modular_simulation.utils.typing import Seconds, StateValue, TimeQuantity
@@ -86,12 +82,11 @@ class System(BaseModel):
         )
     )
 
-    _history: dict[str, list[StateValue]] = PrivateAttr(default_factory = dict)
+    _state_history: dict[str, list[StateValue]] = PrivateAttr(default_factory = dict)
+    _tag_info_dict: dict[str, TagInfo] = PrivateAttr(default_factory=dict)
+    _history_slots: list[tuple[Callable[[Any], Any], list]] = PrivateAttr(default_factory=list)
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
-
-    # add private attrs
-    _history_slots: list[tuple[Callable[[Any], Any], list]] = PrivateAttr(default_factory=list)
 
     def _validate(self):
         exception_group = []
@@ -147,31 +142,93 @@ class System(BaseModel):
         
         self.process_model._attach_system(self)
         model = self.process_model
+        # importantly, the order must be
+        # 1. sensors, 2. calculations, 3. controllers
+        # as calculations depend on sensors, and controllers depend on 
+        # both sensors and calculations. 
         for sensor in self.sensors:
-            sensor.commission(self.time, model)
+            self.add_component(sensor)
+        
+        # calculations may be defined out of order
+        # such that calculation 1 depends on result of calculation 2
+        # in such case, the wiring of calculation 1 will FAIL in the first pass. 
+        # We will try to iteratively resolve calculations for up to NUM_CALCULATION passes. 
+        
+        attempts = 0
+        max_attempts = len(self.calculations)
+        resolution_done = False if max_attempts > 0 else True
+        pending_calculation_indeces = list(range(len(self.calculations)))
+        while not resolution_done and attempts < max_attempts:
+            attempts += 1
+            errors = []
+            for calculation_index in pending_calculation_indeces:
+                error, successful = self.add_component(self.calculations[calculation_index])
+                if error is not None:
+                    errors.append(error)
+                if successful:
+                    pending_calculation_indeces.remove(calculation_index)
+                if successful and error is not None:
+                    pass
+                if not successful and error is None:
+                    pass
+            if len(pending_calculation_indeces) == 0:
+                resolution_done = True
+        if len(errors) > 0:
+            raise ExceptionGroup(
+                f"{len(pending_calculation_indeces)} calculation(s) could not be resolved: ",
+                errors
+            )
         for controller in self.controllers:
-            controller.commission(self)
-        for calculation in self.calculations:
-            calculation.wire_inputs(self.time, self.tag_info_dict)
+            self.add_component(controller)
 
         if self.record_history:
             # Build history dict and accessors exactly once
             for state in model.model_dump():
                 mq_obj: StateValue = getattr(model, state)
                 lst = [] # type:ignore
-                self._history[state] = lst
+                self._state_history[state] = lst
                 getter = model.make_converted_getter(state, target_unit=None)
                 # capture the object reference and append list ref
                 self._history_slots.append((lambda o=mq_obj, g=getter: g(o), lst)) #type:ignore[misc]
-            self._history['time'] = []
-
+            self._state_history['time'] = []
+            
+    def add_component(self, component: SensorBase|CalculationBase|ControllerBase) -> tuple[Exception|None, bool]:
+        """
+        Adds sensors, calculations, and controllers to the system.
+        Performs the necessary wiring and commissioning steps to bind
+        them to the system. 
+        """
+        successful = True
+        # for sensor and controller, if an error was raised, it is fatal, so
+        # the following code assumes if it returned, we are ok. 
+        # for calculation, that is a different issue. 
+        if isinstance(component, SensorBase):
+            self._tag_info_dict[component._tag_info.tag] = component._tag_info
+            # don't care about sensor lol, only way it fails is if 
+            # state value is bad, in which case scipy solver will fail later.
+            _ = component.commission(self) 
+            error = None 
+        if isinstance(component, CalculationBase):
+            # output tag info available before wiring inputs, but
+            # certain calculations have some preprocessing during the wiring stage,
+            # such as resolving unit issues. Thus, put it after wiring inputs.
+            error, successful = component.wire_inputs(self)
+            if successful:
+                self._tag_info_dict.update(component._output_tag_info_dict)
+        if isinstance(component, ControllerBase):
+            _ = component.commission(self) # don't care about controller lol, it may fail and still be fine.
+            # sp tag info available only after commissioning, unlike above. 
+            self._tag_info_dict[component._sp_tag_info.tag] = component._sp_tag_info
+            error = None
+        return error, successful
+        
     def _update_history(self) -> None:
         if not self.record_history:
             return
         # simple tight loop: call getter, append to pre-bound list
         for getter, lst in self._history_slots:
             lst.append(getter()) #type:ignore[call-arg]
-        self._history['time'].append(self.time)
+        self._state_history['time'].append(self.time)
 
     def _update_components(self) -> None:
         """
@@ -261,24 +318,9 @@ class System(BaseModel):
         controller.change_control_mode(mode)
         return controller.mode
     
-    @cached_property
+    @property
     def tag_info_dict(self) -> dict[str, TagInfo]:
-        """
-        does not include the controller sp tags due to order of definition.
-        controller sp tag info is created AFTER this property is accessed. 
-        Instead, controllers will call the update_tag_info_dict once
-        they are ready with their sp tag info.
-        """
-        info_dict = {}
-        for s in self.sensors:
-            info_dict[s.alias_tag] = s._tag_info
-        for c in self.calculations:
-            info_dict.update(c._output_tag_info_dict)
-        return info_dict
-    
-    def update_tag_info_dict(self, tag: str, tag_info: TagInfo) -> None:
-        """updates the tag_info_dict after it has been constructed"""
-        self.tag_info_dict[tag] =  tag_info
+        return self._tag_info_dict
 
     @cached_property
     def controller_dictionary(self) -> dict[str, ControllerBase]:
@@ -299,40 +341,23 @@ class System(BaseModel):
         return list(self.controller_dictionary.keys())
 
     @property
-    def measured_history(self) -> dict[str, Any]:
+    def history(self) -> dict[str, Any]:
         """Returns historized measurements and calculations."""
-
-        sensors_detail: dict[str, list[TagData]] = {}
-        calculations_detail: dict[str, list[TagData]] = {}
-        history: dict[str, Any] = {
-            "sensors": sensors_detail,
-            "calculations": calculations_detail,
-        }
-
+        history: dict[str, Any] = {}
         for sensor in self.sensors:
-            # use alias_tag for when it is different from measurement_tag
-            sensors_detail[sensor.alias_tag] = sensor.measurement_history
-
+            history.update(sensor.history)
         for calculation in self.calculations:
-            for output_tag_name, output_tag_info in calculation._output_tag_info_dict.items():
-                calculations_detail[output_tag_name] = (output_tag_info.history)
-
-        return history
-
-    @property
-    def history(self) -> dict[str, list]:
-        """Returns a trimmed copy of the full history dictionary."""
-        if not self.record_history:
-            return {}
-        return self._history
-
-    @property
-    def setpoint_history(self) -> dict[str, dict[str, list]]:
-        """Returns historized controller setpoints keyed by ``cv_tag``."""
-        history: dict[str, dict[str, list]] = {}
+            history.update(calculation.history)
         for controller in self.controllers:
             history.update(controller.sp_history)
         return history
+
+    @property
+    def state_history(self) -> dict[str, list]:
+        """Returns a trimmed copy of the state history dictionary."""
+        if not self.record_history:
+            return {}
+        return self._state_history
 
 
 

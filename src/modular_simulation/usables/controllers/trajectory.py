@@ -286,7 +286,7 @@ class Trajectory:
             # else equal to last—nothing to do
             return
 
-        tL, tR = ti[j - 1], ti[j]
+        _, tR = ti[j - 1], ti[j]
         if t_s == tR:
             self._knots_t = ti[: j + 1]
             self._knots_y = yi[: j + 1]

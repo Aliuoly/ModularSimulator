@@ -1,9 +1,9 @@
 import logging
 from collections import deque
+import numpy as np
 from pydantic import Field, PrivateAttr
 from modular_simulation.usables.controllers.controller_base import ControllerBase
 from modular_simulation.utils.typing import Seconds, StateValue
-from modular_simulation.utils.wrappers import second
 logger = logging.getLogger(__name__)
 
 class PIDController(ControllerBase):
@@ -78,17 +78,19 @@ class PIDController(ControllerBase):
             # error and de 0, with sum(e*dt) = integral, gives
             # u(k) = Kp * 1/Ti * integral
             # integral = u * Ti/Kp
-            self._integral = self._control_action.value * self.Ti / self.Kp
+            if not np.isnan(self._control_action.value) and self.Ti != float('inf'):
+                self._integral = self._control_action.value * self.Ti / self.Kp
 
     def _control_algorithm(
             self,
             t: Seconds,
             cv: StateValue,
             sp: StateValue,
-            ) -> StateValue:
+            ) -> tuple[StateValue, bool]:
         """
         PID control algorithm for SISO systems. As such, only handles scalar cv and sp.
         """
+        successful = True
         dt = t - self.t
         
         error = sp - cv
@@ -102,7 +104,7 @@ class PIDController(ControllerBase):
         # valid enough so whatever. 
         alpha = dt / (dt + self.derivative_filter_tc) 
         self._filtered_derivative = alpha * (PD_error - self._error_queue[1]) + (1-alpha) * self._filtered_derivative
-        
+
         # PID control law
         if self.velocity_form:
             p_term = self.Kp * (PD_error - last_error)
@@ -113,8 +115,8 @@ class PIDController(ControllerBase):
                 # scientific notation takes up 4 spaces by itself, and due to sign of the number another 1 space is possible
                 # and from the decimal point another space is taken. thus, need at least 6 + decimal place many spaces
                 # so leave 5 spaces free. e.g., %6.1e is ok, since max space = 6, use 1 for decimal, 4 for scientific notation, 1 for sign
-                "%-12.12s PID | sat=%-10.10s t=%8.1f cv=%8.2f sp=%8.2f err=%10.2e P=%10.2e I=%10.2e D=%10.2e out=%8.2f",
-                self.cv_tag, False, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, output,
+                "%-12.12s PID | sat=%-10.10s t=%8.1f cv=%8.2f sp=%8.2f err=%10.2e P=%10.2e I=%10.2e D=%10.2e out=%s=%8.2f%s",
+                self.cv_tag, False, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, self.mv_tag, output, str(self._mv_tag_info.unit),
             )
         else:
             p_term = self.Kp * PD_error
@@ -144,8 +146,8 @@ class PIDController(ControllerBase):
                 # scientific notation takes up 4 spaces by itself, and due to sign of the number another 1 space is possible
                 # and from the decimal point another space is taken. thus, need at least 6 + decimal place many spaces
                 # so leave 5 spaces free. e.g., %6.1e is ok, since max space = 6, use 1 for decimal, 4 for scientific notation, 1 for sign
-                "%-12.12s PID | sat=%-10.10s t=%8.1f cv=%8.2f sp=%8.2f err=%10.2e P=%10.2e I=%10.2e D=%10.2e out=%8.2f",
-                self.cv_tag, saturated, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, output,
+                "%-12.12s PID | sat=%-10.10s t=%8.1f cv=%8.2f sp=%8.2f err=%10.2e P=%10.2e I=%10.2e D=%10.2e out=%s=%8.2f%s",
+                self.cv_tag, saturated, t, cv, sp, error, p_term, self._integral, self._filtered_derivative, self.mv_tag, output, str(self._mv_tag_info.unit),
             )
         self._error_queue.appendleft(PD_error)
-        return output
+        return output, successful

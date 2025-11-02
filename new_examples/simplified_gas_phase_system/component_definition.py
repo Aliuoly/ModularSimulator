@@ -21,6 +21,7 @@ analyzer_partial = partial(
     coefficient_of_variance = 0.002, # 1% rel std
     ) # 2 min delay and sampling period
 sensors = [
+    SampledDelayedSensor(measurement_tag = "monomer_rates", unit = "kmol/hr", coefficient_of_variance=0.002),
     analyzer_partial(measurement_tag="yM1", unit='', random_seed=0),
     analyzer_partial(measurement_tag="yM2", unit='', random_seed=1),
     SampledDelayedSensor(measurement_tag = "pressure", unit="kPa", coefficient_of_variance=0.002),
@@ -29,7 +30,6 @@ sensors = [
     SampledDelayedSensor(measurement_tag = "F_m2", unit = "kg/hour", coefficient_of_variance=0.002),
     SampledDelayedSensor(measurement_tag = "F_cat", unit = "kg/hour", coefficient_of_variance=0.002),
     SampledDelayedSensor(measurement_tag = "effective_cat", unit = "kg/hour", coefficient_of_variance=0.002),
-    SampledDelayedSensor(measurement_tag = "monomer_rates", unit = "kmol/hr", coefficient_of_variance=0.002),
 ]
 calculations = [
     FirstOrderFilter(
@@ -42,7 +42,6 @@ calculations = [
         name = 'pressure_filter',
         raw_signal_tag = 'pressure',
         filtered_signal_tag = 'filtered_pressure',
-        signal_unit = Unit("kPa"),
         time_constant = minute(10), 
     ),
     MoleRatioCalculation(

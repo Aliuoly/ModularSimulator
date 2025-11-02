@@ -7,7 +7,6 @@ from typing import Annotated
 from collections.abc import Mapping
 from numpy.typing import NDArray
 from pydantic import Field
-from astropy.units import Unit
 
 from modular_simulation.measurables import ProcessModel, StateType as T, StateMetadata as M
 from modular_simulation.utils.typing import ArrayIndex
@@ -82,14 +81,14 @@ class GasPhaseReactorProcessModel(ProcessModel):
     V_gas: Annotated[float, M(type=T.DIFFERENTIAL, unit="L")] = 1000.0e3
 
     # ---- Controlled states ---------------------------------------------------
-    F_cat: Annotated[float, M(type=T.CONTROLLED, unit="kg/h")] = 0.0
-    F_m1: Annotated[float, M(type=T.CONTROLLED, unit="kg/h")] = 0.0
-    F_m2: Annotated[float, M(type=T.CONTROLLED, unit="kg/h")] = 0.0
-    F_h2: Annotated[float, M(type=T.CONTROLLED, unit="kg/h")] = 0.0
-    F_n2: Annotated[float, M(type=T.CONTROLLED, unit="kg/h")] = 0.0
+    F_cat: Annotated[float, M(type=T.CONTROLLED, unit="g/s")] = 1.0
+    F_m1: Annotated[float, M(type=T.CONTROLLED, unit="g/s")] = 100.0
+    F_m2: Annotated[float, M(type=T.CONTROLLED, unit="g/s")] = 100.0
+    F_h2: Annotated[float, M(type=T.CONTROLLED, unit="g/s")] = 10.0
+    F_n2: Annotated[float, M(type=T.CONTROLLED, unit="g/s")] = 10.0
     F_vent: Annotated[float, M(type=T.CONTROLLED, unit="L/s")] = 0.0
-    F_teal: Annotated[float, M(type=T.CONTROLLED, unit="mol/s")] = 0.0
-    F_impurity: Annotated[float, M(type=T.CONTROLLED, unit="kg/h")] = 0.0
+    F_teal: Annotated[float, M(type=T.CONTROLLED, unit="mol/s")] = 10.0
+    F_impurity: Annotated[float, M(type=T.CONTROLLED, unit="g/s")] = 0.0
     discharge_valve_position: Annotated[float, M(type=T.CONTROLLED, unit="")] = 0.0
 
     # ---- Algebraic states ----------------------------------------------------
@@ -505,12 +504,12 @@ class GasPhaseReactorProcessModel(ProcessModel):
         c_impurity_qssa = float(algebraic[algebraic_map["c_impurity_qssa"]])
         impurity_qssa_applicable = float(algebraic[algebraic_map["impurity_qssa_applicable"]])
 
-        F_cat = float(u[u_map["F_cat"]]) / 3600 * 1000  # convert from kg/h to g/s
-        F_m1 = float(u[u_map["F_m1"]]) / monomer_mw / 3600.0 * 1000
-        F_m2 = float(u[u_map["F_m2"]]) / comonomer_mw / 3600.0 * 1000
-        F_h2 = float(u[u_map["F_h2"]]) / hydrogen_mw / 3600.0 * 1000
-        F_n2 = float(u[u_map["F_n2"]]) / nitrogen_mw / 3600.0 * 1000
-        F_teal = float(u[u_map["F_teal"]])  # assumed mol/s
+        F_cat = float(u[u_map["F_cat"]])
+        F_m1 = float(u[u_map["F_m1"]]) / monomer_mw
+        F_m2 = float(u[u_map["F_m2"]]) / comonomer_mw
+        F_h2 = float(u[u_map["F_h2"]]) / hydrogen_mw
+        F_n2 = float(u[u_map["F_n2"]]) / nitrogen_mw
+        F_teal = float(u[u_map["F_teal"]])
         F_impurity = float(u[u_map["F_impurity"]]) 
 
         C1 = c_monomer

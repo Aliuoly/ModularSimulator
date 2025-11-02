@@ -103,8 +103,8 @@ class CatInventoryEstimator(CalculationBase):
         return inventory + dinvdt * dt
     
     def model(self, F_cat):
-        pr = self._last_input_value_dict[self.mass_prod_rate_tag]
-        bw = self._last_input_value_dict[self.bed_weight_tag]
+        pr = self.retrieve_specific_input(self.mass_prod_rate_tag).value
+        bw = self.retrieve_specific_input(self.bed_weight_tag).value
         
         dt = 600. # hardcoded 10 minutes -> 600 seconds from now for now. 
         return self.integrate_inventory(self._inventory, F_cat, pr, bw, dt)
@@ -126,6 +126,6 @@ class AlTiRatioEstimator(CalculationBase):
         return {self.AlTi_ratio_tag: Fteal / max(SMALL, FTi)}
     
     def AlTi_model(self, Fteal):
-        F_cat = self._last_input_value_dict[self.F_cat_tag]
+        F_cat = self.retrieve_specific_input(self.F_cat_tag).value
         FTi = F_cat*self.cat_Ti_weight_frac/self.mwTi
         return Fteal / max(1e-20, FTi)

@@ -28,9 +28,7 @@ system = System(
 
 
 def plot(system: System) -> None:
-    history = system.measured_history
-    sensor_hist = history["sensors"]
-    sp_hist = system.setpoint_history
+    history = system.history
 
     plt.figure(figsize=(12, 14))
     pv_kwargs = {"linestyle": "-"}
@@ -38,59 +36,60 @@ def plot(system: System) -> None:
     plot_in_hours = partial(plot_triplet_series, time_converter=lambda t: t / second_value(day(1)) * 24)
 
     ax = plt.subplot(4, 2, 1)
-    plot_in_hours(ax, sensor_hist["F_in"], style="step", line_kwargs=pv_kwargs)
+    plot_in_hours(ax, history["F_in"], style="step", line_kwargs=pv_kwargs)
     plt.title("Inlet Flow Rate (F_in)")
     plt.xlabel("Time [h]")
     plt.ylabel("Flow (L/s)")
     plt.grid(True)
 
     ax = plt.subplot(4, 2, 2)
-    plot_in_hours(ax, sensor_hist["F_out"], style="step", line_kwargs=pv_kwargs)
+    plot_in_hours(ax, history["F_out"], style="step", line_kwargs=pv_kwargs)
     plt.title("Outlet Flow Rate (F_out)")
     plt.xlabel("Time [h]")
     plt.ylabel("Flow (L/s)")
     plt.grid(True)
 
     ax = plt.subplot(4, 2, 3)
-    plot_in_hours(ax, sensor_hist["V"], style="step", line_kwargs=pv_kwargs)
-    plot_in_hours(ax, sp_hist["V.sp"], style="step", line_kwargs=sp_kwargs)
+    plot_in_hours(ax, history["V"], style="step", line_kwargs=pv_kwargs)
+    plot_in_hours(ax, history["V.sp"], style="step", line_kwargs=sp_kwargs)
     plt.title("Reactor Volume (V)")
     plt.xlabel("Time [h]")
     plt.ylabel("Volume (L)")
     plt.grid(True)
 
     ax = plt.subplot(4, 2, 4)
-    plot_in_hours(ax, sensor_hist["B"], style="step", line_kwargs=pv_kwargs)
+    plot_in_hours(ax, history["B"], style="step", line_kwargs=pv_kwargs)
+    plot_in_hours(ax, history["B.sp"], style="step", line_kwargs=sp_kwargs)
     plt.title("Concentration of B")
     plt.xlabel("Time [h]")
     plt.ylabel("mol/L")
     plt.grid(True)
 
     ax = plt.subplot(4, 2, 5)
-    plot_in_hours(ax, sensor_hist["T"], style="step", line_kwargs=pv_kwargs)
-    plot_in_hours(ax, sp_hist["T.sp"], style="step", line_kwargs=sp_kwargs)
+    plot_in_hours(ax, history["T"], style="step", line_kwargs=pv_kwargs)
+    plot_in_hours(ax, history["T.sp"], style="step", line_kwargs=sp_kwargs)
     plt.title("Reactor Temperature (T)")
     plt.xlabel("Time [h]")
     plt.ylabel("Temperature (K)")
     plt.grid(True)
 
     ax = plt.subplot(4, 2, 6)
-    plot_in_hours(ax, sensor_hist["T_J"], style="step", line_kwargs=pv_kwargs)
-    plot_in_hours(ax, sp_hist["T_J.sp"], style="step", line_kwargs=sp_kwargs)
+    plot_in_hours(ax, history["T_J"], style="step", line_kwargs=pv_kwargs)
+    plot_in_hours(ax, history["T_J.sp"], style="step", line_kwargs=sp_kwargs)
     plt.title("Jacket Temperature (T_J)")
     plt.xlabel("Time [h]")
     plt.ylabel("Temperature (K)")
     plt.grid(True)
 
     ax = plt.subplot(4, 2, 7)
-    plot_in_hours(ax, sensor_hist["T_J_in"], style="step", line_kwargs=pv_kwargs)
+    plot_in_hours(ax, history["T_J_in"], style="step", line_kwargs=pv_kwargs)
     plt.title("Jacket Inlet Temperature (T_J_in)")
     plt.xlabel("Time [h]")
     plt.ylabel("Temperature (K)")
     plt.grid(True)
 
     ax = plt.subplot(4, 2, 8)
-    plot_in_hours(ax, sensor_hist["jacket_flow"], style="step", line_kwargs=pv_kwargs)
+    plot_in_hours(ax, history["jacket_flow"], style="step", line_kwargs=pv_kwargs)
     plt.title("Jacket Flow Rate")
     plt.xlabel("Time [h]")
     plt.ylabel("Flow (L/s)")
@@ -108,5 +107,7 @@ if __name__ == "__main__":
     mpl.set_loglevel("warning")
 
     system.step(duration=day(1))
+    system.extend_controller_trajectory("B").step(0.1).hold(duration=day(0.5)).step(0.1)
+    system.step(duration=day(2))
     plot(system)
     plt.show()

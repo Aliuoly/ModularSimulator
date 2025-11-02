@@ -34,7 +34,7 @@ if __name__ == "__main__":
     plt.figure(figsize=(12, 8))
     # --- First simulation run ---
     system.step(day(1))
-    # --- Change the setpoint and continue the simulation ---
+    # # --- Change the setpoint and continue the simulation ---
     system.extend_controller_trajectory(cv_tag="B", value=0.2)
     system.step(day(1))
     system.extend_controller_trajectory(cv_tag="B").ramp(0.3, rate = 0.1 / day(1))
@@ -45,22 +45,19 @@ if __name__ == "__main__":
     # =====================
 
     # The simulation history is stored in the system's `_history` attribute.
-    history = system.measured_history  #type: ignore
-    sensor_hist = history["sensors"]
-    calc_hist = history["calculations"]
-    sp_hist= system.setpoint_history
+    history = system.history
     # Plot Concentration of B
     plot_in_days = partial(plot_triplet_series, time_converter=lambda t: t / second_value(day(1)))
     ax = plt.subplot(2, 2, 1)
     plot_in_days(
         ax,
-        sensor_hist["B"],
+        history["B"],
         style="step",
         line_kwargs=pv_kwargs,
     )
     plot_in_days(
         ax,
-        sp_hist["B.sp"],
+        history["B.sp"],
         style="step",
         line_kwargs=sp_kwargs,
     )
@@ -73,7 +70,7 @@ if __name__ == "__main__":
     ax = plt.subplot(2, 2, 2)
     plot_in_days(
         ax,
-        sensor_hist["F_in"],
+        history["F_in"],
         style="step",
         line_kwargs=pv_kwargs,
     )
@@ -86,7 +83,7 @@ if __name__ == "__main__":
     ax = plt.subplot(2, 2, 3)
     plot_in_days(
         ax,
-        sensor_hist["V"],
+        history["V"],
         style="step",
         line_kwargs=pv_kwargs,
     )
@@ -99,7 +96,7 @@ if __name__ == "__main__":
     ax = plt.subplot(2, 2, 4)
     plot_in_days(
         ax,
-        sensor_hist["F_out"],
+        history["F_out"],
         style="step",
         line_kwargs=pv_kwargs,
     )

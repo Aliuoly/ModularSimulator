@@ -13,6 +13,6 @@ class MVController(ControllerBase):
         t: Seconds,
         cv: StateValue,
         sp: StateValue,
-        ) -> StateValue:
+        ) -> tuple[StateValue, bool]:
         
-        return sp
+        return sp, True

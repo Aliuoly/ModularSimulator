@@ -1,11 +1,12 @@
+from __future__ import annotations
 import numpy as np
-from typing import Annotated
-from astropy.units import Unit
+from typing import Annotated, TYPE_CHECKING
 from pydantic import PrivateAttr, Field
 from modular_simulation.usables import CalculationBase, TagMetadata, TagType
-from modular_simulation.usables.tag_info import TagInfo
 from modular_simulation.utils.typing import Seconds, StateValue
 from modular_simulation.validation.exceptions import CalculationConfigurationError
+if TYPE_CHECKING:
+    from modular_simulation.framework.system import System
 SMALL = 1e-12
 
 
@@ -29,11 +30,12 @@ class FirstOrderFilter(CalculationBase):
     _filtered_signal: StateValue = PrivateAttr()
     _t: Seconds = PrivateAttr()
 
-    def wire_inputs(self, t: Seconds, available_tag_info_dict: dict[str, TagInfo]) -> None:
+    def _pre_wire_inputs(self, system: System) -> tuple[Exception|None, bool]:
         """
         overwrite the unit info in the annotation
         with the tag info of the raw measurement itself. 
         """
+        available_tag_info_dict = system.tag_info_dict
         raw_signal_tag_info = available_tag_info_dict.get(self.raw_signal_tag)
         if raw_signal_tag_info is not None:
             self._field_metadata_dict["raw_signal_tag"].unit = raw_signal_tag_info.unit
@@ -41,13 +43,14 @@ class FirstOrderFilter(CalculationBase):
             self._output_tag_info_dict[self.filtered_signal_tag].unit = raw_signal_tag_info.unit
             self._filtered_signal = raw_signal_tag_info.data.value
         else:
-            raise CalculationConfigurationError(
+            error = CalculationConfigurationError(
                 f"FirstOrderFilter calculation for signal '{self.raw_signal_tag}' failed to initialize. "
                 "No corresponding signal found amongst available tags. "
             )
-        super().wire_inputs(t, available_tag_info_dict)
+            return error, False
         # initialize filtered signal to raw signal at start
-        self._t = t
+        self._t = system.time
+        return None, True
         
     def _calculation_algorithm(self, t:Seconds, inputs_dict:dict[str, StateValue]):
         raw = inputs_dict[self.raw_signal_tag]

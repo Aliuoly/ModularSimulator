@@ -1,1 +1,0 @@
-"""Example package for modular simulator demos."""

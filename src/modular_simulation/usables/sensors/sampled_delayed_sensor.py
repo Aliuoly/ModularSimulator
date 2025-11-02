@@ -1,7 +1,5 @@
-import numpy as np
 import collections
 from pydantic import Field, PrivateAttr
-from typing import Annotated
 from modular_simulation.usables.sensors.sensor_base import SensorBase, TagData
 from modular_simulation.utils.typing import Seconds, StateValue
 
@@ -24,7 +22,7 @@ class SampledDelayedSensor(SensorBase):
             "This is how long it takes for new measurements to become available."
         ),
     )
-
+    _first_sample: bool = PrivateAttr(default=True)
     _sample_queue: collections.deque[TagData] = PrivateAttr(default_factory=collections.deque)
 
     # ============================================================
@@ -33,6 +31,8 @@ class SampledDelayedSensor(SensorBase):
 
     def _should_update(self, t: Seconds) -> bool:
         """Return True if the next sample should be taken."""
+        if self._first_sample:
+            return True
         return t > (self._t + self.sampling_period)
     def _get_sample(self, target_t: Seconds) -> tuple[TagData, bool]:
         """
@@ -51,7 +51,6 @@ class SampledDelayedSensor(SensorBase):
 
         # Use local variables to reduce attribute lookups
         popleft = q.popleft
-        q0 = q[0]
 
         # Small local loop but with reduced overhead
         last_valid = None
@@ -70,7 +69,10 @@ class SampledDelayedSensor(SensorBase):
         q = self._sample_queue
         q_append = q.append
         q_append(TagData(t, raw_value))
-
+        if self._first_sample:
+            self._first_sample = False
+            return q[0].value, True  # always return first sample so they have a value
         target_t = t - self.deadtime
         tag_data, successful = self._get_sample(target_t)
+        self._t = t
         return tag_data.value, successful

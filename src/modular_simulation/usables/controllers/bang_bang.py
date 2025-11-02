@@ -1,7 +1,11 @@
+from __future__ import annotations
 from pydantic import Field, PrivateAttr
 from modular_simulation.usables.controllers.controller_base import ControllerBase
-from astropy.units import Quantity #type: ignore
+from typing import TYPE_CHECKING
 import logging
+from modular_simulation.utils.typing import Seconds, StateValue
+if TYPE_CHECKING:
+    from modular_simulation.framework.system import System
 logger = logging.getLogger(__name__)
 
 class BangBangController(ControllerBase):
@@ -35,20 +39,19 @@ class BangBangController(ControllerBase):
         default = False,
         description = "If True, the controller inverts the on/off logic described in the documentation."
     )
-    _cv_filtered: float|None = PrivateAttr(default = None) 
+    _cv_filtered: float = PrivateAttr() 
     _state: bool = PrivateAttr(default = False)
-    
+
+    def _post_commission(self, system: System):
+        self._cv_filtered = system.tag_info_dict[self.cv_tag].data.value
     def _control_algorithm(
         self,
-        t: float,
-        cv: float,
-        sp: float,
-        ) -> float:
+        t: Seconds,
+        cv: StateValue,
+        sp: StateValue,
+        ) -> tuple[StateValue, bool]:
         
-        if self._cv_filtered is None:
-            self._cv_filtered = cv
-        else:
-            self._cv_filtered = self.alpha * cv + (1 - self.alpha) * self._cv_filtered
+        self._cv_filtered = self.alpha * cv + (1 - self.alpha) * self._cv_filtered
 
         HL = sp + self.deadband
         LL = sp - self.deadband
@@ -60,6 +63,6 @@ class BangBangController(ControllerBase):
             self._state = not self._state
         
         if self._state:
-            return self.mv_range[1]
+            return self.mv_range[1], True
         else:
-            return self.mv_range[0]
+            return self.mv_range[0], True

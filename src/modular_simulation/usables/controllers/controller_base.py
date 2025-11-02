@@ -2,16 +2,14 @@ from __future__ import annotations # without this cant type hint the cascade con
 from abc import ABC, abstractmethod
 import math
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING
 import numpy as np
 from enum import IntEnum
-from astropy.units import Quantity
-from pydantic import BaseModel, PrivateAttr, Field, ConfigDict, SerializeAsAny, BeforeValidator, PlainSerializer
+from pydantic import BaseModel, PrivateAttr, Field, ConfigDict, SerializeAsAny
 from modular_simulation.usables.tag_info import TagData, TagInfo
 from modular_simulation.usables.controllers.trajectory import Trajectory
 from modular_simulation.validation.exceptions import ControllerConfigurationError
-from modular_simulation.utils.typing import Seconds, StateValue, PerSeconds, SerializableUnit
-from modular_simulation.utils.wrappers import second, second_value
+from modular_simulation.utils.typing import Seconds, StateValue, PerSeconds
 from modular_simulation.measurables.process_model import ProcessModel
 if TYPE_CHECKING:
     from modular_simulation.framework import System
@@ -163,6 +161,7 @@ class ControllerBase(BaseModel, ABC):
     _initialized: bool = PrivateAttr(default = False)
     _control_action: TagData = PrivateAttr()
     _sp_tag_info: TagInfo = PrivateAttr()
+    _mv_tag_info: TagInfo = PrivateAttr() # only for debug info, not used inherently
     _is_scalar:bool = PrivateAttr(default = False)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
     
@@ -260,11 +259,7 @@ class ControllerBase(BaseModel, ABC):
         
         # if no cascade controller, the setpoint of this controller
         # will be provided by the sp_trajectory
-    def commission(
-        self,
-        system: System,
-        is_final_control_element: bool = True,
-        ) -> None:
+    def commission(self, system: System, is_final_control_element: bool = True) -> bool:
         """Wire the controller into orchestrated quantities and validate modes.
 
         The container guarantees all referenced tags exist, so this method
@@ -303,27 +298,21 @@ class ControllerBase(BaseModel, ABC):
         self.change_control_mode(controller_mode)
 
         #now run post commission hook in case it is implemented
-        postfix = ".sp" if is_final_control_element else ".csp"
         mv_type = "final control element" if is_final_control_element else "cascade controller"
         self._sp_tag_info = TagInfo(
-            tag = f"{self.cv_tag}{postfix}", 
+            tag = f"{self.cv_tag}.sp", 
             unit = system.tag_info_dict[self.cv_tag].unit,
             description = f"setpoint for {self.cv_tag} ({mv_type})"
         )
-        system.update_tag_info_dict(self._sp_tag_info.tag, self._sp_tag_info)
-
-        # make the control action default to starting state value
+        # make the control action default to starting measurement or calculation value
         mv_tag_info = system.tag_info_dict[self.mv_tag]
-        mv_state_unit = system.process_model.state_metadata_dict[mv_tag_info._raw_tag].unit
-        converted_data = mv_tag_info.make_converted_data_getter(mv_state_unit)()
-        converted_data.time = system.time
-        converted_data.ok = True
-        self._control_action = converted_data
-        
+        self._control_action = mv_tag_info.data
+        self._mv_tag_info = mv_tag_info
         self._post_commission(system)
         self._initialized = True
-        if np.isscalar(converted_data.value):
+        if np.isscalar(self._control_action.value):
             self._is_scalar = True
+        return True
         
     def _post_commission(self, system: System):
         pass
@@ -348,7 +337,7 @@ class ControllerBase(BaseModel, ABC):
         cv = self._cv_getter()
         
         if self.mode == ControllerMode.TRACKING:
-            self.sp_trajectory.set_now(t = t, value = cv.value)
+            self.sp_trajectory.set(t = t, value = cv.value)
             self._sp_tag_info.data = cv
             if self.cascade_controller is not None:
                 self.cascade_controller.update(t)
@@ -375,10 +364,10 @@ class ControllerBase(BaseModel, ABC):
             return last_control_action
 
         # compute control output
-        control_output = self._control_algorithm(t = t, cv = cv.value, sp = sp_val)
-        if np.isnan(control_output):
+        control_output, successful = self._control_algorithm(t = t, cv = cv.value, sp = sp_val)
+        if np.isnan(control_output) or not successful:
             logger.warning(
-                f"'{self.cv_tag}' controller returned an invalid value '{control_output}'. "
+                f"'{self.cv_tag}' controller algorithm failed. "
                 f"Holding previous control action ({last_control_action.value}) "
             )
             last_control_action.ok = False
@@ -424,13 +413,18 @@ class ControllerBase(BaseModel, ABC):
             t: Seconds,
             cv: StateValue,
             sp: StateValue,
-            ) -> StateValue:
+            ) -> tuple[StateValue, bool]:
         """The actual control algorithm. To be implemented by subclasses."""
         pass
     
     @property
     def sp_history(self) -> dict[str, TagData]:
-        return {self._sp_tag_info.tag: self._sp_tag_info.history}
+        c = self
+        sp_history = {self._sp_tag_info.tag: self._sp_tag_info.history}
+        while c.cascade_controller is not None:
+            c = c.cascade_controller
+            sp_history.update(c.sp_history)
+        return sp_history
 
     @property
     def t(self) -> Seconds:

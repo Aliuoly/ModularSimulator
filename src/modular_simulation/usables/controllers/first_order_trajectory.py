@@ -7,7 +7,7 @@ from modular_simulation.validation.exceptions import ControllerConfigurationErro
 from modular_simulation.utils.typing import Seconds, StateValue
 if TYPE_CHECKING:
     from modular_simulation.framework.system import System
-from astropy.units import Quantity
+from astropy.units import Unit
 import logging
 logger = logging.getLogger(__name__)
 
@@ -49,12 +49,12 @@ class FirstOrderTrajectoryController(ControllerBase):
                 f"The configured open loop time constant tag '{self.open_loop_time_constant}' "
                 "was not found in the defined measurements or calculations. "
             )
-            if not isinstance(found_tag_info, Quantity):
+            if found_tag_info.unit.is_equivalent("second") is False:
                 raise ControllerConfigurationError(
                 f"The configured open loop time constant tag '{self.open_loop_time_constant}' "
-                "was found to not be a astropy.units.Quantity"
+                "was found to not have units of time. Got '{found_tag_info.unit}' instead. "
             )
-            converter = found_tag_info.unit.get_converter("second")
+            converter = found_tag_info.unit.get_converter(Unit("second"))
             def tc_getter() -> Seconds:
                 return converter(found_tag_info.data.value)
             self._get_open_loop_tc = tc_getter
@@ -67,7 +67,7 @@ class FirstOrderTrajectoryController(ControllerBase):
         t: Seconds,
         cv: StateValue,
         sp: StateValue,
-        ) -> StateValue:
+        ) -> tuple[StateValue, bool]:
         """Compute the MV required to hit the desired next CV sample.
 
         The algorithm derives the desired CV trajectory based on the requested
@@ -93,5 +93,5 @@ class FirstOrderTrajectoryController(ControllerBase):
             "%-12.12s FOTC | t=%8.1f cv=%8.2f sp=%8.2f out=%8.2f, cv_pred_at_out=%8.2f",
             self.cv_tag, t, cv, sp, output, expected_next_value
         )
-        return output
+        return output, True
     

@@ -1,18 +1,19 @@
+from __future__ import annotations
 import numpy as np
 from abc import ABC, abstractmethod
 from pydantic import (
     BaseModel, ConfigDict,
     Field, PrivateAttr, 
-    PlainSerializer, BeforeValidator
 )
-from astropy.units import Unit, UnitBase
-from typing import Any, Annotated
+from typing import Any, TYPE_CHECKING
 from collections.abc import Callable
 from collections import deque
 from modular_simulation.usables.tag_info import TagData, TagInfo
-from modular_simulation.measurables.process_model import ProcessModel
 from modular_simulation.utils.typing import StateValue, SerializableUnit, Seconds
 from modular_simulation.validation.exceptions import SensorConfigurationError
+
+if TYPE_CHECKING:
+    from modular_simulation.framework.system import System
 
 class RNGCache:
     """Efficient cache for random numbers to reduce per-call RNG overhead."""
@@ -108,8 +109,9 @@ class SensorBase(BaseModel, ABC):
     )
 
     #----construction time initialized----
-    _rng: np.random.Generator = PrivateAttr()
+    _rng_cache: RNGCache = PrivateAttr()
     _tag_info: TagInfo = PrivateAttr()
+    _alias_tag: str = PrivateAttr()
 
     #----commission time initialized----
     _measurement_getter: Callable[[], StateValue] = PrivateAttr()
@@ -123,17 +125,17 @@ class SensorBase(BaseModel, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
     def model_post_init(self, context: Any) -> None:
-        self._rng = np.random.default_rng(self.random_seed)
         self._rng_cache = RNGCache(seed=self.random_seed, cache_size=100_00)
+        if self.alias_tag is None: 
+            self.alias_tag = self.measurement_tag
+        self._alias_tag = self.alias_tag
         self._tag_info = TagInfo(
             tag = self.alias_tag, 
             unit = self.unit, 
             description = self.description,
             _raw_tag = self.measurement_tag)
-        if self.alias_tag is None: 
-            self.alias_tag = self.measurement_tag
 
-    def commission(self, t: Seconds, process: ProcessModel) -> None:
+    def commission(self, system: System) -> bool:
         """
         Commission the sensor for the process (lol)
         Resolve the measurement source and prime the sensor state.
@@ -142,6 +144,8 @@ class SensorBase(BaseModel, ABC):
         will check for "if self.something is None"
         """
         desired_state = self.measurement_tag
+        process = system.process_model
+        t = system.time
         state_info = process.state_metadata_dict.get(desired_state)
         if state_info is None:
             raise SensorConfigurationError(
@@ -160,6 +164,12 @@ class SensorBase(BaseModel, ABC):
         self.measure(t = self._t, force=True) # flush the update logic
         if np.isscalar(self._measurement):
             self._is_scalar = True
+        # if somehow the measurement returned NAN, something went wrong and the
+        # commissioning failed. 
+        successful = True
+        if np.any(np.isnan(self._tag_info.data.value)):
+            return not successful
+        return successful
 
     def measure(self, t: Seconds, *, force: bool = False) -> TagData:
         """Execute the measurement pipeline and return the resulting :class:`TagData`.
@@ -264,5 +274,5 @@ class SensorBase(BaseModel, ABC):
         return noisy_value, False
 
     @property
-    def measurement_history(self) -> list[TagData]:
-        return list(self._tag_info.history)
+    def history(self) -> dict[str, TagData]:
+        return {self._alias_tag: self._tag_info.history}

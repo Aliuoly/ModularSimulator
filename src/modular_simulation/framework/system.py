@@ -1,4 +1,3 @@
-from abc import ABC
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from typing import Any
 from collections.abc import Callable
@@ -18,8 +17,8 @@ from modular_simulation.usables import (
 )
 from modular_simulation.usables.tag_info import TagInfo
 from modular_simulation.measurables.process_model import ProcessModel
-from modular_simulation.utils.wrappers import second
-from modular_simulation.utils.typing import TimeValue, StateValue
+from modular_simulation.utils.typing import Seconds, StateValue, TimeQuantity
+from modular_simulation.utils.wrappers import second_value
 from modular_simulation.validation.exceptions import (
     SensorConfigurationError, 
     ControllerConfigurationError
@@ -31,7 +30,7 @@ logger = logging.getLogger(__name__)
 class System(BaseModel):
     """
     """
-    dt: TimeValue = Field(
+    dt: Seconds = Field(
         default = ...,
         description = (
             "How often the system's sensors, calculations, and controllers update. "
@@ -88,9 +87,6 @@ class System(BaseModel):
     )
 
     _history: dict[str, list[StateValue]] = PrivateAttr(default_factory = dict)
-    _dt_in_seconds: float = PrivateAttr()
-    _t_in_seconds: float = PrivateAttr() 
-    _params: dict[str, Any] = PrivateAttr() # NDict for numba implementation, dict[str, slice] otherwise
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
 
@@ -147,17 +143,17 @@ class System(BaseModel):
         return exception_group
     
     def model_post_init(self, context: Any) -> None:
-        
         self._validate()
-
+        
+        self.process_model._attach_system(self)
         model = self.process_model
-        self._t_in_seconds = model.t
-        self._dt_in_seconds = self.dt.to_value("second")
+        for sensor in self.sensors:
+            sensor.commission(self.time, model)
+        for controller in self.controllers:
+            controller.commission(self)
+        for calculation in self.calculations:
+            calculation.wire_inputs(self.time, self.tag_info_dict)
 
-        if self.use_numba:
-            self._construct_fast_params()
-        else:
-            self._construct_params()
         if self.record_history:
             # Build history dict and accessors exactly once
             for state in model.model_dump():
@@ -169,87 +165,13 @@ class System(BaseModel):
                 self._history_slots.append((lambda o=mq_obj, g=getter: g(o), lst)) #type:ignore[misc]
             self._history['time'] = []
 
-        # pre-calculate the algebraic values once to refresh them with current states
-        # and control elements and constants
-        initial_algebraic_array = self._params["algebraic_values_function"](
-            y = model.differential_view.to_array(),
-            u = model.controlled_view.to_array(),
-            k = self._params["k"],
-            y_map = self._params["y_map"],
-            u_map = self._params["u_map"],
-            k_map = self._params["k_map"],
-            algebraic_map = self._params["algebraic_map"],
-            algebraic_size = self._params["algebraic_size"]
-        )
-        model.algebraic_view.update_from_array(initial_algebraic_array)
-
-        
-        for sensor in self.sensors:
-            sensor.commission(self.time, model)
-        for controller in self.controllers:
-            controller.commission(self)
-        for calculation in self.calculations:
-            calculation.wire_inputs(self.time, self.tag_info_dict)
-
-    def _construct_fast_params(self) -> None:
-        """
-        overwrites System's method of the same name to support numba njit decoration
-        """
-        model = self.process_model
-        y_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
-        index_map = model.differential_view.index_map
-        for member in index_map:
-            y_map[member] = index_map[member if isinstance(member, slice) else slice(member, member+1)]
-
-        u_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
-        index_map = model.controlled_view.index_map
-        for member in index_map:
-            u_map[member] = index_map[member if isinstance(member, slice) else slice(member, member+1)]
-        
-        k_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
-        index_map = model.constant_view.index_map
-        for member in index_map:
-            k_map[member] = index_map[member if isinstance(member, slice) else slice(member, member+1)]
-
-        algebraic_map = NDict.empty(key_type = types.unicode_type, value_type = types.slice2_type)
-        index_map = model.algebraic_view.index_map
-        for member in index_map:
-            algebraic_map[member] = index_map[member if isinstance(member, slice) else slice(member, member+1)]
-
-        algebraic_size = model.algebraic_view.array_size
-
-        self._params = {
-            'y_map': y_map,
-            'u_map': u_map,
-            'k_map': k_map,
-            'algebraic_map': algebraic_map,
-            'algebraic_size': algebraic_size,
-            'k': model.constant_view.to_array(),
-            'algebraic_values_function': jit(**self.numba_options)(model.calculate_algebraic_values),
-            'rhs_function': jit(**self.numba_options)(model.differential_rhs),
-        }
-
-    def _construct_params(self) -> None:
-        model = self.process_model
-        algebraic_size = model.algebraic_view.array_size
-        self._params = {
-            'y_map': model.differential_view._index_map,
-            'u_map': model.controlled_view._index_map,
-            'k_map': model.constant_view._index_map,
-            'algebraic_size': algebraic_size,
-            'algebraic_map': model.algebraic_view._index_map,
-            'k': model.constant_view.to_array(),
-            'algebraic_values_function': model.calculate_algebraic_values,
-            'rhs_function': model.differential_rhs,
-        }
-
     def _update_history(self) -> None:
         if not self.record_history:
             return
         # simple tight loop: call getter, append to pre-bound list
         for getter, lst in self._history_slots:
             lst.append(getter()) #type:ignore[call-arg]
-        self._history['time'].append(self._t_in_seconds)
+        self._history['time'].append(self.time)
 
     def _update_components(self) -> None:
         """
@@ -267,7 +189,7 @@ class System(BaseModel):
         for c in self.controllers:
             c.update(t)
     
-    def step(self, duration: TimeValue|None = None) -> None:
+    def step(self, duration: Seconds|TimeQuantity|None = None) -> None:
         """
         The main public method to advance the simulation by one time step.
 
@@ -277,10 +199,8 @@ class System(BaseModel):
         states with the final, successful result.
         """
         show_progress = False
-        if duration is None:
-            nsteps = 1
-        else:
-            nsteps = round(duration.to(self.dt.unit).value / self.dt.value)
+        duration = second_value(duration) if duration is not None else self.dt
+        nsteps = round(duration / self.dt)
         if nsteps > 1:
             if logger.level == logging.NOTSET:
                 # dont show progress bar if we are logging.
@@ -292,42 +212,11 @@ class System(BaseModel):
         # and then update the states with single_step()
         for _ in range(int(nsteps)):
             self._update_components()
-            self._update_process()
+            self.process_model.step(self.dt)
+            self._update_history()
             if show_progress:
                 pbar.update(1)
 
-    def _update_process(self):
-        y_map = self._params['y_map']
-        u_map = self._params['u_map']
-        k_map = self._params['k_map']
-        algebraic_map = self._params['algebraic_map']
-        k = self._params['k']
-        algebraic_values_function = self._params["algebraic_values_function"]
-        rhs_function = self._params["rhs_function"]
-        algebraic_size = self._params["algebraic_size"]
-        differential_view = self.process_model.differential_view
-        y = differential_view.to_array()
-        u = self.process_model.controlled_view.to_array()
-        end_t = self._t_in_seconds + self._dt_in_seconds
-        result = solve_ivp(
-            fun = self.process_model._rhs_wrapper,
-            t_span = (self._t_in_seconds, end_t),
-            y0 = y,
-            args = (u, k, y_map, u_map, k_map, algebraic_map, algebraic_values_function, rhs_function, algebraic_size),
-            **self.solver_options
-        )
-        final_y = result.y[:, -1]
-        differential_view.update_from_array(final_y)
-
-        # After the final SUCCESSFUL step, update the actual algebraic_states object.
-        final_algebraic_values = algebraic_values_function(
-            final_y, u, k, y_map, u_map, k_map, algebraic_map, algebraic_size
-        )
-        self.process_model.algebraic_view.update_from_array(final_algebraic_values)
-        self.process_model.t = end_t
-        self._t_in_seconds = end_t
-        self._update_history()
-    
     def extend_controller_trajectory(self, cv_tag: str, value: float | None = None) -> "Trajectory":
         """
         used to 'extend' the setpoint trajectory of a controller from the current time onwards.
@@ -351,14 +240,14 @@ class System(BaseModel):
             )
         active_trajectory = controller.sp_trajectory
         if value is None:
-            value = active_trajectory(self._t_in_seconds)
+            value = active_trajectory(self.time)
 
-        old_value = active_trajectory(self._t_in_seconds)
-        active_trajectory.set(t = self._t_in_seconds, value = value)
-        new_value = active_trajectory(self._t_in_seconds)
+        old_value = active_trajectory(self.time)
+        active_trajectory.set(t = self.time, value = value)
+        new_value = active_trajectory(self.time)
         logger.info("Setpoint trajectory for '%(tag)s' controller changed at time %(time)0.0f " \
                         "from %(old)0.1e to %(new)0.1e",
-                        {'tag': cv_tag, 'time': self._t_in_seconds, 'old': old_value, 'new': new_value})
+                        {'tag': cv_tag, 'time': self.time, 'old': old_value, 'new': new_value})
         return active_trajectory
 
     def set_controller_mode(self, cv_tag: str, mode: ControllerMode | str) -> ControllerMode:
@@ -400,15 +289,14 @@ class System(BaseModel):
                 controller = controller.cascade_controller
                 return_dict.update({controller.cv_tag : controller})
         return return_dict
+    
+    @property
+    def time(self) -> Seconds:
+        return self.process_model.t
 
     @cached_property
     def cv_tag_list(self) -> list[str]:
         return list(self.controller_dictionary.keys())
-    
-    @property
-    def time(self) -> TimeValue:
-        """Return the current simulation time."""
-        return second(self._t_in_seconds)
 
     @property
     def measured_history(self) -> dict[str, Any]:

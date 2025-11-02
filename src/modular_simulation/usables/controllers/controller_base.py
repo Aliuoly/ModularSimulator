@@ -10,7 +10,7 @@ from pydantic import BaseModel, PrivateAttr, Field, ConfigDict, SerializeAsAny, 
 from modular_simulation.usables.tag_info import TagData, TagInfo
 from modular_simulation.usables.controllers.trajectory import Trajectory
 from modular_simulation.validation.exceptions import ControllerConfigurationError
-from modular_simulation.utils.typing import TimeValue, StateValue, PerTimeValue
+from modular_simulation.utils.typing import Seconds, StateValue, PerSeconds, SerializableUnit
 from modular_simulation.utils.wrappers import second, second_value
 from modular_simulation.measurables.process_model import ProcessModel
 if TYPE_CHECKING:
@@ -26,7 +26,7 @@ def wrap_cv_getter_as_sp_getter(cv_getter):
     Turns a cv_getter, which takes no arguments, 
         into a sp_getter, which takes t as argument
     """
-    def sp_getter(t: TimeValue):
+    def sp_getter(t: Seconds):
         return cv_getter()
     
     return sp_getter
@@ -123,7 +123,7 @@ class ControllerBase(BaseModel, ABC):
             "measured unit of mv_tag or making a conversion calculation separately."
         )
     )
-    ramp_rate: Annotated[PerTimeValue, BeforeValidator(second), PlainSerializer(second_value),] | None = Field(
+    ramp_rate: PerSeconds | None = Field(
         default=None,
         description=(
             "Optional ramp rate limit for the controller setpoint. "
@@ -148,8 +148,8 @@ class ControllerBase(BaseModel, ABC):
             "If no cascade controller is provided, this mode will fall back to AUTO with a warning. "
         )
     )
-    period: Annotated[Quantity, BeforeValidator(second), PlainSerializer(second_value),] = Field(
-        default = Quantity(1e-12, "second"),
+    period: Seconds = Field(
+        default = 1e-12,
         description = (
             "minimum execution period of the controller. Controlelr will execute "
             "as frequently as possible such that the time between execution is as "
@@ -157,7 +157,7 @@ class ControllerBase(BaseModel, ABC):
         )
     )
     _is_final_control_element: bool = PrivateAttr(default = True)
-    _sp_getter: Callable[[TimeValue], TagData] = PrivateAttr()
+    _sp_getter: Callable[[Seconds], TagData] = PrivateAttr()
     _cv_getter: Callable[[], TagData] = PrivateAttr()
     _mv_setter: Callable[[StateValue], None] = PrivateAttr()
     _initialized: bool = PrivateAttr(default = False)
@@ -314,11 +314,10 @@ class ControllerBase(BaseModel, ABC):
         # make the control action default to starting state value
         mv_tag_info = system.tag_info_dict[self.mv_tag]
         mv_state_unit = system.process_model.state_metadata_dict[mv_tag_info._raw_tag].unit
-        self._control_action = TagData(
-            time = system.time,
-            value = mv_tag_info.make_converted_data_getter(mv_state_unit)(),
-            ok = True
-        )
+        converted_data = mv_tag_info.make_converted_data_getter(mv_state_unit)()
+        converted_data.time = system.time
+        converted_data.ok = True
+        self._control_action = converted_data
         
         self._post_commission(system)
         self._initialized = True
@@ -326,7 +325,7 @@ class ControllerBase(BaseModel, ABC):
     def _post_commission(self, system: System):
         pass
 
-    def update(self, t: TimeValue) -> TagData:
+    def update(self, t: Seconds) -> TagData:
         """Run one control-cycle update and return the applied MV value.
 
         The routine pulls the latest controlled-variable reading, sources the
@@ -376,8 +375,8 @@ class ControllerBase(BaseModel, ABC):
         control_output = self._control_algorithm(t = t, cv = cv.value, sp = sp_val)
         if np.isnan(control_output):
             logger.warning(
-                "'{cv}' controller returned an invalid value '{value}'. "
-                "Holding previous control action. "
+                f"'{self.cv_tag}' controller returned an invalid value '{control_output}'. "
+                f"Holding previous control action ({last_control_action.value}) "
             )
             last_control_action.ok = False
             return last_control_action
@@ -395,10 +394,10 @@ class ControllerBase(BaseModel, ABC):
 
     def _apply_mv_ramp(
             self,
-            t0: TimeValue,
+            t0: Seconds,
             mv0: StateValue,
             mv_target: StateValue,
-            t_now: TimeValue
+            t_now: Seconds
             ) -> StateValue:
         if self.ramp_rate is None:
             return mv_target
@@ -417,7 +416,7 @@ class ControllerBase(BaseModel, ABC):
     @abstractmethod
     def _control_algorithm(
             self,
-            t: TimeValue,
+            t: Seconds,
             cv: StateValue,
             sp: StateValue,
             ) -> StateValue:
@@ -429,6 +428,6 @@ class ControllerBase(BaseModel, ABC):
         return {self._sp_tag_info.tag: self._sp_tag_info.history}
 
     @property
-    def t(self) -> TimeValue:
+    def t(self) -> Seconds:
         return self._control_action.time
     

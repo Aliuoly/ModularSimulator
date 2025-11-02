@@ -1,12 +1,11 @@
 from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Annotated, TYPE_CHECKING
-from pydantic import Field, PrivateAttr, BaseModel, BeforeValidator, PlainSerializer
+from pydantic import Field, PrivateAttr, BaseModel, BeforeValidator
 from modular_simulation.usables.controllers.controller_base import ControllerBase
 from modular_simulation.usables.calculations.calculation_base import CalculationBase
 from modular_simulation.validation.exceptions import ControllerConfigurationError
-from modular_simulation.utils.typing import TimeValue, StateValue
-from modular_simulation.utils.wrappers import second, second_value
+from modular_simulation.utils.typing import Seconds, StateValue
 from modular_simulation.utils.bounded_minimize import bounded_minimize
 import logging
 if TYPE_CHECKING:
@@ -48,7 +47,7 @@ class InternalModelController(ControllerBase):
             "and returns the predicted controlled variable's value. "
         )
     )
-    sp_filter_tc: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
+    sp_filter_tc: Seconds = Field(
         default = 1.0,
         gt = 0.0,
         le = 1.0,
@@ -93,7 +92,7 @@ class InternalModelController(ControllerBase):
         )
 
     def _control_algorithm(self,
-        t: TimeValue,
+        t: Seconds,
         cv: StateValue,
         sp: StateValue,
         ) -> StateValue:

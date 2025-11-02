@@ -1,5 +1,5 @@
 from modular_simulation.usables.controllers.controller_base import ControllerBase
-from modular_simulation.utils.typing import StateValue, TimeValue
+from modular_simulation.utils.typing import StateValue, Seconds
 import logging
 logger = logging.getLogger(__name__)
 
@@ -10,7 +10,7 @@ class MVController(ControllerBase):
 
     def _control_algorithm(
         self,
-        t: TimeValue,
+        t: Seconds,
         cv: StateValue,
         sp: StateValue,
         ) -> StateValue:

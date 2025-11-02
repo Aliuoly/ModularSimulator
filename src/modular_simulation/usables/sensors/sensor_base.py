@@ -10,7 +10,7 @@ from typing import Any, Annotated
 from collections.abc import Callable
 from modular_simulation.usables.tag_info import TagData, TagInfo
 from modular_simulation.measurables.process_model import ProcessModel
-from modular_simulation.utils.typing import StateValue, TimeValue
+from modular_simulation.utils.typing import StateValue, SerializableUnit, Seconds
 from modular_simulation.validation.exceptions import SensorConfigurationError
 
 
@@ -40,11 +40,7 @@ class SensorBase(BaseModel, ABC):
             "then, a usable with tag 'lab_MI' will be available, while 'cumm_MI' would not be available."
         )
     )
-    unit: Annotated[
-        UnitBase,
-        BeforeValidator(lambda u: u if isinstance(u, UnitBase) else Unit(u)),
-        PlainSerializer(lambda u: str(u)),
-    ] = Field(
+    unit: SerializableUnit = Field(
         description = "Unit of the measured quantity. Will be parsed with Astropy if is a string. "
     )
     description: str = Field(
@@ -78,7 +74,7 @@ class SensorBase(BaseModel, ABC):
             "If true value is beyong the range, it is clipped and returned. "
         )
     )
-    time_constant: float = Field(
+    time_constant: Seconds = Field(
         default = 0.0,
         description = (
             "The timeconstant associated with the dynamics of "
@@ -100,7 +96,7 @@ class SensorBase(BaseModel, ABC):
     # all internal calculation that requires the previous measurement and timestamp should use these
     # these may or may not be equivalent to _tag_info.data.value and .t
     _measurement: StateValue = PrivateAttr() 
-    _t: TimeValue = PrivateAttr()                # all internal calculation that requires the previous timestamp should use this
+    _t: Seconds = PrivateAttr()                # all internal calculation that requires the previous timestamp should use this
     _initialized: bool = PrivateAttr(default = False)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -115,7 +111,7 @@ class SensorBase(BaseModel, ABC):
         if self.alias_tag is None: 
             self.alias_tag = self.measurement_tag
 
-    def commission(self, t: TimeValue, process: ProcessModel) -> None:
+    def commission(self, t: Seconds, process: ProcessModel) -> None:
         """
         Commission the sensor for the process (lol)
         Resolve the measurement source and prime the sensor state.
@@ -141,7 +137,7 @@ class SensorBase(BaseModel, ABC):
         self._initialized = True
         self.measure(t = self._t, force=True) # flush the update logic
     
-    def measure(self, t: TimeValue, *, force: bool = False) -> TagData:
+    def measure(self, t: Seconds, *, force: bool = False) -> TagData:
         """Execute the measurement pipeline and return the resulting :class:`TagData`.
 
         The method enforces initialization, optionally reuses the most recent
@@ -173,7 +169,7 @@ class SensorBase(BaseModel, ABC):
         self._tag_info.data = TagData(time = t, value = final_value, ok = ok)
         return self._tag_info.data
     
-    def _sensor_dynamics(self, new_value: StateValue, t: TimeValue):
+    def _sensor_dynamics(self, new_value: StateValue, t: Seconds):
         dt = t - self._t
         lamb = dt / (dt + self.time_constant) # approximation
         self._t = t
@@ -181,7 +177,7 @@ class SensorBase(BaseModel, ABC):
         return self._measurement
     
     @abstractmethod
-    def _should_update(self, t: TimeValue) -> bool:
+    def _should_update(self, t: Seconds) -> bool:
         """
         Subclass hook that decides whether a fresh measurement is required.
 
@@ -192,7 +188,7 @@ class SensorBase(BaseModel, ABC):
         pass
 
     @abstractmethod
-    def _get_processed_value(self, t: TimeValue, raw_value: StateValue) -> tuple[StateValue, bool]:
+    def _get_processed_value(self, t: Seconds, raw_value: StateValue) -> tuple[StateValue, bool]:
         """
         Transform the true value into the sensor's processed output.
 

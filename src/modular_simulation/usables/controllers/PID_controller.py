@@ -1,10 +1,9 @@
 import logging
 from collections import deque
-from typing import Annotated
-from pydantic import Field, PrivateAttr, PlainSerializer, BeforeValidator
+from pydantic import Field, PrivateAttr
 from modular_simulation.usables.controllers.controller_base import ControllerBase
-from modular_simulation.utils.typing import TimeValue, StateValue, PerTimeValue
-from modular_simulation.utils.wrappers import second, second_value
+from modular_simulation.utils.typing import Seconds, StateValue
+from modular_simulation.utils.wrappers import second
 logger = logging.getLogger(__name__)
 
 class PIDController(ControllerBase):
@@ -29,22 +28,18 @@ class PIDController(ControllerBase):
         gt = 0,
         description = "Proportional gain"
         )
-    Ti: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
-        default = second(float('inf')),
+    Ti: Seconds = Field(
+        default = float('inf'),
         gt = 0,
         description = "Integral time constant"
         )
-    Td: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
-        default = second(0.0),
+    Td: Seconds = Field(
+        default = 0.0,
         ge = 0,
         description = "Derivative time constant"
     )
-    inverted: bool = Field(
-        default = False,
-        description = "If True, the controller assumes that higher control output -> lower pv."
-    )
-    derivative_filter_tc: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
-        default = second(0.0),
+    derivative_filter_tc: Seconds = Field(
+        default = 0.0,
         ge = 0.0,
         description = "Time constant of the derivative filter used to smooth out derivative action"
     )
@@ -60,13 +55,16 @@ class PIDController(ControllerBase):
             "if 1, corresponds to classic PID. if 0, corresponds to I-PD."
         )
     )
+    inverted: bool = Field(
+        default = False,
+        description = "If True, the controller assumes that higher control output -> lower pv."
+    )
     velocity_form: bool = Field(
         default = False,
         description=(
             "Whether to use the velocity form of the PID formulation."
         )
     )
-
     # additional PID only private attributes
     _error_queue: deque[StateValue] = PrivateAttr(default_factory = lambda: deque([0.0, 0.0], maxlen = 2))
     _integral: StateValue = PrivateAttr(default=0.0)
@@ -84,7 +82,7 @@ class PIDController(ControllerBase):
 
     def _control_algorithm(
             self,
-            t: TimeValue,
+            t: Seconds,
             cv: StateValue,
             sp: StateValue,
             ) -> StateValue:

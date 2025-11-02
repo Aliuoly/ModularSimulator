@@ -2,7 +2,8 @@ from modular_simulation.framework import System
 from modular_simulation.plotting import plot_triplet_series
 from process_definition import IrreversibleProcessModel
 from component_definition import sensors, calculations, controllers
-from modular_simulation.utils.wrappers import second, day
+from modular_simulation.utils.wrappers import second, day, second_value
+from functools import partial
 import logging
 
 
@@ -36,6 +37,8 @@ if __name__ == "__main__":
     # --- Change the setpoint and continue the simulation ---
     system.extend_controller_trajectory(cv_tag="B", value=0.2)
     system.step(day(1))
+    system.extend_controller_trajectory(cv_tag="B").ramp(0.3, rate = 0.1 / day(1))
+    system.step(day(4))
             
 
     # 3. Plot the results.
@@ -47,14 +50,15 @@ if __name__ == "__main__":
     calc_hist = history["calculations"]
     sp_hist= system.setpoint_history
     # Plot Concentration of B
+    plot_in_days = partial(plot_triplet_series, time_converter=lambda t: t / second_value(day(1)))
     ax = plt.subplot(2, 2, 1)
-    plot_triplet_series(
+    plot_in_days(
         ax,
         sensor_hist["B"],
         style="step",
         line_kwargs=pv_kwargs,
     )
-    plot_triplet_series(
+    plot_in_days(
         ax,
         sp_hist["B.sp"],
         style="step",
@@ -67,7 +71,7 @@ if __name__ == "__main__":
 
     # Plot Inlet Flow Rate (F_in)
     ax = plt.subplot(2, 2, 2)
-    plot_triplet_series(
+    plot_in_days(
         ax,
         sensor_hist["F_in"],
         style="step",
@@ -80,7 +84,7 @@ if __name__ == "__main__":
 
     # Plot Reactor Volume (V)
     ax = plt.subplot(2, 2, 3)
-    plot_triplet_series(
+    plot_in_days(
         ax,
         sensor_hist["V"],
         style="step",
@@ -93,7 +97,7 @@ if __name__ == "__main__":
 
     # Plot Outlet Flow Rate (F_out)
     ax = plt.subplot(2, 2, 4)
-    plot_triplet_series(
+    plot_in_days(
         ax,
         sensor_hist["F_out"],
         style="step",

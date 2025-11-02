@@ -2,23 +2,27 @@ from abc import ABC, abstractmethod
 from typing import Annotated, TypeAlias
 from numpy.typing import NDArray
 from collections.abc import Callable
+from dataclasses import dataclass
+from astropy.units import Unit, UnitBase
 from enum import IntEnum
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, PlainSerializer, BeforeValidator
-from astropy.units import UnitBase, Unit
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from modular_simulation.validation.exceptions import CalculationDefinitionError, CalculationConfigurationError
 from modular_simulation.usables.tag_info import TagInfo, TagData
-from modular_simulation.utils.typing import StateValue, TimeValue
+from modular_simulation.utils.typing import StateValue, Seconds, SerializableUnit
 from modular_simulation.utils import extract_unique_metadata
+from modular_simulation.utils.wrappers import second_value
 
-    
+def TypeAliasFunction(object):
+    return type(object)
+
 class TagType(IntEnum):
     INPUT = 1
     OUTPUT = 2
     CONSTANT = 3
 
 
-
-class TagMetadata(BaseModel):
+@dataclass
+class TagMetadata:
     """
     Represents information about a model state, including its type, unit, and description
 
@@ -31,17 +35,20 @@ class TagMetadata(BaseModel):
     :vartype description: str = ""
     """
     type: TagType
-    unit: Annotated[
-        UnitBase,
-        BeforeValidator(lambda u: u if isinstance(u, UnitBase) else Unit(u)),
-        PlainSerializer(lambda u: str(u)),
-    ] = ""
+    unit: SerializableUnit = Unit("")
     description: str = ""
-    model_config = ConfigDict(extra='allow',arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
 
-
-TagAnnotation: TypeAlias = Annotated[str, TagMetadata]
-ConstantAnnotation: TypeAlias = Annotated[StateValue, TagMetadata]
+    def __init__(self, type: TagType, unit: SerializableUnit = Unit(""), description: str = ""):
+        if not isinstance(type, TagType):
+            raise TypeError(f"TagMetadata 'type' must be an instance of TagType Enum, got {type} of type {type(type)}")
+        if isinstance(unit, str):
+            unit = Unit(unit)
+        if not isinstance(unit, UnitBase):
+            raise TypeError(f"TagMetadata 'unit' must be an instance of astropy.units.Unit, got {unit} of type {TypeAliasFunction(unit)}")
+        self.type = type
+        self.unit = unit
+        self.description = description
 
 # Default tag aliases used throughout the examples.  Users can always opt to
 # specify their own :class:`Annotated` types with custom units and descriptions
@@ -61,14 +68,13 @@ class CalculationBase(BaseModel, ABC):
     )
 
     #-----construction time defined-----
-    _tag_metadata_dict: dict[str, TagMetadata] = PrivateAttr()
+    _field_metadata_dict: dict[str, TagMetadata] = PrivateAttr()
     _output_tag_info_dict: dict[str, TagInfo] = PrivateAttr()
 
     #-----initialization (wiring) time defined-----
-    _t: TimeValue = PrivateAttr() 
-    _input_data_getters: dict[str, Callable[[], TagData]] = PrivateAttr()
-    _input_data_dict: dict[str, TagData] = PrivateAttr()
-    _input_value_dict: dict[str, StateValue] = PrivateAttr()
+    _input_data_getters: dict[str, Callable[[], TagData]] = PrivateAttr(default_factory=dict)
+    _input_data_dict: dict[str, TagData] = PrivateAttr(default_factory=dict)
+    _input_value_dict: dict[str, StateValue] = PrivateAttr(default_factory=dict)
     _initialized: bool = PrivateAttr(default = False)
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -77,19 +83,19 @@ class CalculationBase(BaseModel, ABC):
         if self.name is None:
             self.name = self.__class__.__name__
 
-        self._tag_metadata_dict = {
-            field_name: extract_unique_metadata(field, TagInfo, field_name, CalculationDefinitionError)
+        self._field_metadata_dict = {
+            field_name: extract_unique_metadata(field, TagMetadata, field_name, CalculationDefinitionError)
             for field_name, field in self.__class__.model_fields.items() 
             if field_name != "name"
         }
         self._output_tag_info_dict = {
-            tag: TagInfo(tag = tag, unit = metadata.unit, description = metadata.description)
-            for tag, metadata in self._tag_metadata_dict.items()
+            getattr(self, tag): TagInfo(tag = getattr(self, tag), unit = metadata.unit, description = metadata.description)
+            for tag, metadata in self._field_metadata_dict.items()
             if metadata.type == TagType.OUTPUT
         }
 
     
-    def wire_inputs(self, t: TimeValue, available_tag_info_dict: dict[str, TagInfo]) -> None:
+    def wire_inputs(self, t: Seconds, available_tag_info_dict: dict[str, TagInfo]) -> None:
         """
         Links calculation inputs to tag info instances
         and creates a simple callable for it.
@@ -97,11 +103,12 @@ class CalculationBase(BaseModel, ABC):
         so they are not NANs.
         Validation is already done so no error handling is placed here. 
         """
-        input_tag_metadata_dict = {
-            tag: metadata for tag, metadata in self._tag_metadata_dict.items()
+        t = second_value(t)
+        input_field_metadata_dict = {
+            field: metadata for field, metadata in self._field_metadata_dict.items()
             if metadata.type == TagType.INPUT
         }
-        for input_field, input_tag_metadata in input_tag_metadata_dict.items():
+        for input_field, input_field_metadata in input_field_metadata_dict.items():
             input_tag = getattr(self, input_field)
             found_tag_info = available_tag_info_dict.get(input_tag)
             if found_tag_info is None:
@@ -111,7 +118,7 @@ class CalculationBase(BaseModel, ABC):
                     "and that it corresponds to either a sensor measurement or a calculation output."
                 )
             self._input_data_getters[input_tag] = found_tag_info.make_converted_data_getter(
-                target_unit = input_tag_metadata.unit
+                target_unit = input_field_metadata.unit
             )
         self._t = t
         self._initialized = True
@@ -138,10 +145,10 @@ class CalculationBase(BaseModel, ABC):
         return any(possible_faulty_inputs_oks) if possible_faulty_inputs_oks else True
 
     @abstractmethod
-    def _calculation_algorithm(self, t: TimeValue, inputs_dict: dict[str, StateValue]) -> dict[str, StateValue]:
+    def _calculation_algorithm(self, t: Seconds, inputs_dict: dict[str, StateValue]) -> dict[str, StateValue]:
         pass    
 
-    def calculate(self, t: TimeValue) -> TagData:
+    def calculate(self, t: Seconds) -> TagData:
         """public facing method to get the calculation result"""
         if not self._initialized:
             raise RuntimeError(

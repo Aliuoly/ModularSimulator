@@ -1,11 +1,10 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING
 from collections.abc import Callable
-from pydantic import Field, PrivateAttr, PlainSerializer, BeforeValidator
+from pydantic import Field, PrivateAttr
 from modular_simulation.usables.controllers.controller_base import ControllerBase
 from modular_simulation.validation.exceptions import ControllerConfigurationError
-from modular_simulation.utils.typing import TimeValue, StateValue
-from modular_simulation.utils.wrappers import second, second_value
+from modular_simulation.utils.typing import Seconds, StateValue
 if TYPE_CHECKING:
     from modular_simulation.framework.system import System
 from astropy.units import Quantity
@@ -30,16 +29,16 @@ class FirstOrderTrajectoryController(ControllerBase):
             "open_loop_time_constant can be measured or a constant. "
         )
     )
-    open_loop_time_constant: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] | str = Field(
+    open_loop_time_constant: Seconds | str = Field(
         ...,
         description = (
-            "if a TimeValue is provided, this is the constant open_loop_time_constant used by "
+            "if a Seconds is provided, this is the constant open_loop_time_constant used by "
             "the controller. If a string is provided, the string is assumed to be a calculation output tag "
             "defined as part of the usable_quantities of the system. "
         )
     )
 
-    _get_open_loop_tc: Callable[[], TimeValue] = PrivateAttr()
+    _get_open_loop_tc: Callable[[], Seconds] = PrivateAttr()
     # ------------------------------------------------------------------------
     def _post_commission(self, system: System):
         # resolve the open_loop_time_constant thing
@@ -55,16 +54,17 @@ class FirstOrderTrajectoryController(ControllerBase):
                 f"The configured open loop time constant tag '{self.open_loop_time_constant}' "
                 "was found to not be a astropy.units.Quantity"
             )
-            def tc_getter() -> TimeValue:
-                return Quantity(found_tag_info.data.value, found_tag_info.unit)
+            converter = found_tag_info.unit.get_converter("second")
+            def tc_getter() -> Seconds:
+                return converter(found_tag_info.data.value)
             self._get_open_loop_tc = tc_getter
         else:
-            def tc_getter() -> TimeValue:
+            def tc_getter() -> Seconds:
                 return self.open_loop_time_constant
             self._get_open_loop_tc = tc_getter
 
     def _control_algorithm(self,
-        t: TimeValue,
+        t: Seconds,
         cv: StateValue,
         sp: StateValue,
         ) -> StateValue:

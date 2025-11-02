@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
-from astropy.units import UnitBase, UnitsError #type: ignore
+from astropy.units import UnitBase #type: ignore
 import numpy as np
-from modular_simulation.utils.typing import StateValue, TimeValue
+from modular_simulation.utils.typing import StateValue, Seconds
 
 
 
@@ -16,7 +16,7 @@ class TagData:
     :vartype ok: bool
     """
 
-    time: TimeValue = np.nan
+    time: Seconds = np.nan
     value: StateValue = np.nan
     ok: bool = False  # whether or not the value is ok (not faulty)
 

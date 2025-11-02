@@ -21,8 +21,8 @@ sensors=[
         measurement_tag = "B",
         unit = "mol/L",
         coefficient_of_variance=0.05,
-        sampling_period = 900,
-        deadtime = 900,
+        sampling_period = minute(10),
+        deadtime = minute(10),
     ),
     SampledDelayedSensor(
         measurement_tag = "V",

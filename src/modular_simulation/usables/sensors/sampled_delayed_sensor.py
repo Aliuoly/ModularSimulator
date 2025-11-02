@@ -1,6 +1,6 @@
 import numpy as np
 from modular_simulation.usables.sensors.sensor_base import SensorBase, TagData
-from modular_simulation.utils.typing import TimeValue, StateValue
+from modular_simulation.utils.typing import Seconds, StateValue
 from modular_simulation.utils.wrappers import second, second_value
 import collections
 from pydantic import Field, PrivateAttr, PlainSerializer, BeforeValidator
@@ -12,22 +12,24 @@ class SampledDelayedSensor(SensorBase):
     A sensor with a set sampling frequency, measurement deadtime, and gaussian noise.
     """
     
-    deadtime: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
+    deadtime: Seconds = Field(
         0.0,
         ge = 0.0,
-        description = "The measurement deadtime (a.k.a delay) in system units"
+        description = "The measurement deadtime (a.k.a delay)"
     )
 
-    sampling_period: Annotated[TimeValue, BeforeValidator(second), PlainSerializer(second_value),] = Field(
+    sampling_period: Seconds = Field(
         0.0,
         ge = 0.0,
-        description = "The sampling period of the sensor in system units. " \
-                        "This is how long it takes for new measurements to become available."
+        description = (
+            "The sampling period of the sensor. " 
+            "This is how long it takes for new measurements to become available."
+        )
     )
 
     _sample_queue: collections.deque[TagData] = PrivateAttr(default_factory=collections.deque)
 
-    def _should_update(self, t: TimeValue) -> bool:
+    def _should_update(self, t: Seconds) -> bool:
         """
         SampledDelayedSensor should update when a new sample, as determined by 
         the configured sampling time and measurement deadtime, is available. 
@@ -36,7 +38,7 @@ class SampledDelayedSensor(SensorBase):
             return True
         return False
 
-    def _get_sample(self, target_t: TimeValue) -> tuple[TagData, bool]:
+    def _get_sample(self, target_t: Seconds) -> tuple[TagData, bool]:
         """Consume and return the latest sample with time ≤ target_t.
         If none are available, set the successful flag to False
         """
@@ -57,7 +59,7 @@ class SampledDelayedSensor(SensorBase):
         # Otherwise, no new sample is ready yet
         return self._tag_info.data, not successful
     
-    def _get_processed_value(self, raw_value: StateValue, t: TimeValue) -> tuple[StateValue, bool]:
+    def _get_processed_value(self, raw_value: StateValue, t: Seconds) -> tuple[StateValue, bool]:
         """
         Retrieves the time-delayed measurement value by looking it up in
         the sample queue. 

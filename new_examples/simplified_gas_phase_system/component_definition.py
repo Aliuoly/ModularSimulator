@@ -29,6 +29,7 @@ sensors = [
     SampledDelayedSensor(measurement_tag = "F_m2", unit = "kg/hour", coefficient_of_variance=0.002),
     SampledDelayedSensor(measurement_tag = "F_cat", unit = "kg/hour", coefficient_of_variance=0.002),
     SampledDelayedSensor(measurement_tag = "effective_cat", unit = "kg/hour", coefficient_of_variance=0.002),
+    SampledDelayedSensor(measurement_tag = "monomer_rates", unit = "kmol/hr", coefficient_of_variance=0.002),
 ]
 calculations = [
     FirstOrderFilter(

@@ -17,9 +17,11 @@ else:  # pragma: no cover - fall back when matplotlib is absent
 SeriesInput = Sequence[TagData] | Mapping[str, Sequence[Any]]
 
 
-def _coerce_scalar(value: Any) -> float:
+def _coerce_scalar(value: Any, index:int|None = None) -> float:
     arr = np.asarray(value)
     if arr.shape != () and arr.shape != (1, ):
+        if isinstance(index, int):
+            return float(arr[index])
         raise ValueError(
             "Plotting only supports scalar values; received array with shape " 
             f"{arr.shape}."
@@ -27,7 +29,7 @@ def _coerce_scalar(value: Any) -> float:
     return float(arr.item())
 
 
-def triplets_to_arrays(samples: Sequence[TagData]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def triplets_to_arrays(samples: Sequence[TagData], index:int|None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Convert a sequence of triplets into NumPy arrays of time, value, and quality flags."""
 
     times = np.empty(len(samples), dtype=float)
@@ -36,12 +38,12 @@ def triplets_to_arrays(samples: Sequence[TagData]) -> tuple[np.ndarray, np.ndarr
 
     for idx, sample in enumerate(samples):
         times[idx] = float(sample.time)
-        values[idx] = _coerce_scalar(sample.value)
+        values[idx] = _coerce_scalar(sample.value, index)
         ok[idx] = bool(sample.ok)
     return times, values, ok
 
 
-def _extract_series(samples: SeriesInput) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _extract_series(samples: SeriesInput, index:int|None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if isinstance(samples, Mapping):
         try:
             times_like = samples["time"]
@@ -57,10 +59,10 @@ def _extract_series(samples: SeriesInput) -> tuple[np.ndarray, np.ndarray, np.nd
 
         values_arr = np.empty(len(times_arr), dtype=float)
         for idx, raw_value in enumerate(values_like):
-            values_arr[idx] = _coerce_scalar(raw_value)
+            values_arr[idx] = _coerce_scalar(raw_value, index)
         return times_arr, values_arr, ok_arr
 
-    return triplets_to_arrays(samples)
+    return triplets_to_arrays(samples, index)
 
 
 def _iter_true_segments(mask: np.ndarray) -> Iterable[slice]:
@@ -87,6 +89,7 @@ def plot_triplet_series(
     time_converter: Callable = lambda v: v,
     t_start: float | tuple[float,...] = 0.0, # in the converted unit
     t_end: float | tuple[float,...] = np.inf, # in the converted unit
+    array_index: int| None = None,
 ) -> list[Any]:
     """Plot a :class:`TagData` series on ``ax``.
 
@@ -115,7 +118,7 @@ def plot_triplet_series(
     list of Matplotlib artists added to the axes.
     """
     
-    times, values, ok = _extract_series(samples)
+    times, values, ok = _extract_series(samples, index=array_index)
     times = time_converter(times)
     keep_ind = np.zeros(len(times), dtype = np.bool)
     if isinstance(t_start, tuple):

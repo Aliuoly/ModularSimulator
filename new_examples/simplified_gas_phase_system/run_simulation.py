@@ -122,5 +122,17 @@ if __name__ == '__main__':
     lns1, labs1 = ax.get_legend_handles_labels()
     ax.legend(lns1, labs1, loc="best")
 
+        # Pressure
+    ax = axes[7]
+    ploter(ax, sensor_hist["monomer_rates"], label="monomer rate",
+                        time_converter=lambda t: t/3600., array_index=0) # seconds to hours
+    ploter(ax, sensor_hist["monomer_rates"], label="comonomer rate",
+                        time_converter=lambda t: t/3600., array_index=1) # seconds to hours
+    ax.set_title("monomer_rates")
+    ax.set_ylabel("monomer_rates")
+    ax.grid(True, alpha=0.3)
+    lns1, labs1 = ax.get_legend_handles_labels()
+    ax.legend(lns1, labs1, loc="best")
+
     plt.tight_layout()
     plt.show()

@@ -163,6 +163,7 @@ class ControllerBase(BaseModel, ABC):
     _initialized: bool = PrivateAttr(default = False)
     _control_action: TagData = PrivateAttr()
     _sp_tag_info: TagInfo = PrivateAttr()
+    _is_scalar:bool = PrivateAttr(default = False)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra = "forbid")
     
     def _make_cv_getter(self, available_tag_info_dict: dict[str, TagInfo]) -> None:
@@ -321,6 +322,8 @@ class ControllerBase(BaseModel, ABC):
         
         self._post_commission(system)
         self._initialized = True
+        if np.isscalar(converted_data.value):
+            self._is_scalar = True
         
     def _post_commission(self, system: System):
         pass
@@ -380,8 +383,10 @@ class ControllerBase(BaseModel, ABC):
             )
             last_control_action.ok = False
             return last_control_action
-        
-        control_output = np.clip(control_output, *self.mv_range)
+        if self._is_scalar:
+            control_output = max(min(control_output, self.mv_range[1]), self.mv_range[0])
+        else:
+            control_output = np.clip(control_output, *self.mv_range)
         ramp_output = self._apply_mv_ramp(
             t0 = last_control_action.time, mv0 = last_control_action.value, mv_target = control_output, t_now = t
             )

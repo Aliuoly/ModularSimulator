@@ -8,12 +8,32 @@ from pydantic import (
 from astropy.units import Unit, UnitBase
 from typing import Any, Annotated
 from collections.abc import Callable
+from collections import deque
 from modular_simulation.usables.tag_info import TagData, TagInfo
 from modular_simulation.measurables.process_model import ProcessModel
 from modular_simulation.utils.typing import StateValue, SerializableUnit, Seconds
 from modular_simulation.validation.exceptions import SensorConfigurationError
 
+class RNGCache:
+    """Efficient cache for random numbers to reduce per-call RNG overhead."""
 
+    def __init__(self, seed: int | None = None, cache_size: int = 10_000):
+        self._rng = np.random.default_rng(seed)
+        self._cache_size = cache_size
+        self._uniform_cache: deque[float] = deque()
+        self._normal_cache: deque[float] = deque()
+
+    def random(self) -> float:
+        """Return one uniform random number [0,1)."""
+        if not self._uniform_cache:
+            self._uniform_cache.extend(self._rng.random(self._cache_size))
+        return self._uniform_cache.popleft()
+
+    def normal(self) -> float:
+        """Return one standard normal random number (mean 0, std 1)."""
+        if not self._normal_cache:
+            self._normal_cache.extend(self._rng.standard_normal(self._cache_size))
+        return self._normal_cache.popleft()
 
 class SensorBase(BaseModel, ABC):
     """Abstract base class for all sensors in the modular simulation framework.
@@ -98,11 +118,13 @@ class SensorBase(BaseModel, ABC):
     _measurement: StateValue = PrivateAttr() 
     _t: Seconds = PrivateAttr()                # all internal calculation that requires the previous timestamp should use this
     _initialized: bool = PrivateAttr(default = False)
+    _is_scalar: bool = PrivateAttr(default=False)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
     def model_post_init(self, context: Any) -> None:
         self._rng = np.random.default_rng(self.random_seed)
+        self._rng_cache = RNGCache(seed=self.random_seed, cache_size=100_00)
         self._tag_info = TagInfo(
             tag = self.alias_tag, 
             unit = self.unit, 
@@ -136,7 +158,9 @@ class SensorBase(BaseModel, ABC):
         self._measurement = self._measurement_getter()
         self._initialized = True
         self.measure(t = self._t, force=True) # flush the update logic
-    
+        if np.isscalar(self._measurement):
+            self._is_scalar = True
+
     def measure(self, t: Seconds, *, force: bool = False) -> TagData:
         """Execute the measurement pipeline and return the resulting :class:`TagData`.
 
@@ -156,12 +180,15 @@ class SensorBase(BaseModel, ABC):
         raw_value = self._measurement_getter()
         if self.time_constant > 1e-12:
             raw_value = self._sensor_dynamics(raw_value, t)
-        processed_value, successful = np.clip(
-            self._get_processed_value(t = t, raw_value = raw_value), 
-            *self.instrument_range
-        )
+        processed_value, successful = self._get_processed_value(t = t, raw_value = raw_value)
         if not successful:
             return self._tag_info.data
+        
+        if self._is_scalar:
+            processed_value = max(min(processed_value, self.instrument_range[1]), self.instrument_range[0])
+        else:
+            processed_value = np.clip(processed_value, *self.instrument_range)
+
         
         final_value, is_faulty = self._apply_noise_and_faults(processed_value)
 
@@ -212,22 +239,27 @@ class SensorBase(BaseModel, ABC):
         """
         # Check for a fault
         faulty = False
-        if self._rng.random() < self.faulty_probability:
+        if self._rng_cache.random() < self.faulty_probability:
             faulty = True
             # A fault occurred, simulate what kind
             # 1. frozen value
-            if self._rng.random() < 0.5:
+            if self._rng_cache.random() < 0.5:
                 return self._measurement, faulty
             # 2. spike
-            value *= (0.5 + self._rng.random())
+            value *= (0.5 + self._rng_cache.random())
             return value, faulty
 
         # If not faulty, apply noise
         noisy_value = value
         if self.coefficient_of_variance > 0:
             noise_std_dev = np.abs(value * self.coefficient_of_variance)
-            noise = self._rng.normal(loc=0.0, scale=noise_std_dev)
-            noisy_value = value + noise
+            if np.isscalar(value):
+                noise = self._rng_cache.normal() * noise_std_dev
+                noisy_value = value + noise
+            else:
+                for i in range(len(value)):
+                    noise = self._rng_cache.normal() * noise_std_dev[i]
+                    noisy_value[i] = value[i] + noise
         
         return noisy_value, False
 

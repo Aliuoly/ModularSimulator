@@ -1,0 +1,90 @@
+sequenceDiagram
+    participant User
+    participant System
+    participant ProcessModel
+    participant SensorBase
+    participant CalculationBase
+    participant ControlElement
+    participant ControllerBase
+    participant TagStore
+
+    Note over System, TagStore: Simulation Loop (step)
+
+    User->>System: step(duration)
+    activate System
+    
+    Note right of System: Determine nsteps based on dt
+    
+    loop Every dt
+        System->>System: _update_components()
+        activate System
+        
+        %% Sensors Update
+        rect rgb(230, 240, 255)
+            Note over System, SensorBase: 1. Update Sensors
+            loop For each Sensor
+                System->>SensorBase: measure(t)
+                activate SensorBase
+                SensorBase->>ProcessModel: get_state()
+                ProcessModel-->>SensorBase: raw_value
+                SensorBase->>SensorBase: apply noise/faults
+                SensorBase->>TagStore: update TagInfo.data (measurement)
+                deactivate SensorBase
+            end
+        end
+
+        %% Calculations Update
+        rect rgb(255, 240, 230)
+            Note over System, CalculationBase: 2. Update Calculations
+            loop For each Calculation
+                System->>CalculationBase: calculate(t)
+                activate CalculationBase
+                CalculationBase->>TagStore: query calculation inputs
+                TagStore-->>CalculationBase: calculation inputs
+                CalculationBase->>CalculationBase: run algorithm
+                CalculationBase->>TagStore: update TagInfo.data (outputs)
+                deactivate CalculationBase
+            end
+        end
+
+        %% Control Elements Update
+        rect rgb(230, 255, 240)
+            Note over System, ControlElement: 3. Update Control Elements
+            loop For each ControlElement
+                System->>ControlElement: update(t)
+                activate ControlElement
+                
+                Note over ControlElement: See control_loop_example.mermaid for details
+                
+                alt Mode is AUTO
+                    rect rgb(235, 255, 235)
+                        ControlElement->>ControllerBase: update(t)
+                        activate ControllerBase
+                        ControllerBase->>TagStore: update TagInfo.data (SP)
+                        ControllerBase-->>ControlElement: MV
+                        deactivate ControllerBase
+                    end
+                else Mode is MANUAL
+                    rect rgb(255, 235, 235)
+                        ControlElement->>ControlElement: get MV from trajectory
+                    end
+                end
+                
+                ControlElement->>ProcessModel: set MV state
+                deactivate ControlElement
+            end
+        end
+
+        deactivate System
+
+        %% Process Step
+        rect rgb(240, 240, 240)
+            Note over System, ProcessModel: 4. Advance Process
+            System->>ProcessModel: step(dt)
+            activate ProcessModel
+            ProcessModel->>ProcessModel: integrate ODEs (solve_ivp)
+            deactivate ProcessModel
+        end
+    end
+    
+    deactivate System

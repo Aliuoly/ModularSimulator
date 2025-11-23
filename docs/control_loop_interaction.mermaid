@@ -1,0 +1,65 @@
+sequenceDiagram
+    participant ControlElement
+    participant ControlElementModeManager
+    participant PrimaryController as Controller (Primary)
+    participant PrimaryModeManager as ModeManager (Primary)
+    participant CascadeController as Controller (Cascade)
+    participant TagStore
+
+    Note over ControlElement, TagStore: Control Element Update Cycle
+
+    ControlElement->>ControlElementModeManager: get_control_action(t)
+    activate ControlElementModeManager
+    
+    alt Mode == AUTO (Controller Active)
+        rect rgb(235, 255, 235)
+            ControlElementModeManager->>PrimaryController: update(t)
+            activate PrimaryController
+            
+            PrimaryController->>TagStore: query CV current value
+            TagStore-->>PrimaryController: CV current value
+            PrimaryController->>PrimaryModeManager: get_setpoint(t)
+            activate PrimaryModeManager
+            
+            alt Mode == AUTO (Local Trajectory)
+                rect rgb(235, 255, 235)
+                    PrimaryModeManager->>PrimaryModeManager: query SP from Trajectory
+                end
+            else Mode == CASCADE (Cascade Controller)
+                rect rgb(235, 245, 255)
+                    PrimaryModeManager->>CascadeController: update(t)
+                    activate CascadeController
+                    Note right of CascadeController: Cascade Controller Logic (Mode Manager Not Shown - Simplified)
+                    CascadeController->>TagStore: query CV current value
+                    TagStore-->>CascadeController: CV current value
+                    CascadeController->>TagStore: query SP
+                    TagStore-->>CascadeController: SP
+                    CascadeController->>TagStore: update TagInfo.data (setpoint)
+                    CascadeController->>CascadeController: compute MV
+                    CascadeController-->>PrimaryModeManager: return MV (as SP to inner loop)
+                    deactivate CascadeController
+                end
+            else Mode == TRACKING (Tracking PV)
+                rect rgb(245, 245, 245)
+                    PrimaryModeManager->>TagStore: query SP = CV
+                    TagStore-->>PrimaryModeManager: retrieved SP = CV
+                end
+            end
+            
+            PrimaryModeManager-->>PrimaryController: return SP
+            deactivate PrimaryModeManager
+            
+            PrimaryController->>TagStore: update TagInfo.data (setpoint)
+            PrimaryController->>PrimaryController: compute MV
+            PrimaryController-->>ControlElementModeManager: return MV
+            deactivate PrimaryController
+        end
+    else Mode == MANUAL (Trajectory Active)
+        rect rgb(255, 235, 235)
+            ControlElementModeManager->>TagStore: query MV from Trajectory
+            TagStore-->>ControlElementModeManager: retrieved mv_value
+        end
+    end
+    
+    ControlElementModeManager-->>ControlElement: return MV
+    deactivate ControlElementModeManager

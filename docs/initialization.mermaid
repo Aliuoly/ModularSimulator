@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant User
+    participant System
+    participant ProcessModel
+    participant SensorBase
+    participant CalculationBase
+    participant ControlElement
+    participant TagStore
+
+    Note over System, TagStore: Initialization Phase (add_component)
+    
+    User->>System: add_component(Sensor)
+    activate System
+    System->>TagStore: add(Sensor.tag_info)
+    System->>SensorBase: commission(System)
+    deactivate System
+
+    User->>System: add_component(Calculation)
+    activate System
+    System->>CalculationBase: wire_inputs(System)
+    System->>TagStore: add(Calculation.output_tag_info)
+    deactivate System
+
+    User->>System: add_component(ControlElement)
+    activate System
+    System->>ControlElement: commission(System)
+    System->>TagStore: add(ControlElement.controller_sp_tag_info)
+    deactivate System

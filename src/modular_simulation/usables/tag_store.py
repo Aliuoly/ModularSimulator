@@ -30,6 +30,10 @@ class TagStore(Mapping[str, TagInfo]):
     def __len__(self) -> int:
         return len(self._tags)
 
+    @override
+    def __repr__(self) -> str:
+        return f"TagStore({self._tags})"
+
     @property
     def measured_tags(self) -> dict[str, TagInfo]:
         """Returns a dictionary of all measured tags."""

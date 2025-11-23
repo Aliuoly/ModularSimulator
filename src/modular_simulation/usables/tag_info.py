@@ -34,7 +34,7 @@ class TagInfo:
 
     tag: str
     unit: UnitBase
-    type: Literal["measured", "calculated", "setpoint"]
+    type: Literal["measured", "calculated", "setpoint", "raw"]
     description: str
     _raw_tag: str
 
@@ -44,7 +44,7 @@ class TagInfo:
     def __init__(
         self,
         tag: str,
-        type: Literal["measured", "calculated", "setpoint"],
+        type: Literal["measured", "calculated", "setpoint", "raw"],
         unit: UnitBase,
         description: str = "no description provided",
         *,
@@ -99,3 +99,6 @@ class TagInfo:
     def history(self) -> list[TagData]:
         """public access to the tag's history"""
         return self._history
+
+    def __repr__(self) -> str:
+        return f"TagInfo(tag={self.tag}, type={self.type}, unit={self.unit}, description={self.description}, raw_tag={self._raw_tag}, data={self._data}, history length: {len(self._history)})"

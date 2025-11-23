@@ -13,6 +13,7 @@ dt = second(30)
 system = System(
     dt=dt,
     process_model=IrreversibleProcessModel(),
+    record_history=True,
     sensors=sensors,
     calculations=calculations,
     control_elements=control_elements,
@@ -103,3 +104,5 @@ if __name__ == "__main__":
     plt.tight_layout()
 
     plt.show()
+
+    print(system.tag_store)

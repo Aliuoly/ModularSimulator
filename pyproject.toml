@@ -43,6 +43,7 @@ testpaths = [
 [tool.basedpyright]
 reportMissingTypeStubs = false
 stubPath = "typings"
+reportImportCycles = false
 
 [dependency-groups]
 dev = [

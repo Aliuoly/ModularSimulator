@@ -180,7 +180,7 @@ class ProcessModel(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInher
         }
 
     def state_getter(self, state_name: str) -> StateValue:
-        return getattr(self, state_name)  # pyright: ignore[reportAny]
+        return cast(StateValue, getattr(self, state_name))
 
     def attach_system(self, system: System) -> None:
         """Called by the system when the process model is added to it."""

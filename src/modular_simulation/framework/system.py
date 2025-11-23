@@ -1,11 +1,12 @@
 from __future__ import annotations
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
-from typing import Any, override, TYPE_CHECKING
+from typing import Any, Callable, override, TYPE_CHECKING, cast
 from collections.abc import Sequence
 from functools import cached_property
 from modular_simulation.usables.control_system.control_element import ControlElement
 from modular_simulation.utils.typing import Seconds, StateValue, TimeQuantity
 from modular_simulation.usables.tag_store import TagStore
+from modular_simulation.usables.tag_info import TagInfo, TagData
 from modular_simulation.utils.wrappers import second
 from modular_simulation.measurables.process_model import ProcessModel
 from modular_simulation.usables.sensors.sensor_base import SensorBase
@@ -20,7 +21,6 @@ import logging
 from tqdm import tqdm
 
 if TYPE_CHECKING:
-    from modular_simulation.usables.tag_info import TagData
     from modular_simulation.usables.control_system.trajectory import Trajectory
 
 logger = logging.getLogger(__name__)
@@ -29,48 +29,21 @@ logger = logging.getLogger(__name__)
 class System(BaseModel):
     """ """
 
-    dt: Seconds = Field(
-        default=...,
-        description=(
-            "How often the system's sensors, calculations, and controllers update. "
-            "The solver takes adaptive 'internal steps' regardless of this value to update the system's states. "
-        ),
-    )
-    process_model: ProcessModel = Field(
-        ...,
-        description=(
-            "A container for all constants, state, control, and algebraic variables that can be measured or recorded. "
-        ),
-    )
-    sensors: Sequence[SensorBase] = Field(
-        ...,
-    )
-    control_elements: Sequence[ControlElement] = Field(
-        ...,
-    )
-    calculations: Sequence[CalculationBase] = Field(
-        ...,
-    )
+    dt: Seconds
+    """
+    How often the system's sensors, calculations, and controllers update. "
+    The solver takes adaptive 'internal steps' regardless of this value to update the system's states. "
+    """
+    process_model: ProcessModel
+    """
+    A container for all constants, state, control, and algebraic variables that can be measured or recorded. "
+    """
+    sensors: Sequence[SensorBase]
+    calculations: Sequence[CalculationBase]
+    control_elements: Sequence[ControlElement]
     solver_options: dict[str, Any] = Field(  # pyright: ignore[reportExplicitAny]
         default_factory=lambda: {"method": "LSODA"},
-        description=(
-            "arguments to scipy.integrate.solve_ivp call done by the system when taking steps."
-        ),
     )
-    use_numba: bool = Field(
-        default=False,
-        description=(
-            "Whether or not to attempt to compile the rhs and algebraic value function with numba. "
-            "This should work out of the box and improve speed for large systems."
-        ),
-    )
-    # numba_options: dict[str, Any] = Field(
-    #     default_factory=lambda: {"nopython": True, "cache": True},
-    #     description=(
-    #         "arguments for numba JIT compilation of rhs and calculate_algebraic_values methods. "
-    #         "Ignored if use_numba is False"
-    #     ),
-    # )
     record_history: bool = Field(
         default=False,
         description=(
@@ -86,8 +59,83 @@ class System(BaseModel):
     )
 
     _tag_store: TagStore = PrivateAttr(default_factory=TagStore)
-
+    _history_updaters: list[Callable[[Seconds], None]] = PrivateAttr(default_factory=list)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportUnannotatedClassAttribute]
+
+    @override
+    def model_post_init(self, context: Any) -> None:  # pyright: ignore[reportExplicitAny, reportAny]
+        self._validate()
+
+        self.process_model.attach_system(self)
+        # importantly, the order must be
+        # 1. sensors, 2. calculations, 3. controllers
+        # as calculations depend on sensors, and controllers depend on
+        # both sensors and calculations.
+        for sensor in self.sensors:
+            error, successful = self.add_component(sensor)
+            if not successful and error is not None:
+                raise error
+
+        # calculations may be defined out of order
+        # such that calculation 1 depends on result of calculation 2
+        # in such case, the wiring of calculation 1 will FAIL in the first pass.
+        # We will try to iteratively resolve calculations for up to NUM_CALCULATION passes.
+
+        attempts = 0
+        max_attempts = len(self.calculations)
+        resolution_done = False if max_attempts > 0 else True
+        pending_calculation_indeces = list(range(len(self.calculations)))
+        errors: list[Exception] = []
+        while not resolution_done and attempts < max_attempts:
+            attempts += 1
+            errors.clear()
+            for calculation_index in pending_calculation_indeces:
+                error, successful = self.add_component(self.calculations[calculation_index])
+                if error is not None:
+                    errors.append(error)
+                if successful:
+                    pending_calculation_indeces.remove(calculation_index)
+                if successful and error is not None:
+                    pass
+                if not successful and error is None:
+                    pass
+            if len(pending_calculation_indeces) == 0:
+                resolution_done = True
+        if len(errors) > 0:
+            raise ExceptionGroup(
+                f"{len(pending_calculation_indeces)} out of {len(self.calculations)} calculation(s) could not be resolved: ",
+                errors,
+            )
+        for control_element in self.control_elements:
+            error, successful = self.add_component(control_element)
+            if not successful and error is not None:
+                raise error
+
+        if self.record_history:
+
+            def make_history_updater(tag_info: TagInfo) -> Callable[[Seconds], None]:
+                process_model = self.process_model
+                tag = tag_info.raw_tag
+
+                def updater(time: Seconds):
+                    value = cast(StateValue, getattr(process_model, tag))
+                    tag_info.data = TagData(
+                        value=value, time=time, ok=True
+                    )  # the setter of .data updates TagInfo.history as well
+
+                return updater
+
+            for raw_state_name in self.process_model.state_list:
+                metadata = self.process_model.state_metadata_dict[raw_state_name]
+                tag_info = TagInfo(
+                    tag=f"(raw, {metadata.type.name})_{raw_state_name}",
+                    unit=metadata.unit,
+                    type="raw",
+                    description=metadata.description,
+                    _raw_tag=raw_state_name,
+                )
+                self._history_updaters.append(make_history_updater(tag_info))
+                self._tag_store.add(tag_info)
 
     def _validate(self):
         exception_group: list[Exception] = []
@@ -134,53 +182,21 @@ class System(BaseModel):
             )
         return exception_group
 
-    @override
-    def model_post_init(self, context: Any) -> None:  # pyright: ignore[reportExplicitAny, reportAny]
-        self._validate()
+    def _update_components(self) -> None:
+        """
+        Handles the control loop logic before integration.
 
-        self.process_model.attach_system(self)
-        # importantly, the order must be
-        # 1. sensors, 2. calculations, 3. controllers
-        # as calculations depend on sensors, and controllers depend on
-        # both sensors and calculations.
-        for sensor in self.sensors:
-            error, successful = self.add_component(sensor)
-            if not successful and error is not None:
-                raise error
-
-        # calculations may be defined out of order
-        # such that calculation 1 depends on result of calculation 2
-        # in such case, the wiring of calculation 1 will FAIL in the first pass.
-        # We will try to iteratively resolve calculations for up to NUM_CALCULATION passes.
-
-        attempts = 0
-        max_attempts = len(self.calculations)
-        resolution_done = False if max_attempts > 0 else True
-        pending_calculation_indeces = list(range(len(self.calculations)))
-        errors: list[Exception] = []
-        while not resolution_done and attempts < max_attempts:
-            attempts += 1
-            errors.clear()
-            for calculation_index in pending_calculation_indeces:
-                error, successful = self.add_component(self.calculations[calculation_index])
-                if error is not None:
-                    errors.append(error)
-                if successful:
-                    pending_calculation_indeces.remove(calculation_index)
-                if successful and error is not None:
-                    pass
-                if not successful and error is None:
-                    pass
-            if len(pending_calculation_indeces) == 0:
-                resolution_done = True
-        if len(errors) > 0:
-            raise ExceptionGroup(
-                f"{len(pending_calculation_indeces)} out of {len(self.calculations)} calculation(s) could not be resolved: ", errors
-            )
-        for control_element in self.control_elements:
-            error, successful = self.add_component(control_element)
-            if not successful and error is not None:
-                raise error
+        This method updates all sensors and controllers based on the current state,
+        sets the new values for the control elements, and returns the initial state
+        array for the solver.
+        """
+        t = self.time
+        for s in self.sensors:
+            _ = s.measure(t)
+        for c in self.calculations:
+            _ = c.calculate(t)
+        for c in self.control_elements:
+            _ = c.update(t)
 
     def add_component(
         self, component: SensorBase | CalculationBase | ControlElement
@@ -201,37 +217,23 @@ class System(BaseModel):
             # state value is bad, in which case scipy solver will fail later.
             _ = component.commission(self)
             error = None
-        if isinstance(component, CalculationBase):
+        elif isinstance(component, CalculationBase):
             # output tag info available before wiring inputs, but
             # certain calculations have some preprocessing during the wiring stage,
             # such as resolving unit issues. Thus, put it after wiring inputs.
             error, successful = component.wire_inputs(self)
             if successful:
                 self.tag_store.add(component.output_tag_info_dict)
-        if isinstance(component, ControlElement):
+        elif isinstance(component, ControlElement):  # pyright: ignore[reportUnnecessaryIsInstance]
             _ = component.commission(
                 self
             )  # don't care about controller lol, it may fail and still be fine.
             # sp tag info available only after commissioning, unlike above.
             self.tag_store.add(component.controller_sp_tag_info_dict)
             error = None
+        else:
+            raise ValueError(f"Unknown component type: {type(component)}")  # pyright: ignore[reportUnreachable]
         return error, successful
-
-    def _update_components(self) -> None:
-        """
-        Handles the control loop logic before integration.
-
-        This method updates all sensors and controllers based on the current state,
-        sets the new values for the control elements, and returns the initial state
-        array for the solver.
-        """
-        t = self.time
-        for s in self.sensors:
-            _ = s.measure(t)
-        for c in self.calculations:
-            _ = c.calculate(t)
-        for c in self.control_elements:
-            _ = c.update(t)
 
     def step(self, duration: Seconds | TimeQuantity | None = None) -> None:
         """
@@ -257,6 +259,8 @@ class System(BaseModel):
         for _ in range(int(nsteps)):
             self._update_components()
             self.process_model.step(self.dt)
+            for updater in self._history_updaters:  # only populated if record history is True
+                updater(self.time)
             if pbar:
                 _ = pbar.update(1)
         if pbar:

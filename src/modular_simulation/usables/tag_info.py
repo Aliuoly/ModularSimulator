@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, override
 import numpy as np
 
 if TYPE_CHECKING:
@@ -58,6 +58,10 @@ class TagInfo:
         self._history = []
         self._data = TagData()
 
+    @override
+    def __repr__(self) -> str:
+        return f"TagInfo(tag={self.tag}, type={self.type}, unit={self.unit}, description={self.description}, raw_tag={self._raw_tag}, data={self._data}, history length: {len(self._history)})"
+
     def make_converted_data_getter(self, target_unit: UnitBase | None = None):
         if target_unit is None:
             target_unit = self.unit
@@ -99,6 +103,3 @@ class TagInfo:
     def history(self) -> list[TagData]:
         """public access to the tag's history"""
         return self._history
-
-    def __repr__(self) -> str:
-        return f"TagInfo(tag={self.tag}, type={self.type}, unit={self.unit}, description={self.description}, raw_tag={self._raw_tag}, data={self._data}, history length: {len(self._history)})"

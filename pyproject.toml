@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools >= 80", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
+
+[tool.mypy]
+ignore_missing_imports = true
+
+[project]
+name = "modular-simulation"
+version = "0.1.0"
+license = { text = "MIT" }
+authors = [
+  { name="Alden Olyniec", email="aldenliuolyniec@gmail.com" },
+]
+description = "Modular simulation framework for easily defining measurable and controllable systems."
+readme = "README.md"
+requires-python = ">=3.13, <3.14"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+dependencies = [
+  "numba",
+  "scipy",
+  "tqdm",
+  "pydantic",
+  "matplotlib",
+  "astropy",
+  "nicegui",
+  "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+  "tests",
+]
+[tool.basedpyright]
+reportMissingTypeStubs = false
+stubPath = "typings"
+
+[dependency-groups]
+dev = [
+    "ruff",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

@@ -1,0 +1,101 @@
+When it comes to designing the base controller class, a dilema struck - conceptual vs function identify. 
+
+A "controller" takes a PV, a SP, and an algorithm, and returns a MV (control output). This
+is the conceptual identify of a controller. To define a controller conceptually, it is then
+necessary to provide a PV source, an SP source, and a MV source/destination. 
+Thus, at the moment, the base controller requires 
+    1. MV tag
+    2. PV tag
+    3. SP trajectory
+
+However, the the functional identify of the controller is not so singular. 
+The controller SP's source is not simple - 
+    it could be a setpoint trajectory, which takes input "time" and returns SP(t).
+    it could be a cascade controller, which takes is itself a controller. 
+    it could be not applicable - such as in the case of a "tracking" or "manual" controller. 
+Different SP sources makes the controller behave significantly differently. 
+
+Take for example, a controller representing a physical hand valve. This controller does NOT have
+a "PV" per se. All it has is its "MV" - the valve position of the hand valve. 
+Such a controller does NOT use a PV - so the part about "takes a PV, a SP, ..." no longer holds. 
+
+Take for example a cascade controller, whose "MV" is "mv_A". "mv_A" is naturally
+the "SP" of the inner loop controller in this configuration. In fact, it is !illegal!
+for the MV of this cascade outerloop to NOT be the SP of the cascade inner loop - such a 
+configuration makes no sense and does not construct a cascade loop. 
+    Thus, it is more appropriate for such a loop to be configured one of two ways
+        1. inner loop does NOT define a PV/SP tag or
+        2. outer loop does NOT define a MV tag. 
+Once again, either options breaks the conceptually coherent way of defining a controller. 
+
+So then how is it possible to define a coherent "base controller" class for every case 
+mentioned so far?
+
+After thinking more about it, it just seems impossible. I think the most appropriate solution
+is to impose custom validation logic with pydantic. 
+
+1. PV tag is now an optional argument. 
+    If none is provided, a MV tag and MV trajectory must be provided. 
+2. MV tag is now an optional argument. 
+    If none is provided, the current controller MUST have an inner loop controller. 
+    The inner loop's SP is then resolved to be the MV output of this controller. 
+
+
+Another option may be define separate the final control element. A cascade loop then might look like
+
+{
+    "final_control_element":{ # NOT A CONTROLLER!
+        "tag": "valve_A",
+        "range": (0,100.),
+        "mode": AUTO, # AUTO or MANUAL only, no other options
+        "controller":{ # YES A CONTROLLER!
+            "type": "PID",
+            "CV_tag": "flow_A",
+            "CV_range": (0, 3000.),
+            "mode": CASCADE, # TRACKING, MANUAL, AUTO, CASCADE available
+            "cascade_controller":{
+                "type": "IMC":
+                "CV_tag": "conc_A",
+                "CV_range": (0, 100.),
+                "mode": AUTO,
+                "sp_trajectory": Trajectory(0.5),
+                "model_path": "concentration_calc_A.IMC_model"
+            }
+        }
+    }
+}
+
+The thing passed to System is the no longer a list of controllers, but a list of
+    final control elements instead. 
+    Thes final control elements must be validated against the controllable states. 
+The output of the controllers is passed down the chain, and only the final control element
+interacts with the process. 
+
+The sp trajectory now also becomes optional. If not provided, will just take the current PV value
+at commissioning time and take it as the SP and hold it there. 
+
+I think the controllers also no longer require MV range, but instead specifies the CV range, within which
+the SP may move. The MV range will be inherited from the inner loop instead and used if necessary. 
+
+Now for the mode management and bumpless transfer - together with the mv and sp trajectory,
+I think it makes more sense to encapsulate them in something like a "mode manager".
+
+The responsiblity of the mode manager is then to 
+    1. Route the sp to the controller from the appropriate source based on the mode selected. 
+    2. Handle bumpless transfer logic when changing mode. 
+In order to route the sp, it should also have access all the different sp sources themselves. 
+    TRACKING MODE: CV itself
+    MANUAL MODE:   CV itself
+    AUTO MODE:     SP trajectory
+    CASCADE MODE:  .update method of the cascade controller
+Frustratingly, the MANUAL MODE logic does not resolve nicely here. As is, the mode manager itself
+cannot provide instruction on what MV the controller should return. 
+
+Instead, perhaps the mode manager will manage not the SP source, but the algorithm source. 
+    TRACKING MODE: specified algorithm skipped. SP history updated with PV
+    MANUAL MODE: specified algorithm skipped. SP history updated with PV. 
+                    ! MV is returned. 
+    AUTO MODE: SP retrieved from sp_trajectory, specified algorithm performed,
+                    SP history updated with retrieved SP. algorithm output returned as MV. 
+    CASCADE MODE: SP retrieved by asking the cascade controller for its MV output. 
+                    ...

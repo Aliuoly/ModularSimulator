@@ -1,7 +1,11 @@
 from modular_simulation.framework import System
 from modular_simulation.plotting import plot_triplet_series
 from process_definition import GasPhaseReactorProcessModel
-from component_definition import sensors, calculations, control_elements
+from component_definition import (
+    sensors,
+    calculations,
+    control_elements,
+)
 from modular_simulation.utils.wrappers import second, hour
 from functools import partial
 
@@ -23,18 +27,26 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     # run till steady state
-    _ =system.extend_control_element_mv_trajectory("F_cat").hold(100, 6.0)
+    _ = system.extend_control_element_mv_trajectory("F_cat").hold(100, 6.0)
     system.step(hour(12))
 
     # cycle 1
     # system.extend_controller_trajectory("F_cat").ramp(-2.0, rate = per_hour(1)) # ramp dow 2 kg over 2 hours
-    _ = system.extend_controller_sp_trajectory("rM2")\
-            .step(0.1).hold(hour(6))\
-                .step(-0.1).hold(hour(6))\
-                    .step(0.2).hold(hour(6))\
-                        .step(-0.2).hold(hour(6))\
-                            .step(0.3).hold(hour(6))\
-                                .step(-0.3).hold(hour(6))
+    _ = (
+        system.extend_controller_sp_trajectory("rM2")
+        .step(0.1)
+        .hold(hour(6))
+        .step(-0.1)
+        .hold(hour(6))
+        .step(0.2)
+        .hold(hour(6))
+        .step(-0.2)
+        .hold(hour(6))
+        .step(0.3)
+        .hold(hour(6))
+        .step(-0.3)
+        .hold(hour(6))
+    )
     system.step(hour(36))
     # reset to steady state at new cat rate
     # system.extend_controller_trajectory("F_cat").ramp(2.0, rate = per_hour(1)) # ramp dow 2 kg over 2 hours

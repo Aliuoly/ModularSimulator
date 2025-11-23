@@ -4,7 +4,7 @@ from dataclasses import field, dataclass
 import numpy as np
 from numpy.typing import NDArray
 from typing import Any, TYPE_CHECKING, NamedTuple, Protocol, override, cast
-from scipy.integrate import solve_ivp  # pyright: ignore[reportUnknownVariableType]
+from scipy.integrate import solve_ivp
 from functools import cached_property
 from astropy.units import UnitBase, Unit
 from collections.abc import Callable
@@ -83,13 +83,14 @@ class StateMetadata:
     description: str = ""
 
     def __init__(self, type: StateType, unit: UnitBase | str, description: str = ""):
-        if not isinstance(type, StateType):
-            raise ValueError(f"type must be a StateType, not {type}")
+        if not isinstance(type, StateType):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise ValueError(f"type must be a StateType, not {type}")  # pyright: ignore[reportUnreachable]
         if not isinstance(unit, UnitBase):
             unit = Unit(unit)
         self.type = type
         self.unit = unit
         self.description = description
+
 
 @dataclass
 class CategorizedStateView:
@@ -146,8 +147,10 @@ class CategorizedStateView:
         for item in self._index_map.values():
             if isinstance(item, int):
                 max_index = max(max_index, item + 1)
-            elif isinstance(item, slice):
-                max_index = max(max_index, item.stop + 1)
+            elif isinstance(item, slice):  # pyright: ignore[reportUnnecessaryIsInstance]
+                max_index = max(max_index, cast(int, item.stop) + 1)
+            else:
+                raise ValueError(f"Invalid index type: {type(item)}")
         return max_index
 
 
@@ -165,7 +168,7 @@ class ProcessModel(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInher
     _state_metadata_dict: dict[str, StateMetadata] = PrivateAttr()
     _params: ProcessModelParams = PrivateAttr()
     _solver_options: dict[str, Any] = PrivateAttr()  # pyright: ignore[reportExplicitAny]
-    model_config = ConfigDict(extra="forbid")  # pyright: ignore[reportUnannotatedClassAttribute]
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)  # pyright: ignore[reportUnannotatedClassAttribute]
 
     @override
     def model_post_init(self, context: Any) -> None:  # pyright: ignore[reportAny, reportExplicitAny]
@@ -322,53 +325,37 @@ class ProcessModel(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInher
     def _rhs_wrapper(
         t: float,
         y: NDArray[np.float64],
-        u: NDArray[np.float64],
-        k: NDArray[np.float64],
-        y_map: dict[str, ArrayIndex],
-        u_map: dict[str, ArrayIndex],
-        k_map: dict[str, ArrayIndex],
-        algebraic_map: dict[str, ArrayIndex],
-        algebraic_values_function: AlgebraicCallable,
-        rhs_function: RHSCallable,
-        algebraic_size: int,
+        *args: Any,  # pyright: ignore[reportExplicitAny, reportAny]
     ) -> NDArray[np.float64]:
-        """
-        A concrete wrapper called by the solver. It recalculates algebraic states
-        before calling the user-defined `rhs` for the derivatives. This ensures
-        correctness even when the solver rejects and retries steps.
-        """
-        algebraic_array = algebraic_values_function(
-            y=y,
+        # the cast is guaranteed by the .step method
+        # but below is done to make pyright happy.
+        u = cast(NDArray[np.float64], args[0])
+        params = cast(ProcessModelParams, args[1])
+        algebraic = params.algebraic_values_function(
+            y,
             u=u,
-            k=k,
-            y_map=y_map,
-            u_map=u_map,
-            k_map=k_map,
-            algebraic_map=algebraic_map,
-            algebraic_size=algebraic_size,
+            k=params.k,
+            y_map=params.y_map,
+            u_map=params.u_map,
+            k_map=params.k_map,
+            algebraic_map=params.algebraic_map,
+            algebraic_size=params.algebraic_size,
         )
-        return rhs_function(
+
+        return params.rhs_function(
             t,
-            y=y,
-            u=u,
-            k=k,
-            algebraic=algebraic_array,
-            y_map=y_map,
-            u_map=u_map,
-            k_map=k_map,
-            algebraic_map=algebraic_map,
+            y,
+            u,
+            params.k,
+            algebraic,
+            params.y_map,
+            params.u_map,
+            params.k_map,
+            params.algebraic_map,
         )
 
     # ------ public methods ------
     def step(self, dt: Seconds) -> None:
-        y_map = self._params.y_map
-        u_map = self._params.u_map
-        k_map = self._params.k_map
-        algebraic_map = self._params.algebraic_map
-        k = self._params.k
-        algebraic_values_function = self._params.algebraic_values_function
-        rhs_function = self._params.rhs_function
-        algebraic_size = self._params.algebraic_size
         y0 = self.differential_view.to_array()
         u = self.controlled_view.to_array()
         end_t = self.t + dt
@@ -377,25 +364,22 @@ class ProcessModel(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInher
             fun=self._rhs_wrapper,
             t_span=(self.t, end_t),
             y0=y0,
-            args=(
-                u,
-                k,
-                y_map,
-                u_map,
-                k_map,
-                algebraic_map,
-                algebraic_values_function,
-                rhs_function,
-                algebraic_size,
-            ),
-            **self._solver_options,
+            args=(u, self._params),
+            **self._solver_options,  # pyright: ignore[reportAny]
         )
         final_y = result.y[:, -1]
         self.differential_view.update_from_array(final_y)
 
         # After the final SUCCESSFUL step, update the actual algebraic_states object.
-        final_algebraic_values = algebraic_values_function(
-            final_y, u, k, y_map, u_map, k_map, algebraic_map, algebraic_size
+        final_algebraic_values = self._params.algebraic_values_function(
+            final_y,
+            u,
+            self._params.k,
+            self._params.y_map,
+            self._params.u_map,
+            self._params.k_map,
+            self._params.algebraic_map,
+            self._params.algebraic_size,
         )
         self.algebraic_view.update_from_array(final_algebraic_values)
         self.t = end_t

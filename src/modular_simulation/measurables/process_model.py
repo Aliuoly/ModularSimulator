@@ -4,6 +4,7 @@ from dataclasses import field, dataclass
 import numpy as np
 from numpy.typing import NDArray
 from typing import Any, TYPE_CHECKING, NamedTuple, Protocol, override, cast
+import importlib
 from scipy.integrate import solve_ivp
 from functools import cached_property
 from astropy.units import UnitBase, Unit
@@ -201,6 +202,36 @@ class ProcessModel(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInher
             algebraic_size=self._params.algebraic_size,
         )
         self.algebraic_view.update_from_array(initial_algebraic_array)
+
+    def save(self) -> dict[str, Any]:
+        """Return minimal configuration and state needed to reconstruct the model."""
+
+        def _serialize_state(value: StateValue) -> Any:
+            if isinstance(value, np.ndarray):
+                return value.tolist()
+            return value
+
+        return {
+            "type": self.__class__.__name__,
+            "module": self.__class__.__module__,
+            "t": self.t,
+            "states": {
+                name: _serialize_state(self.state_getter(name))
+                for name in self.state_metadata_dict
+            },
+        }
+
+    @classmethod
+    def load(cls, payload: dict[str, Any]) -> "ProcessModel":
+        """Recreate a process model instance from serialized state values."""
+
+        module = importlib.import_module(payload["module"])
+        process_model_cls = getattr(module, payload["type"])
+        if not issubclass(process_model_cls, cls):
+            raise TypeError(f"{process_model_cls} is not a subclass of {cls}")
+
+        state_values = payload.get("states", {})
+        return process_model_cls(t=payload.get("t", 0.0), **state_values)
 
     # def _construct_fast_params(self, numba_options) -> None:
     #     """

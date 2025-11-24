@@ -2,6 +2,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, override
 from collections.abc import Callable
+import importlib
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from modular_simulation.validation.exceptions import (
@@ -97,6 +98,39 @@ class CalculationBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleIn
         Hook for any pre-wiring steps that need to be done before inputs are wired.
         """
         return None, True
+
+    def save(self) -> dict[str, Any]:
+        """Persist minimal configuration and runtime outputs."""
+
+        return {
+            "type": self.__class__.__name__,
+            "module": self.__class__.__module__,
+            "config": self.model_dump(),
+            "state": self._save_runtime_state(),
+        }
+
+    @classmethod
+    def load(cls, payload: dict[str, Any]) -> "CalculationBase":
+        """Recreate a calculation instance from serialized configuration."""
+
+        module = importlib.import_module(payload["module"])
+        calculation_cls = getattr(module, payload["type"])
+        if not issubclass(calculation_cls, cls):
+            raise TypeError(f"{calculation_cls} is not a subclass of {cls}")
+
+        calculation = calculation_cls(**payload["config"])
+        calculation._load_runtime_state(payload.get("state") or {})
+        return calculation
+
+    def _save_runtime_state(self) -> dict[str, Any]:
+        """Hook for subclasses to extend saved runtime state."""
+
+        return {}
+
+    def _load_runtime_state(self, state: dict[str, Any]) -> None:  # pyright: ignore[reportUnusedParameter]
+        """Subclass hook to restore any persisted runtime state."""
+
+        return None
 
     def wire_inputs(self, system: System) -> tuple[CalculationConfigurationError | None, bool]:
         """

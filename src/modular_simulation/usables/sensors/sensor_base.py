@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np
 from abc import ABC, abstractmethod
+import importlib
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -175,6 +176,33 @@ class SensorBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInherit
     def _post_commission(self, system: System) -> bool:
         """Subclass hook that is called after commissioning."""
         return True
+
+    def save(self) -> dict[str, Any]:
+        """Persist minimal configuration for reconstruction."""
+
+        return {
+            "type": self.__class__.__name__,
+            "module": self.__class__.__module__,
+            "config": self.model_dump(),
+        }
+
+    @classmethod
+    def load(cls, payload: dict[str, Any]) -> "SensorBase":
+        """Recreate a sensor instance from serialized configuration."""
+
+        module = importlib.import_module(payload["module"])
+        sensor_cls = getattr(module, payload["type"])
+        if not issubclass(sensor_cls, cls):
+            raise TypeError(f"{sensor_cls} is not a subclass of {cls}")
+
+        sensor = sensor_cls(**payload["config"])
+        sensor._load_runtime_state(payload.get("state") or {})
+        return sensor
+
+    def _load_runtime_state(self, state: dict[str, Any]) -> None:  # pyright: ignore[reportUnusedParameter]
+        """Subclass hook to restore any persisted runtime state."""
+
+        return None
 
     def measure(self, t: Seconds, *, force: bool = False) -> TagData:
         """Execute the measurement pipeline and return the resulting :class:`TagData`.

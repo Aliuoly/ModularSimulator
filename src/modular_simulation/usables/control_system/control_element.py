@@ -1,7 +1,9 @@
 from __future__ import annotations
 import numpy as np
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from collections.abc import Callable
+from dataclasses import asdict
+import importlib
 from pydantic import BaseModel, PrivateAttr, Field, ConfigDict, SerializeAsAny
 from modular_simulation.usables.control_system.trajectory import Trajectory
 from modular_simulation.usables.control_system.mode_manager import ControlElementModeManager
@@ -180,6 +182,55 @@ class ControlElement(BaseModel):
         )
 
         return self._mv_tag_info.data
+
+    def save(self) -> dict[str, Any]:
+        """Persist minimal configuration and runtime state."""
+
+        controller_payload = (
+            self.controller.save() if self.controller is not None else None
+        )
+
+        return {
+            "type": self.__class__.__name__,
+            "module": self.__class__.__module__,
+            "config": self.model_dump(exclude={"controller"}),
+            "controller": controller_payload,
+            "state": self._save_runtime_state(),
+        }
+
+    @classmethod
+    def load(cls, payload: dict[str, Any]) -> "ControlElement":
+        """Recreate a control element instance from serialized configuration."""
+
+        module = importlib.import_module(payload["module"])
+        control_element_cls = getattr(module, payload["type"])
+        if not issubclass(control_element_cls, cls):
+            raise TypeError(f"{control_element_cls} is not a subclass of {cls}")
+
+        controller_payload = payload.get("controller")
+        controller = ControllerBase.load(controller_payload) if controller_payload else None
+
+        config = dict(payload["config"])
+        config["controller"] = controller
+
+        control_element = control_element_cls(**config)
+        control_element._load_runtime_state(payload.get("state") or {})
+        return control_element
+
+    def _save_runtime_state(self) -> dict[str, Any]:
+        """Hook for subclasses to extend saved runtime state."""
+
+        return {
+            "mode": self.mode.name,
+            "mv": asdict(self._control_action),
+            "mv_tag": self.mv_tag,
+        }
+
+    def _load_runtime_state(self, state: dict[str, Any]) -> None:  # pyright: ignore[reportUnusedParameter]
+        """Subclass hook to restore any persisted runtime state."""
+
+        if "mode" in state:
+            self.mode = ControllerMode[state["mode"]]
 
     @property
     def mv_tag_info(self) -> TagInfo:

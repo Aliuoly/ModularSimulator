@@ -390,3 +390,40 @@ class System(BaseModel):
     def history(self) -> dict[str, list[TagData]]:
         """Returns historized measurements and calculations."""
         return self._tag_store.history
+
+    def save(self) -> dict[str, Any]:
+        """Persist minimal configuration and component snapshots for reconstruction."""
+
+        return {
+            "system": {
+                "dt": self.dt,
+                "solver_options": self.solver_options,
+                "record_history": self.record_history,
+                "show_progress": self.show_progress,
+            },
+            "process_model": self.process_model.save(),
+            "sensors": [sensor.save() for sensor in self.sensors],
+            "calculations": [calc.save() for calc in self.calculations],
+            "control_elements": [ce.save() for ce in self.control_elements],
+        }
+
+    @classmethod
+    def load(cls, payload: dict[str, Any]) -> "System":
+        """Recreate a system and its components from serialized snapshots."""
+
+        system_config = payload["system"]
+        process_model = ProcessModel.load(payload["process_model"])
+        sensors = [SensorBase.load(s) for s in payload.get("sensors", [])]
+        calculations = [CalculationBase.load(c) for c in payload.get("calculations", [])]
+        control_elements = [ControlElement.load(ce) for ce in payload.get("control_elements", [])]
+
+        return cls(
+            dt=system_config["dt"],
+            process_model=process_model,
+            sensors=sensors,
+            calculations=calculations,
+            control_elements=control_elements,
+            solver_options=system_config.get("solver_options", {"method": "LSODA"}),
+            record_history=system_config.get("record_history", False),
+            show_progress=system_config.get("show_progress", True),
+        )

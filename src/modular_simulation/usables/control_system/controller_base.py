@@ -2,7 +2,9 @@ from __future__ import annotations  # without this cant type hint the cascade co
 from abc import ABC, abstractmethod
 import math
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+from dataclasses import asdict
+import importlib
 from astropy.units import UnitBase
 import numpy as np
 from .controller_mode import ControllerMode
@@ -88,6 +90,55 @@ class ControllerBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInh
             "'%s' controller mode is changed from %s --> %s", self.cv_tag, self.mode.name, mode.name
         )
         self.mode = self._mode_manager.change_mode(mode)
+
+    def save(self) -> dict[str, Any]:
+        """Persist minimal configuration and runtime trajectory snapshot."""
+
+        cascade_payload = (
+            self.cascade_controller.save() if self.cascade_controller is not None else None
+        )
+
+        return {
+            "type": self.__class__.__name__,
+            "module": self.__class__.__module__,
+            "config": self.model_dump(exclude={"cascade_controller"}),
+            "cascade_controller": cascade_payload,
+            "state": self._save_runtime_state(),
+        }
+
+    @classmethod
+    def load(cls, payload: dict[str, Any]) -> "ControllerBase":
+        """Recreate a controller instance from serialized configuration."""
+
+        module = importlib.import_module(payload["module"])
+        controller_cls = getattr(module, payload["type"])
+        if not issubclass(controller_cls, cls):
+            raise TypeError(f"{controller_cls} is not a subclass of {cls}")
+
+        cascade_payload = payload.get("cascade_controller")
+        cascade_controller = cls.load(cascade_payload) if cascade_payload else None
+
+        config = dict(payload["config"])
+        config["cascade_controller"] = cascade_controller
+
+        controller = controller_cls(**config)
+        controller._load_runtime_state(payload.get("state") or {})
+        return controller
+
+    def _save_runtime_state(self) -> dict[str, Any]:
+        """Hook for subclasses to extend saved runtime state."""
+
+        return {
+            "mode": self.mode.name,
+            "sp": asdict(self._sp_tag_info.data),
+            "control_action": asdict(self._control_action),
+        }
+
+    def _load_runtime_state(self, state: dict[str, Any]) -> None:  # pyright: ignore[reportUnusedParameter]
+        """Subclass hook to restore any persisted runtime state."""
+
+        if "mode" in state:
+            self.mode = ControllerMode[state["mode"]]
 
     def commission(
         self,

@@ -45,8 +45,8 @@ class SampledDelayedSensor(SensorBase):
         return t > (self._t + self.sampling_period)
 
     @override
-    def _post_commission(self, system: System) -> bool:
-        """Subclass hook that is called after commissioning."""
+    def _post_initialization(self, system: System) -> bool:
+        """Subclass hook that is called after initialization."""
         self._t = system.time
         return True
 

@@ -50,8 +50,9 @@ class BangBangController(ControllerBase):
     )
     _cv_filtered: float = PrivateAttr()
     _state: bool = PrivateAttr(default=False)
+
     @override
-    def _post_commission(
+    def _post_initialization(
         self,
         system: System,
         mv_getter: Callable[[], TagData],
@@ -69,6 +70,7 @@ class BangBangController(ControllerBase):
             return False
         self._cv_filtered = cv_value
         return True
+
     @override
     def _control_algorithm(
         self,

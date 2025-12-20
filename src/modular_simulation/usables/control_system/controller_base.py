@@ -140,7 +140,7 @@ class ControllerBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInh
         if "mode" in state:
             self.mode = ControllerMode[state["mode"]]
 
-    def commission(
+    def initialize(
         self,
         system: System,
         mv_getter: Callable[[], TagData],
@@ -168,10 +168,10 @@ class ControllerBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInh
         if self.sp_trajectory is None:
             self.sp_trajectory = Trajectory(cv_tag_info.data.value, cv_tag_info.data.time)
 
-        # commission the controllers starting from the outer loop first.
+        # initialize the controllers starting from the outer loop first.
         if self.cascade_controller is not None:
             # mv tag of the cascade controller is the cv tag of the inner controller
-            successful = self.cascade_controller.commission(
+            successful = self.cascade_controller.initialize(
                 system=system,
                 mv_getter=self._cv_getter,
                 mv_range=self.cv_range,
@@ -183,13 +183,13 @@ class ControllerBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInh
         elif self.mode == ControllerMode.CASCADE:
             # if no cascade controller but mode is CASCADE, change to AUTO
             # typically this is done by the mode manager when the mode was actively
-            # changed to CASCADE. However, during "commissioning", the mode defaults
+            # changed to CASCADE. However, during "initialization", the mode defaults
             # to CASCADE, so we do this silently.
             self.mode = ControllerMode.AUTO
 
         # prepare sp and mv tag info first
         # sp tag info's data is initialized with the sp_trajectory's value
-        # at the commissioning time.
+        # at the initializeing time.
         self._sp_tag_info = TagInfo(
             tag=f"{self.cv_tag}.sp",
             unit=cv_tag_info.unit,
@@ -213,8 +213,8 @@ class ControllerBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInh
             mv_getter=mv_getter,
             cv_tag=self.cv_tag,
         )
-        # now run post commission hook in case it is implemented
-        successful = self._post_commission(system, mv_getter, mv_range, mv_tag, mv_unit)
+        # now run post initialize hook in case it is implemented
+        successful = self._post_initialization(system, mv_getter, mv_range, mv_tag, mv_unit)
         if not successful:
             return False
         self._initialized = True
@@ -222,7 +222,7 @@ class ControllerBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInh
             self._is_scalar = True
         return True
 
-    def _post_commission(
+    def _post_initialization(
         self,
         system: System,
         mv_getter: Callable[[], TagData],
@@ -230,7 +230,7 @@ class ControllerBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInh
         mv_tag: str,
         mv_unit: UnitBase,
     ) -> bool:
-        """hook for additional logic involving system after self.commission"""
+        """hook for additional logic involving system after self.initialize"""
         return True
 
     def update(self, t: Seconds) -> TagData:
@@ -243,7 +243,7 @@ class ControllerBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInh
         cascade chain.
         """
         if not self._initialized:
-            raise RuntimeError(f"{self.cv_tag} controller not commissioned.")
+            raise RuntimeError(f"{self.cv_tag} controller not initializeed.")
 
         last_control_action = self._control_action
 

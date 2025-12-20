@@ -50,15 +50,15 @@ def main() -> None:
     logging.info("Reloading system from checkpoint...")
     restored_system = load_checkpoint(CHECKPOINT_PATH)
 
+    logging.info("Simulation resumed to t = %.2f days", restored_system.time / day(1))
+    logging.info("Current volume V = %.3f L", restored_system.process_model.V)
+    logging.info("Current concentration B = %.4f mol/L", restored_system.process_model.B)
+
     logging.info("Continuing the simulation after reload...")
     restored_system.extend_controller_sp_trajectory(cv_tag="B", value=0.2)
     restored_system.step(day(1))
     restored_system.extend_controller_sp_trajectory(cv_tag="B").ramp(0.3, rate=0.1 / day(1))
     restored_system.step(day(1))
-
-    logging.info("Simulation resumed to t = %.2f days", restored_system.time / day(1))
-    logging.info("Current volume V = %.3f L", restored_system.process_model.V)
-    logging.info("Current concentration B = %.4f mol/L", restored_system.process_model.B)
 
 
 if __name__ == "__main__":

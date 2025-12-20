@@ -35,7 +35,10 @@ class FirstOrderFilter(CalculationBase):
     _t: Seconds = PrivateAttr()
 
     @override
-    def _pre_wire_inputs(self, system: System) -> tuple[CalculationConfigurationError | None, bool]:
+    def _pre_initialization(
+        self,
+        system: System,
+    ) -> tuple[CalculationConfigurationError | None, bool]:
         """
         overwrite the unit info in the annotation
         with the tag info of the raw measurement itself.

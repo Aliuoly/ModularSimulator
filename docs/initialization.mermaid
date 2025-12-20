@@ -12,17 +12,17 @@ sequenceDiagram
     User->>System: add_component(Sensor)
     activate System
     System->>TagStore: add(Sensor.tag_info)
-    System->>SensorBase: commission(System)
+    System->>SensorBase: initialize(System)
     deactivate System
 
     User->>System: add_component(Calculation)
     activate System
-    System->>CalculationBase: wire_inputs(System)
+    System->>CalculationBase: initialize(System)
     System->>TagStore: add(Calculation.output_tag_info)
     deactivate System
 
     User->>System: add_component(ControlElement)
     activate System
-    System->>ControlElement: commission(System)
+    System->>ControlElement: initialize(System)
     System->>TagStore: add(ControlElement.controller_sp_tag_info)
     deactivate System

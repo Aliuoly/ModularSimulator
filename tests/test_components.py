@@ -1,6 +1,11 @@
 import pytest
 
-from modular_simulation.usables import SampledDelayedSensor, PIDController, Trajectory, ControllerMode
+from modular_simulation.usables import (
+    SampledDelayedSensor,
+    PIDController,
+    Trajectory,
+    ControllerMode,
+)
 from modular_simulation.framework.system import System
 
 
@@ -13,7 +18,7 @@ def test_sampled_delayed_sensor_measures_and_histories(thermal_process_model):
         deadtime=0.0,
     )
 
-    sensor.commission(0.0, thermal_process_model)
+    sensor.initialize(0.0, thermal_process_model)
     first_sample = sensor.measure(0.0)
     assert first_sample.value == pytest.approx(300.0)
 

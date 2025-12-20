@@ -100,7 +100,7 @@ class ControlElement(BaseModel):
     _control_action: TagData = PrivateAttr()
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportUnannotatedClassAttribute]
 
-    def commission(self, system: System) -> bool:
+    def initialize(self, system: System) -> bool:
         """Wire the control element into orchestrated quantities and validate modes.
 
         The container guarantees all referenced tags exist, so this method
@@ -117,17 +117,17 @@ class ControlElement(BaseModel):
                 + "The manipulated variable of a control elemnt must be a MEASURED CONTROLLED state."
             )
         self._mv_tag_info = mv_tag_info
-        # commission the control element & its controllers (if any)
+        # initialize the control element & its controllers (if any)
         if self.controller is not None:
             mv_getter = mv_tag_info.make_converted_data_getter()
-            if not self.controller.commission(
+            if not self.controller.initialize(
                 system=system,
                 mv_getter=mv_getter,
                 mv_range=self.mv_range,
                 mv_tag=self.mv_tag,
                 mv_unit=self._mv_tag_info.unit,
             ):
-                return False  # failed to initialize due to controller commissioning error
+                return False  # failed to initialize due to controller initialization error
         else:
             # silently force mode to MANUAL in case it was AUTO during initialization
             # if no controller is provided
@@ -186,9 +186,7 @@ class ControlElement(BaseModel):
     def save(self) -> dict[str, Any]:
         """Persist minimal configuration and runtime state."""
 
-        controller_payload = (
-            self.controller.save() if self.controller is not None else None
-        )
+        controller_payload = self.controller.save() if self.controller is not None else None
 
         return {
             "type": self.__class__.__name__,

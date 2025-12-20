@@ -33,7 +33,6 @@ dependencies = [
   "astropy",
   "nicegui",
   "pytest",
-  "diffeqpy>=2.5.4",
 ]
 
 [tool.pytest.ini_options]

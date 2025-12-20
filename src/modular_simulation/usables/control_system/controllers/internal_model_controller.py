@@ -75,7 +75,7 @@ class InternalModelController(ControllerBase):
     _internal_model: Callable[[StateValue], StateValue] = PrivateAttr()
 
     @override
-    def _post_commission(
+    def _post_initialization(
         self,
         system: System,
         mv_getter: Callable[[], TagData],

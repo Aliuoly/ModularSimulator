@@ -90,12 +90,12 @@ class CalculationBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleIn
             )
         return self._output_tag_info_dict[tag_name].data
 
-    def _pre_wire_inputs(
+    def _pre_initialization(
         self,
         system: System,  # pyright: ignore[reportUnusedParameter]
     ) -> tuple[CalculationConfigurationError | None, bool]:
         """
-        Hook for any pre-wiring steps that need to be done before inputs are wired.
+        Hook for any _pre_initialization steps that need to be done before initialization.
         """
         return None, True
 
@@ -132,7 +132,7 @@ class CalculationBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleIn
 
         return None
 
-    def wire_inputs(self, system: System) -> tuple[CalculationConfigurationError | None, bool]:
+    def initialize(self, system: System) -> tuple[CalculationConfigurationError | None, bool]:
         """
         Links calculation inputs to tag info instances
         and creates a simple callable for it.
@@ -140,7 +140,7 @@ class CalculationBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleIn
         so they are not NANs.
         Validation is already done so no error handling is placed here.
         """
-        error, successful = self._pre_wire_inputs(system)
+        error, successful = self._pre_initialization(system)
         if not successful:
             return error, successful
         input_tag_metadata_pairs: dict[str, TagMetadata] = {
@@ -159,7 +159,7 @@ class CalculationBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleIn
         self._initialized = True
         _ = self.calculate(t=system.time)
         # if somehow the calculation returned NAN, something went wrong and the
-        # commissioning failed.
+        # initialization failed.
         successful = True
         for tag_info in self._output_tag_info_dict.values():
             if np.isnan(tag_info.data.value):

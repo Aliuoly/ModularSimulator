@@ -112,7 +112,7 @@ class SensorBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInherit
     _tag_info: TagInfo = PrivateAttr()
     _alias_tag: str = PrivateAttr()
 
-    # ----commission time initialized----
+    # ----initialize time initialized----
     _measurement_getter: Callable[[], StateValue] = PrivateAttr()
     # all internal calculation that requires the previous measurement and timestamp should use these
     # these may or may not be equivalent to _tag_info.data.value and .t
@@ -136,9 +136,9 @@ class SensorBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInherit
             _raw_tag=self.measurement_tag,
         )
 
-    def commission(self, system: System) -> bool:
+    def initialize(self, system: System) -> bool:
         """
-        Commission the sensor for the process (lol)
+        initialize the sensor for the process (lol)
         Resolve the measurement source and prime the sensor state.
         Note that all necessary sensor states (last measurements, times, etc.)
         are initialized here as well, so no subsequent operations
@@ -165,16 +165,16 @@ class SensorBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInherit
         if np.isscalar(self._measurement):
             self._is_scalar = True
         # if somehow the measurement returned NAN, something went wrong and the
-        # commissioning failed.
+        # initialization failed.
         successful = True
         if np.any(np.isnan(self._tag_info.data.value)):
             return not successful
 
-        successful = self._post_commission(system)
+        successful = self._post_initialization(system)
         return successful
 
-    def _post_commission(self, system: System) -> bool:
-        """Subclass hook that is called after commissioning."""
+    def _post_initialization(self, system: System) -> bool:
+        """Subclass hook that is called after initialization."""
         return True
 
     def save(self) -> dict[str, Any]:

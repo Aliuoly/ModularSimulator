@@ -67,7 +67,7 @@ class PIDController(ControllerBase):
     _filtered_derivative: StateValue = PrivateAttr(default=0.0)
 
     @override
-    def _post_commission(
+    def _post_initialization(
         self,
         system: System,
         mv_getter: Callable[[], TagData],

@@ -47,7 +47,7 @@ class FirstOrderTrajectoryController(ControllerBase):
 
     # ------------------------------------------------------------------------
     @override
-    def _post_commission(
+    def _post_initialization(
         self,
         system: System,
         mv_getter: Callable[[], TagData],

@@ -1,0 +1,220 @@
+{
+  "system": {
+    "dt": 30.0,
+    "solver_options": {
+      "method": "LSODA"
+    },
+    "record_history": true,
+    "show_progress": true
+  },
+  "process_model": {
+    "type": "IrreversibleProcessModel",
+    "module": "process_definition",
+    "t": 86400.0,
+    "states": {
+      "V": 1153.6285047455563,
+      "A": 0.7463160271677551,
+      "B": 0.5073679456644903,
+      "F_out": 3.3965107165229975,
+      "F_in": 3.392698157740686,
+      "k": 0.001,
+      "Cv": 0.1,
+      "CA_in": 1.0
+    }
+  },
+  "sensors": [
+    {
+      "type": "SampledDelayedSensor",
+      "module": "modular_simulation.usables.sensors.sampled_delayed_sensor",
+      "config": {
+        "measurement_tag": "F_out",
+        "alias_tag": "F_out",
+        "unit": "l / s",
+        "description": "No description provided.",
+        "coefficient_of_variance": 0.0,
+        "faulty_probability": 0.0,
+        "faulty_aware": false,
+        "instrument_range": [
+          -Infinity,
+          Infinity
+        ],
+        "random_seed": 0,
+        "deadtime": {
+          "value": 0.0,
+          "unit": "s"
+        },
+        "sampling_period": {
+          "value": 0.0,
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "type": "SampledDelayedSensor",
+      "module": "modular_simulation.usables.sensors.sampled_delayed_sensor",
+      "config": {
+        "measurement_tag": "F_in",
+        "alias_tag": "F_in",
+        "unit": "l / min",
+        "description": "No description provided.",
+        "coefficient_of_variance": 0.05,
+        "faulty_probability": 0.0,
+        "faulty_aware": false,
+        "instrument_range": [
+          -Infinity,
+          Infinity
+        ],
+        "random_seed": 0,
+        "deadtime": {
+          "value": 0.0,
+          "unit": "s"
+        },
+        "sampling_period": {
+          "value": 0.0,
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "type": "SampledDelayedSensor",
+      "module": "modular_simulation.usables.sensors.sampled_delayed_sensor",
+      "config": {
+        "measurement_tag": "B",
+        "alias_tag": "B",
+        "unit": "mol / l",
+        "description": "No description provided.",
+        "coefficient_of_variance": 0.05,
+        "faulty_probability": 0.0,
+        "faulty_aware": false,
+        "instrument_range": [
+          -Infinity,
+          Infinity
+        ],
+        "random_seed": 0,
+        "deadtime": {
+          "value": 600.0,
+          "unit": "s"
+        },
+        "sampling_period": {
+          "value": 600.0,
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "type": "SampledDelayedSensor",
+      "module": "modular_simulation.usables.sensors.sampled_delayed_sensor",
+      "config": {
+        "measurement_tag": "V",
+        "alias_tag": "V",
+        "unit": "l",
+        "description": "No description provided.",
+        "coefficient_of_variance": 0.0,
+        "faulty_probability": 0.01,
+        "faulty_aware": true,
+        "instrument_range": [
+          -Infinity,
+          Infinity
+        ],
+        "random_seed": 0,
+        "deadtime": {
+          "value": 0.0,
+          "unit": "s"
+        },
+        "sampling_period": {
+          "value": 0.0,
+          "unit": "s"
+        }
+      }
+    }
+  ],
+  "calculations": [],
+  "control_elements": [
+    {
+      "type": "ControlElement",
+      "module": "modular_simulation.usables.control_system.control_element",
+      "config": {
+        "mv_tag": "F_in",
+        "mv_trajectory": {
+          "y0": 61.71474645441746,
+          "t0": {
+            "value": 0.0,
+            "unit": "s"
+          }
+        },
+        "mv_range": [
+          0.0,
+          6000.0
+        ],
+        "mode": 1,
+        "period": {
+          "value": 1e-12,
+          "unit": "s"
+        }
+      },
+      "controller": {
+        "type": "PIDController",
+        "module": "modular_simulation.usables.control_system.controllers.PID_controller",
+        "config": {
+          "cv_tag": "B",
+          "cv_range": [
+            0.0,
+            2.0
+          ],
+          "ramp_rate": null,
+          "sp_trajectory": {
+            "y0": 0.5,
+            "t0": {
+              "value": 0.0,
+              "unit": "s"
+            }
+          },
+          "mode": 1,
+          "period": {
+            "value": 1e-12,
+            "unit": "s"
+          },
+          "Kp": 6.0,
+          "Ti": {
+            "value": 120.0,
+            "unit": "s"
+          },
+          "Td": {
+            "value": 0.0,
+            "unit": "s"
+          },
+          "derivative_filter_tc": {
+            "value": 0.0,
+            "unit": "s"
+          },
+          "setpoint_weight": 1.0,
+          "inverted": false,
+          "velocity_form": false
+        },
+        "cascade_controller": null,
+        "state": {
+          "mode": "AUTO",
+          "sp": {
+            "time": 86370.0,
+            "value": 0.5,
+            "ok": true
+          },
+          "control_action": {
+            "time": 86370.0,
+            "value": 203.56188946444118,
+            "ok": true
+          }
+        }
+      },
+      "state": {
+        "mode": "AUTO",
+        "mv": {
+          "time": 0.0,
+          "value": 61.71474645441746,
+          "ok": true
+        },
+        "mv_tag": "F_in"
+      }
+    }
+  ]
+}

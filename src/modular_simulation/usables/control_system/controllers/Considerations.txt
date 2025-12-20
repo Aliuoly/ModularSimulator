@@ -72,7 +72,7 @@ The output of the controllers is passed down the chain, and only the final contr
 interacts with the process. 
 
 The sp trajectory now also becomes optional. If not provided, will just take the current PV value
-at commissioning time and take it as the SP and hold it there. 
+at initialization time and take it as the SP and hold it there. 
 
 I think the controllers also no longer require MV range, but instead specifies the CV range, within which
 the SP may move. The MV range will be inherited from the inner loop instead and used if necessary. 

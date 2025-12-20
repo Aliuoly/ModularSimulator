@@ -203,7 +203,7 @@ class System(BaseModel):
     ) -> tuple[Exception | None, bool]:
         """
         Adds sensors, calculations, and controllers to the system.
-        Performs the necessary wiring and commissioning steps to bind
+        Performs the necessary wiring and initialization steps to bind
         them to the system.
         """
         error = None
@@ -215,20 +215,20 @@ class System(BaseModel):
             self.tag_store.add(component.tag_info)
             # don't care about sensor lol, only way it fails is if
             # state value is bad, in which case scipy solver will fail later.
-            _ = component.commission(self)
+            _ = component.initialize(self)
             error = None
         elif isinstance(component, CalculationBase):
             # output tag info available before wiring inputs, but
             # certain calculations have some preprocessing during the wiring stage,
             # such as resolving unit issues. Thus, put it after wiring inputs.
-            error, successful = component.wire_inputs(self)
+            error, successful = component.initialize(self)
             if successful:
                 self.tag_store.add(component.output_tag_info_dict)
         elif isinstance(component, ControlElement):  # pyright: ignore[reportUnnecessaryIsInstance]
-            _ = component.commission(
+            _ = component.initialize(
                 self
             )  # don't care about controller lol, it may fail and still be fine.
-            # sp tag info available only after commissioning, unlike above.
+            # sp tag info available only after initialization, unlike above.
             self.tag_store.add(component.controller_sp_tag_info_dict)
             error = None
         else:

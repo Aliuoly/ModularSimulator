@@ -23,7 +23,6 @@ def create_system(use_numba: bool = False) -> System:
         sensors=sensors,
         calculations=calculations,
         control_elements=control_elements,
-        use_numba=use_numba,
     )
 
 

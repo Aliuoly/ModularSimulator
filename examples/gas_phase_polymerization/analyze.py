@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from run_simulation import system
 
-N_STEPS = 500
+N_STEPS = 5000
 
 
 def run(iterations: int) -> None:
@@ -30,5 +30,7 @@ if __name__ == "__main__":
 
     buf = io.StringIO()
     stats = pstats.Stats(profiler, stream=buf)
-    stats.sort_stats(pstats.SortKey.CUMULATIVE).print_stats("modular_simulation|gas_phase_polymerization")
+    stats.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(
+        "modular_simulation|gas_phase_polymerization"
+    )
     print(buf.getvalue())

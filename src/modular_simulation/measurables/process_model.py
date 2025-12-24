@@ -216,8 +216,7 @@ class ProcessModel(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInher
             "module": self.__class__.__module__,
             "t": self.t,
             "states": {
-                name: _serialize_state(self.state_getter(name))
-                for name in self.state_metadata_dict
+                name: _serialize_state(self.state_getter(name)) for name in self.state_metadata_dict
             },
         }
 
@@ -396,6 +395,7 @@ class ProcessModel(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInher
             t_span=(self.t, end_t),
             y0=y0,
             args=(u, self._params),
+            dense_output=True,
             **self._solver_options,  # pyright: ignore[reportAny]
         )
         final_y = result.y[:, -1]

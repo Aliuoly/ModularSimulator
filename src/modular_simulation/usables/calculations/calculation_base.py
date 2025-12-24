@@ -27,7 +27,7 @@ class CalculationBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleIn
     e.g., input_one_tag: Annotated[str, TagAnnotation(TagType.INPUT), Unit('m'), 'this is input one']
     """
 
-    name: str | None = Field(default=None, description="Name of the calculation - optional.")
+    name: str = Field(default="", description="Name of the calculation - optional.")
 
     # -----construction time defined-----
     _field_metadata_dict: dict[str, TagMetadata] = PrivateAttr()
@@ -43,7 +43,7 @@ class CalculationBase(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleIn
 
     @override
     def model_post_init(self, context: Any):  # pyright: ignore[reportExplicitAny, reportAny]
-        if self.name is None:
+        if self.name == "":
             self.name = self.__class__.__name__
 
         self._field_metadata_dict = {

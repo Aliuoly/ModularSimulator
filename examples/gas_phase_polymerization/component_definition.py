@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import partial
 
-from modular_simulation.usables import (
+from modular_simulation.components import (
     BangBangController,
     CalculationBase,
     CalculationModelPath,
@@ -13,7 +13,7 @@ from modular_simulation.usables import (
     ControlElement,
     FirstOrderTrajectoryController,
 )
-from modular_simulation.usables.calculations.first_order_filter import FirstOrderFilter
+from modular_simulation.components.calculations.first_order_filter import FirstOrderFilter
 from modular_simulation.utils.wrappers import minute, hour, per_hour
 from calculations.misc_calculations import (
     AlTiRatioEstimator,

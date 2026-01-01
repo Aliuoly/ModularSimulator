@@ -3,16 +3,16 @@ from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 from typing import Any, Callable, override, TYPE_CHECKING, cast
 from collections.abc import Sequence
 from functools import cached_property
-from modular_simulation.usables.control_system.control_element import ControlElement
+from modular_simulation.components.control_system.control_element import ControlElement
 from modular_simulation.utils.typing import Seconds, StateValue, TimeQuantity
-from modular_simulation.usables.point import PointRegistry, Point, DataValue
+from modular_simulation.components.point import PointRegistry, Point, DataValue
 
 from modular_simulation.utils.wrappers import second
 from modular_simulation.measurables.process_model import ProcessModel
-from modular_simulation.usables.sensors.abstract_sensor import AbstractSensor
-from modular_simulation.usables.calculations.abstract_calculation import AbstractCalculation
-from modular_simulation.usables.control_system.controller_mode import ControllerMode
-from modular_simulation.usables.control_system.abstract_controller import AbstractController
+from modular_simulation.components.sensors.abstract_sensor import AbstractSensor
+from modular_simulation.components.calculations.abstract_calculation import AbstractCalculation
+from modular_simulation.components.control_system.controller_mode import ControllerMode
+from modular_simulation.components.control_system.abstract_controller import AbstractController
 from modular_simulation.validation.exceptions import (
     SensorConfigurationError,
     ControllerConfigurationError,
@@ -21,7 +21,7 @@ import logging
 from tqdm import tqdm
 
 if TYPE_CHECKING:
-    from modular_simulation.usables.control_system.trajectory import Trajectory
+    from modular_simulation.components.control_system.trajectory import Trajectory
 
 logger = logging.getLogger(__name__)
 

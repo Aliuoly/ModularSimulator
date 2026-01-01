@@ -53,6 +53,16 @@ class Trajectory(BaseModel):
         self._knots_t = [self.t0]
         self._knots_y = [self.y0]
 
+    def save(self) -> dict[str, Any]:
+        """Minimal save: only the current value."""
+        _, val = self.end()
+        return {"value": float(val)}
+
+    @classmethod
+    def load(cls, payload: dict[str, Any]) -> Trajectory:
+        """Create a constant trajectory from a value."""
+        return cls(y0=payload["value"])
+
     # --------------------------
     # Public API
     # --------------------------

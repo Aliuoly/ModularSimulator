@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from typing import Annotated
+from typing import Annotated, override
 from pydantic import Field
 
 from modular_simulation.framework.system import System
@@ -9,13 +9,13 @@ from modular_simulation.measurables.process_model import (
     StateMetadata,
     StateType,
 )
-from modular_simulation.usables.sensors.sensor_base import SensorBase
+from modular_simulation.components.sensors import AbstractSensor as SensorBase
+from modular_simulation.components import ControlElement, Trajectory, Point
+from modular_simulation.components.abstract_component import ComponentUpdateResult
 
 
 class MinimalProcessModel(ProcessModel):
-    x: Annotated[
-        float, StateMetadata(StateType.DIFFERENTIAL, "1", "simple state")
-    ] = Field(1.0)
+    x: Annotated[float, StateMetadata(StateType.DIFFERENTIAL, "1", "simple state")] = Field(1.0)
 
     @staticmethod
     def calculate_algebraic_values(
@@ -46,12 +46,11 @@ class MinimalProcessModel(ProcessModel):
 
 
 class MinimalSensor(SensorBase):
-    def _should_update(self, t: float) -> bool:  # noqa: D401
-        return True
-
-    def _get_processed_value(self, t: float, raw_value):  # noqa: D401
-        self._measurement = raw_value
-        return raw_value, True
+    @override
+    def _update(self, t: float) -> ComponentUpdateResult:
+        measurement = self._measurement_getter()
+        self._point.data = measurement
+        return ComponentUpdateResult(data_value=measurement, exceptions=[])
 
 
 @pytest.fixture()
@@ -87,5 +86,5 @@ def test_system_save_load_round_trip(minimal_system: System) -> None:
     expected = starting_value * np.exp(-restored.dt)
     assert restored.process_model.x == pytest.approx(expected, rel=1e-3)
 
-    measurement = restored.sensors[0].measure(restored.time, force=True)
-    assert measurement.ok
+    update_result = restored.sensors[0].update(restored.time)
+    assert update_result.data_value.ok

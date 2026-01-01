@@ -6,10 +6,10 @@ from pydantic import ConfigDict, Field, PrivateAttr
 from modular_simulation.validation.exceptions import (
     SensorConfigurationError,
 )
-from modular_simulation.usables.point import Point, DataValue
-from modular_simulation.usables.abstract_component import AbstractComponent, ComponentUpdateResult
+from modular_simulation.components.point import Point, DataValue
+from modular_simulation.components.abstract_component import AbstractComponent, ComponentUpdateResult
 from modular_simulation.utils.typing import Seconds
-from modular_simulation.usables.calculations.point_metadata import PointMetadata, TagType
+from modular_simulation.components.calculations.point_metadata import PointMetadata, TagType
 from modular_simulation.utils.metadata_extraction import extract_unique_metadata
 
 if TYPE_CHECKING:

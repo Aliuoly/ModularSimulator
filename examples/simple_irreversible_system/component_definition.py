@@ -1,4 +1,4 @@
-from modular_simulation.usables import (
+from modular_simulation.components import (
     SampledDelayedSensor,
     Trajectory,
     CalculationBase,
@@ -40,7 +40,7 @@ control_elements = [
         mv_range=(0, 100 * 60),
         controller=PIDController(
             cv_tag="B",
-            sp_trajectory=Trajectory(0.5),
+            sp_trajectory=Trajectory(y0=0.5),
             cv_range=(0, 2),
             Kp=1.0e-1 * 60,
             Ti=minute(2),

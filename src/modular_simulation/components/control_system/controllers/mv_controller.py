@@ -1,5 +1,5 @@
 from typing import override
-from modular_simulation.usables.control_system.abstract_controller import AbstractController
+from modular_simulation.components.control_system.abstract_controller import AbstractController
 from modular_simulation.utils.typing import StateValue, Seconds
 import logging
 

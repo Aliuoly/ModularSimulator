@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, override
 
-from modular_simulation.usables import CalculationBase, TagMetadata, TagType
+from modular_simulation.components import CalculationBase, TagMetadata, TagType
 from modular_simulation.utils.typing import StateValue
 
 

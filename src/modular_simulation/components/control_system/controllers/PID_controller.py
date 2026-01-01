@@ -5,8 +5,8 @@ from typing import Callable, override, TYPE_CHECKING
 from astropy.units import UnitBase
 import numpy as np
 from pydantic import Field, PrivateAttr
-from modular_simulation.usables.control_system.abstract_controller import AbstractController
-from modular_simulation.usables.point import DataValue
+from modular_simulation.components.control_system.abstract_controller import AbstractController
+from modular_simulation.components.point import DataValue
 from modular_simulation.utils.typing import Seconds, StateValue
 
 if TYPE_CHECKING:

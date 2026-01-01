@@ -25,7 +25,7 @@
   "sensors": [
     {
       "type": "SampledDelayedSensor",
-      "module": "modular_simulation.usables.sensors.sampled_delayed_sensor",
+      "module": "modular_simulation.components.sensors.sampled_delayed_sensor",
       "config": {
         "measurement_tag": "F_out",
         "alias_tag": "F_out",
@@ -51,7 +51,7 @@
     },
     {
       "type": "SampledDelayedSensor",
-      "module": "modular_simulation.usables.sensors.sampled_delayed_sensor",
+      "module": "modular_simulation.components.sensors.sampled_delayed_sensor",
       "config": {
         "measurement_tag": "F_in",
         "alias_tag": "F_in",
@@ -77,7 +77,7 @@
     },
     {
       "type": "SampledDelayedSensor",
-      "module": "modular_simulation.usables.sensors.sampled_delayed_sensor",
+      "module": "modular_simulation.components.sensors.sampled_delayed_sensor",
       "config": {
         "measurement_tag": "B",
         "alias_tag": "B",
@@ -103,7 +103,7 @@
     },
     {
       "type": "SampledDelayedSensor",
-      "module": "modular_simulation.usables.sensors.sampled_delayed_sensor",
+      "module": "modular_simulation.components.sensors.sampled_delayed_sensor",
       "config": {
         "measurement_tag": "V",
         "alias_tag": "V",
@@ -132,7 +132,7 @@
   "control_elements": [
     {
       "type": "ControlElement",
-      "module": "modular_simulation.usables.control_system.control_element",
+      "module": "modular_simulation.components.control_system.control_element",
       "config": {
         "mv_tag": "F_in",
         "mv_trajectory": {
@@ -154,7 +154,7 @@
       },
       "controller": {
         "type": "PIDController",
-        "module": "modular_simulation.usables.control_system.controllers.PID_controller",
+        "module": "modular_simulation.components.control_system.controllers.PID_controller",
         "config": {
           "cv_tag": "B",
           "cv_range": [

@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Annotated, override
 import numpy as np
 
-from modular_simulation.usables import (
+from modular_simulation.components import (
     CalculationBase,
     TagMetadata,
     TagType,

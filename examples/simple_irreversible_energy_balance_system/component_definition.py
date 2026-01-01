@@ -1,5 +1,5 @@
 from __future__ import annotations
-from modular_simulation.usables import (
+from modular_simulation.components import (
     CalculationBase,
     ControlElement,
     PIDController,

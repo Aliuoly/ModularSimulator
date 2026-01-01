@@ -3,12 +3,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 from collections.abc import Callable
 from .controller_mode import ControllerMode
-from modular_simulation.usables.point import DataValue
+from modular_simulation.components.point import DataValue
 
 if TYPE_CHECKING:
     from .abstract_controller import AbstractController
     from .trajectory import Trajectory
-    from modular_simulation.usables.abstract_component import ComponentUpdateResult
+    from modular_simulation.components.abstract_component import ComponentUpdateResult
 import logging
 
 logger = logging.getLogger(__name__)

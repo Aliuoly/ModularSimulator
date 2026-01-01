@@ -3,8 +3,9 @@ import sys
 from abc import ABC, abstractmethod
 from typing import Any, TypedDict, TYPE_CHECKING
 from pydantic import BaseModel, field_validator, PrivateAttr
+import importlib
 
-from modular_simulation.usables.point import DataValue
+from modular_simulation.components.point import DataValue
 
 if TYPE_CHECKING:
     from modular_simulation.framework import System
@@ -58,8 +59,10 @@ class AbstractComponent(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultiple
     Base class for all components. All components must implement the following methods:
     1. commission (as in, binding to an instance of System)
     2. update (updating the component's states)
-    3. to_dict (converting the component's configuration and history to a dictionary)
-    4. from_dict (creating a component from a dictionary holding its configuration and history)
+    1. commission (as in, binding to an instance of System)
+    2. update (updating the component's states)
+    3. save (converting the component's configuration and history to a dictionary)
+    4. load (creating a component from a dictionary holding its configuration and history)
 
     All components must also have a name attribute. If no name is provided, the name will be set to the class name.
     The orchestrating `System` will ensure that all components have unique names.
@@ -115,8 +118,8 @@ class AbstractComponent(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultiple
         """Internal hook to check if the component should update."""
         ...
 
-    def to_dict(self) -> ComponentDataDict:
-        """Convert the component's configuration and history to a dictionary."""
+    def save(self) -> ComponentDataDict:
+        """Serialize the component to a dictionary."""
         return ComponentDataDict(
             name=self.name,
             type=self.__class__.__name__,
@@ -124,6 +127,21 @@ class AbstractComponent(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultiple
             config=self._get_configuration_dict(),
             state=self._get_runtime_state_dict(),
         )
+
+    @classmethod
+    def load(cls, payload: dict[str, Any]) -> AbstractComponent:
+        """Create a component from a dictionary."""
+        module_name = payload["module"]
+        type_name = payload["type"]
+        module = importlib.import_module(module_name)
+        component_cls = getattr(module, type_name)
+        if not issubclass(component_cls, AbstractComponent):
+            raise TypeError(f"{component_cls} is not a subclass of AbstractComponent")
+
+        component = component_cls._load_configuration(payload["config"])
+        component.name = payload["name"]
+        component._load_runtime_state(payload["state"])
+        return component
 
     @abstractmethod
     def _get_configuration_dict(self) -> dict[str, Any]:  # pyright: ignore[reportExplicitAny]
@@ -134,14 +152,6 @@ class AbstractComponent(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultiple
     def _get_runtime_state_dict(self) -> dict[str, Any]:  # pyright: ignore[reportExplicitAny]
         """Convert the component's runtime state to a dictionary."""
         ...
-
-    @classmethod
-    def from_dict(cls, data: ComponentDataDict) -> AbstractComponent:
-        """Create a component from a dictionary holding its configuration and history."""
-        component = cls._load_configuration(data["config"])
-        component.name = data["name"]
-        component._load_runtime_state(data["state"])
-        return component
 
     @classmethod
     @abstractmethod

@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast, override
 from collections.abc import Callable
 from pydantic import Field, PrivateAttr
-from modular_simulation.usables.control_system.abstract_controller import AbstractController
-from modular_simulation.usables.point import DataValue
+from modular_simulation.components.control_system.abstract_controller import AbstractController
+from modular_simulation.components.point import DataValue
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 from modular_simulation.utils.typing import Seconds, StateValue
 

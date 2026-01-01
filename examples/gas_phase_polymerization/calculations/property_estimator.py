@@ -3,7 +3,7 @@ from typing import Literal, Deque, Annotated
 from numpy.typing import NDArray
 from pydantic import Field, PrivateAttr
 from astropy.units import Unit #type:ignore
-from modular_simulation.usables import (
+from modular_simulation.components import (
     CalculationBase, 
     TagMetadata,
     TagType,

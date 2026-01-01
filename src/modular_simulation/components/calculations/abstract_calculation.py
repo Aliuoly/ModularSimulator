@@ -9,11 +9,11 @@ from modular_simulation.validation.exceptions import (
     CalculationDefinitionError,
     CalculationConfigurationError,
 )
-from modular_simulation.usables.point import Point, DataValue
-from modular_simulation.usables.abstract_component import AbstractComponent, ComponentUpdateResult
+from modular_simulation.components.point import Point, DataValue
+from modular_simulation.components.abstract_component import AbstractComponent, ComponentUpdateResult
 from modular_simulation.utils.typing import StateValue, Seconds
 from modular_simulation.utils.metadata_extraction import extract_unique_metadata
-from modular_simulation.usables.calculations.point_metadata import PointMetadata, TagType
+from modular_simulation.components.calculations.point_metadata import PointMetadata, TagType
 
 if TYPE_CHECKING:
     from modular_simulation.framework.system import System

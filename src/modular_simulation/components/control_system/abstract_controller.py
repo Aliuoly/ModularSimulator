@@ -1,18 +1,20 @@
 from __future__ import annotations  # without this cant type hint the cascade controller properly
-from abc import abstractmethod, ABC
+from abc import abstractmethod
 import math
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 from dataclasses import asdict
-import importlib
 from astropy.units import UnitBase
 import numpy as np
 from .controller_mode import ControllerMode
-from pydantic import PrivateAttr, Field, ConfigDict, SerializeAsAny, BaseModel
-from modular_simulation.usables.point import DataValue, Point
+from pydantic import PrivateAttr, Field, ConfigDict, SerializeAsAny
+from modular_simulation.components.point import DataValue, Point
 from .trajectory import Trajectory
 from modular_simulation.validation.exceptions import ControllerConfigurationError
-from modular_simulation.usables.abstract_component import ComponentUpdateResult
+from modular_simulation.components.abstract_component import (
+    AbstractComponent,
+    ComponentUpdateResult,
+)
 from modular_simulation.utils.typing import Seconds, StateValue, PerSeconds
 from .mode_manager import ControllerModeManager
 
@@ -23,7 +25,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class AbstractController(BaseModel, ABC):
+class AbstractController(AbstractComponent):
     """Abstract base class for all controllers in the modular simulation framework."""
 
     cv_tag: str = Field(..., description="The tag of the controlled variable (CV).")
@@ -75,9 +77,10 @@ class AbstractController(BaseModel, ABC):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportUnannotatedClassAttribute]
 
-    # -------- Interface --------
+    # -------- AbstractComponent Interface --------
 
-    def initialize(self, system: System) -> list[Exception]:
+    @override
+    def _initialize(self, system: System) -> list[Exception]:
         """Base commissioning for the controller.
 
         Resolves CV points, sets up SP points, and commissions cascade controllers.
@@ -128,24 +131,14 @@ class AbstractController(BaseModel, ABC):
 
         return exceptions
 
-    def should_update(self, t: Seconds) -> bool:
-        if not self._initialized:
-            return False
-        # Check period
+    @override
+    def _should_update(self, t: Seconds) -> bool:
         # control_action time is the time of the *last* action
         return t >= (self._control_action.time + self.period)
 
-    def update(self, t: Seconds) -> ComponentUpdateResult:
+    @override
+    def _update(self, t: Seconds) -> ComponentUpdateResult:
         """Run one control-cycle update and return result."""
-        if not self._initialized:
-            return ComponentUpdateResult(
-                data_value=DataValue(),
-                exceptions=[RuntimeError(f"Controller '{self.cv_tag}' has not been initialized.")],
-            )
-
-        if not self.should_update(t):
-            return ComponentUpdateResult(data_value=self._control_action, exceptions=[])
-
         try:
             data_value = self._control_update(t)
             return ComponentUpdateResult(data_value=data_value, exceptions=[])
@@ -303,48 +296,41 @@ class AbstractController(BaseModel, ABC):
         """The actual control algorithm. To be implemented by subclasses."""
         pass
 
-    # -------- Serialization (Standalone) --------
+    @override
+    def _get_configuration_dict(self) -> dict[str, Any]:
+        config = self.model_dump(exclude={"cascade_controller"})
+        if self.cascade_controller is not None:
+            config["cascade_controller"] = self.cascade_controller.save()
+        return config
 
-    def save(self) -> dict[str, Any]:  # pyright: ignore[reportExplicitAny]
-        cascade_payload = (
-            self.cascade_controller.save() if self.cascade_controller is not None else None
-        )
-
-        return {
-            "type": self.__class__.__name__,
-            "module": self.__class__.__module__,
-            "config": self.model_dump(exclude={"cascade_controller"}),
-            "cascade_controller": cascade_payload,
-            "state": self._save_runtime_state(),
-        }
-
-    @classmethod
-    def load(cls, payload: dict[str, Any]) -> "AbstractController":  # pyright: ignore[reportExplicitAny]
-        module = importlib.import_module(payload["module"])
-        controller_cls = getattr(module, payload["type"])
-        if not issubclass(controller_cls, cls):
-            raise TypeError(f"{controller_cls} is not a subclass of {cls}")
-
-        cascade_payload = payload.get("cascade_controller")
-        cascade_controller = cls.load(cascade_payload) if cascade_payload else None
-
-        config = dict(payload["config"])
-        config["cascade_controller"] = cascade_controller
-
-        controller = controller_cls(**config)
-        controller._load_runtime_state(payload.get("state") or {})
-        return controller
-
-    def _save_runtime_state(self) -> dict[str, Any]:  # pyright: ignore[reportExplicitAny]
+    @override
+    def _get_runtime_state_dict(self) -> dict[str, Any]:
         return {
             "mode": self.mode.name,
             "sp": asdict(self._sp_point.data),
             "control_action": asdict(self._control_action),
         }
 
-    def _load_runtime_state(self, state: dict[str, Any]) -> None:  # pyright: ignore[reportExplicitAny]
+    @classmethod
+    @override
+    def _load_configuration(cls, data: dict[str, Any]) -> "AbstractController":
+        config = dict(data)
+
+        # Handle Controller
+        if "cascade_controller" in config and config["cascade_controller"] is not None:
+            # We use cls.load instead of AbstractController.load to maintain type
+            # but actually AbstractController.load is safer for dispatch
+            cascade_controller = AbstractController.load(config["cascade_controller"])
+            config["cascade_controller"] = cascade_controller
+
+        return cls(**config)
+
+    @override
+    def _load_runtime_state(self, state: dict[str, Any]) -> None:
         if "mode" in state:
             self.mode = ControllerMode[state["mode"]]
+        # sp and control_action are usually cold-started or updated by first step
+        # but could be restored here if needed.
 
     # -------- Properties --------
 

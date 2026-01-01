@@ -1,9 +1,9 @@
 from __future__ import annotations
 from pydantic import Field, PrivateAttr
-from modular_simulation.usables.control_system.abstract_controller import AbstractController
+from modular_simulation.components.control_system.abstract_controller import AbstractController
 from typing import TYPE_CHECKING, Callable, override, cast
 from astropy.units import UnitBase
-from modular_simulation.usables.point import DataValue
+from modular_simulation.components.point import DataValue
 import logging
 from modular_simulation.utils.typing import Seconds, StateValue
 

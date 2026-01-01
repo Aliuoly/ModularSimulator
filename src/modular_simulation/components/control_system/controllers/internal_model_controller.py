@@ -4,9 +4,9 @@ from typing import Any, Annotated, TYPE_CHECKING, override, cast
 from astropy.units import UnitBase
 import numpy as np
 from pydantic import Field, PrivateAttr, BaseModel, BeforeValidator
-from modular_simulation.usables.control_system.abstract_controller import AbstractController
-from modular_simulation.usables.calculations.abstract_calculation import AbstractCalculation
-from modular_simulation.usables.point import DataValue
+from modular_simulation.components.control_system.abstract_controller import AbstractController
+from modular_simulation.components.calculations.abstract_calculation import AbstractCalculation
+from modular_simulation.components.point import DataValue
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 from modular_simulation.utils.typing import Seconds, StateValue
 from modular_simulation.utils.bounded_minimize import bounded_minimize

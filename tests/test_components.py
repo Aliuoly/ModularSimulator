@@ -3,7 +3,7 @@ import numpy as np
 from types import SimpleNamespace
 from astropy.units import Unit
 
-from modular_simulation.usables import (
+from modular_simulation.components import (
     SampledDelayedSensor,
     PIDController,
     Trajectory,

@@ -3,8 +3,8 @@ import numpy as np
 from typing import Annotated, TYPE_CHECKING, override
 from pydantic import PrivateAttr, Field
 from modular_simulation.validation.exceptions import CalculationConfigurationError
-from modular_simulation.usables.calculations.point_metadata import PointMetadata, TagType
-from modular_simulation.usables.calculations.abstract_calculation import AbstractCalculation
+from modular_simulation.components.calculations.point_metadata import PointMetadata, TagType
+from modular_simulation.components.calculations.abstract_calculation import AbstractCalculation
 from modular_simulation.utils.typing import Seconds, StateValue
 from astropy.units import Unit
 

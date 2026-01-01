@@ -7,7 +7,7 @@ from typing import Any, Iterable, TYPE_CHECKING, Callable
 
 import numpy as np
 
-from modular_simulation.usables import TagData
+from modular_simulation.components import TagData
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from matplotlib.axes import Axes

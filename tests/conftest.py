@@ -14,11 +14,19 @@ from modular_simulation.utils.typing import ArrayIndex
 class ThermalProcessModel(ProcessModel):
     """Simple first-order process used for testing."""
 
-    temperature: Annotated[float, M(type=T.DIFFERENTIAL, unit="K", description="process temperature")] = 300.0
+    temperature: Annotated[
+        float, M(type=T.DIFFERENTIAL, unit="K", description="process temperature")
+    ] = 300.0
     heat_flux: Annotated[float, M(type=T.ALGEBRAIC, unit="K/s", description="cooling rate")] = 0.0
-    heater_power: Annotated[float, M(type=T.CONTROLLED, unit="K/s", description="heating input")] = 0.0
-    ambient_temperature: Annotated[float, M(type=T.CONSTANT, unit="K", description="ambient temperature")] = 295.0
-    cooling_rate: Annotated[float, M(type=T.CONSTANT, unit="1/s", description="linear cooling coefficient")] = 0.2
+    heater_power: Annotated[
+        float, M(type=T.CONTROLLED, unit="K/s", description="heating input")
+    ] = 0.0
+    ambient_temperature: Annotated[
+        float, M(type=T.CONSTANT, unit="K", description="ambient temperature")
+    ] = 295.0
+    cooling_rate: Annotated[
+        float, M(type=T.CONSTANT, unit="1/s", description="linear cooling coefficient")
+    ] = 0.2
 
     @staticmethod
     def calculate_algebraic_values(
@@ -80,5 +88,5 @@ def attached_process_model(thermal_process_model: ThermalProcessModel) -> Therma
         use_numba=False,
         numba_options={},
     )
-    thermal_process_model._attach_system(dummy_system)
+    thermal_process_model.attach_system(dummy_system)
     return thermal_process_model

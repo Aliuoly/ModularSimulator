@@ -15,13 +15,13 @@ The framework is intended to be used for learning about controller design, tryin
 
 The framework comes with a set of pre-built components to get you started:
 
-*   **Controllers** (`modular_simulation.usables.control_system.controllers`):
+*   **Controllers** (`modular_simulation.components.control_system.controllers`):
     *   `PIDController`: Standard PID algorithm with anti-windup, setpoint weighting, and derivative filtering.
     *   `BangBangController`: Simple on/off control with deadband.
     *   `InternalModelController`: Model-based control using an internal process model.
     *   `FirstOrderTrajectoryController`: Computes MV to drive CV along a desired first-order trajectory.
     *   `MVController`: Pass-through controller that sets MV directly to the setpoint value.
-*   **Sensors** (`modular_simulation.usables.sensors`):
+*   **Sensors** (`modular_simulation.components.sensors`):
     *   `SampledDelayedSensor`: Simulates discrete sampling intervals and measurement delays. Also supports Gaussian noise injection and random fault simulation (drift, freeze, bias).
 
 ## Installation
@@ -89,7 +89,7 @@ We have detailed diagrams illustrating how these components interact:
 
 *   `src/modular_simulation`: Core framework code.
     *   `framework`: System orchestration and time stepping.
-    *   `usables`: Sensors, Calculations, and Control components.
+    *   `components`: Sensors, Calculations, and Control components.
     *   `quantities`: Data structures for process state.
 *   `examples`: Ready-to-run example simulations.
 *   `docs`: Mermaid diagrams and documentation.

@@ -2,7 +2,7 @@
 
 from functools import partial
 
-from modular_simulation.usables import (
+from modular_simulation.components import (
     PIDController,
     Trajectory,
     SampledDelayedSensor,
@@ -49,7 +49,7 @@ control_elements = [
             cascade_controller=PIDController(
                 cv_tag="Cb",
                 cv_range=(0.0, 2.0),
-                sp_trajectory=Trajectory(0.20).hold(hour(40)).step(0.10).hold(hour(40)).step(-0.2),
+                sp_trajectory=Trajectory(y0=0.20).hold(hour(40)).step(0.10).hold(hour(40)).step(-0.2),
                 Kp=20.0,
                 Ti=hour(1.0),
             ),

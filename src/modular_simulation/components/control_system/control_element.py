@@ -2,13 +2,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, override
 import numpy as np
 import importlib
+from dataclasses import asdict
 from pydantic import PrivateAttr, ConfigDict, Field
-from modular_simulation.usables.point import Point, DataValue
+from modular_simulation.components.point import Point, DataValue
 from modular_simulation.validation.exceptions import (
     ControlElementConfigurationError,
     ControllerConfigurationError,
 )
-from modular_simulation.usables.abstract_component import AbstractComponent, ComponentUpdateResult
+from modular_simulation.components.abstract_component import (
+    AbstractComponent,
+    ComponentUpdateResult,
+)
 from modular_simulation.utils.typing import Seconds, StateValue
 from .controller_mode import ControllerMode
 from .mode_manager import ControlElementModeManager
@@ -203,22 +207,12 @@ class ControlElement(AbstractComponent):
             return ComponentUpdateResult(data_value=self._mv_point.data, exceptions=[e])
 
     @override
-    def _get_configuration_dict(self) -> dict[str, Any]:
-        return self.model_dump(exclude={"controller", "mv_trajectory"})
-
-    @override
-    def _get_runtime_state_dict(self) -> dict[str, Any]:
-        return self._save_runtime_state()
-
-    @classmethod
-    @override
-    def _load_configuration(cls, data: dict[str, Any]) -> "ControlElement":
-        return cls(**data)
-
-    @override
     def _load_runtime_state(self, state: dict[str, Any]) -> None:
         if "mode" in state:
             self.mode = ControllerMode[state["mode"]]
+        if "mv" in state:
+            # Optionally restore mv point data if needed, but usually it's driven by PM
+            pass
 
     # -------- Control Logic --------
 
@@ -233,68 +227,41 @@ class ControlElement(AbstractComponent):
         )
         self.mode = self._mode_manager.change_mode(mode)
 
-    def _control_update(self, t: Seconds) -> DataValue:
-        """Internal control update method."""
-        if not self._initialized:
-            raise RuntimeError(f"Control element '{self.mv_tag}' has not been commissioned.")
+    @override
+    def _get_configuration_dict(self) -> dict[str, Any]:
+        config = self.model_dump(exclude={"controller", "mv_trajectory"})
+        config["mv_trajectory"] = self.mv_trajectory.save()
+        if self.controller is not None:
+            config["controller"] = self.controller.save()
+        return config
 
-        control_action = self._mode_manager.get_control_action(t)
-
-        if control_action.ok:
-            if self._is_scalar:
-                control_action.value = min(
-                    max(control_action.value, self.mv_range[0]), self.mv_range[1]
-                )
-            else:
-                control_action.value = np.clip(
-                    control_action.value, self.mv_range[0], self.mv_range[1]
-                )
-
-        self._mv_setter(control_action)
-        return control_action
-
-    # -------- Serialization (Legacy) --------
-
-    def save(self) -> dict[str, Any]:
-        controller_payload = self.controller.save() if self.controller is not None else None
+    @override
+    def _get_runtime_state_dict(self) -> dict[str, Any]:
         return {
-            "type": self.__class__.__name__,
-            "module": self.__class__.__module__,
-            "config": self.model_dump(exclude={"controller", "mv_trajectory"}),
-            "mv_trajectory": self.mv_trajectory.to_dict(),
-            "controller": controller_payload,
-            "state": self._save_runtime_state(),
+            "mode": self.mode.name,
+            "mv": asdict(self._mv_point.data),
         }
 
     @classmethod
-    def load(cls, payload: dict[str, Any]) -> "ControlElement":
-        module = importlib.import_module(payload["module"])
-        control_element_cls = getattr(module, payload["type"])
-        if not issubclass(control_element_cls, cls):
-            raise TypeError(f"{control_element_cls} is not a subclass of {cls}")
+    @override
+    def _load_configuration(cls, data: dict[str, Any]) -> "ControlElement":
+        config = dict(data)
 
-        from .trajectory import Trajectory
+        # Handle Trajectory
+        if "mv_trajectory" in config:
+            from .trajectory import Trajectory
 
-        mv_trajectory = Trajectory.from_dict(payload["mv_trajectory"])
+            config["mv_trajectory"] = Trajectory.load(config["mv_trajectory"])
 
-        from .abstract_controller import AbstractController
+        # Handle Controller
+        if "controller" in config and config["controller"] is not None:
+            from .abstract_controller import AbstractController
 
-        controller_payload = payload.get("controller")
-        controller = AbstractController.load(controller_payload) if controller_payload else None
+            config["controller"] = AbstractController.load(config["controller"])
 
-        config = dict(payload["config"])
-        config["mv_trajectory"] = mv_trajectory
-        config["controller"] = controller
+        return cls(**config)
 
-        control_element = control_element_cls(**config)
-        control_element._load_runtime_state(payload.get("state") or {})
-        return control_element
-
-    def _save_runtime_state(self) -> dict[str, Any]:
-        return {
-            "mode": self.mode.name,
-            "mv": self._mv_point.data.model_dump(),
-        }
+    # -------- Serialization (Legacy) --------
 
     # -------- Properties --------
 

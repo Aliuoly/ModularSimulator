@@ -1,5 +1,5 @@
 from functools import partial
-from modular_simulation.usables import (
+from modular_simulation.components import (
     SampledDelayedSensor,
     FirstOrderFilter,
     ControlElement,

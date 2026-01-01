@@ -1,13 +1,15 @@
 from .calculations import (
+    AbstractCalculation,
     CalculationBase,
-    TagMetadata,
+    PointMetadata,
     TagType,
-    FirstOrderFilter
+    FirstOrderFilter,
 )
-from .sensors import SensorBase
-from .tag_info import TagData
+from .sensors import AbstractSensor, SensorBase
+from .point import DataValue, Point, PointRegistry
 from .sensors.sampled_delayed_sensor import SampledDelayedSensor
 from .control_system import (
+    AbstractController,
     CalculationModelPath,
     ControllerBase,
     InternalModelController,
@@ -20,9 +22,21 @@ from .control_system import (
     ControlElement,
 )
 
+# Backward compatibility aliases
+TagData = DataValue
+
 __all__ = [
-    "ControllerMode",
+    # New abstract base class names
+    "AbstractSensor",
+    "AbstractController",
+    "AbstractCalculation",
+    # Legacy aliases (deprecated)
+    "SensorBase",
     "ControllerBase",
+    "CalculationBase",
+    "TagData",  # Deprecated, use DataValue
+    # Controllers
+    "ControllerMode",
     "MVController",
     "ControlElement",
     "Trajectory",
@@ -31,11 +45,14 @@ __all__ = [
     "CalculationModelPath",
     "BangBangController",
     "FirstOrderTrajectoryController",
-    "SensorBase",
-    "CalculationBase",
+    # Sensors
     "SampledDelayedSensor",
-    "TagData",
-    "TagMetadata",
+    # Point module
+    "DataValue",
+    "Point",
+    "PointRegistry",
+    # Calculations
+    "PointMetadata",
     "TagType",
     "FirstOrderFilter",
 ]

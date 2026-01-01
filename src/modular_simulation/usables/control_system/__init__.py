@@ -1,7 +1,7 @@
 from .control_element import ControlElement
 from .trajectory import Trajectory
 from .controller_mode import ControllerMode
-from .controller_base import ControllerBase
+from .abstract_controller import AbstractController
 from .controllers import (
     PIDController,
     InternalModelController,
@@ -11,11 +11,15 @@ from .controllers import (
     FirstOrderTrajectoryController,
 )
 
+# Backward compatibility alias
+ControllerBase = AbstractController
+
 __all__ = [
     "ControlElement",
     "Trajectory",
     "ControllerMode",
-    "ControllerBase",
+    "AbstractController",
+    "ControllerBase",  # Deprecated alias for backward compatibility
     "PIDController",
     "InternalModelController",
     "CalculationModelPath",

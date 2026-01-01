@@ -1,7 +1,11 @@
-from .sensor_base import SensorBase
+from .abstract_sensor import AbstractSensor
 from .sampled_delayed_sensor import SampledDelayedSensor
 
+# Backward compatibility alias
+SensorBase = AbstractSensor
+
 __all__ = [
-    "SensorBase",
+    "AbstractSensor",
+    "SensorBase",  # Deprecated alias for backward compatibility
     "SampledDelayedSensor",
 ]

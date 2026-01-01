@@ -4,9 +4,9 @@ from typing import Any, Annotated, TYPE_CHECKING, override, cast
 from astropy.units import UnitBase
 import numpy as np
 from pydantic import Field, PrivateAttr, BaseModel, BeforeValidator
-from modular_simulation.usables.control_system.controller_base import ControllerBase
-from modular_simulation.usables.calculations.calculation_base import CalculationBase
-from modular_simulation.usables.tag_info import TagData
+from modular_simulation.usables.control_system.abstract_controller import AbstractController
+from modular_simulation.usables.calculations.abstract_calculation import AbstractCalculation
+from modular_simulation.usables.point import DataValue
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 from modular_simulation.utils.typing import Seconds, StateValue
 from modular_simulation.utils.bounded_minimize import bounded_minimize
@@ -17,10 +17,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def convert_calculation_to_str(calculation_name: type[CalculationBase] | str) -> str:
+def convert_calculation_to_str(calculation_name: type[AbstractCalculation] | str) -> str:
     if isinstance(calculation_name, str):
         return calculation_name
-    elif issubclass(calculation_name, CalculationBase):
+    elif issubclass(calculation_name, AbstractCalculation):
         return calculation_name.__name__
     else:
         raise ValueError(
@@ -40,7 +40,7 @@ class CalculationModelPath(BaseModel):
     method_name: str
 
 
-class InternalModelController(ControllerBase):
+class InternalModelController(AbstractController):
     """Internal Model Control (IMC) implementation for SISO loops.
 
     ``model`` may be a callable operating directly in system units or a
@@ -75,10 +75,10 @@ class InternalModelController(ControllerBase):
     _internal_model: Callable[[StateValue], StateValue] = PrivateAttr()
 
     @override
-    def _post_initialization(
+    def _post_commission_hook(
         self,
         system: System,
-        mv_getter: Callable[[], TagData],
+        mv_getter: Callable[[], DataValue],
         mv_range: tuple[StateValue, StateValue],
         mv_tag: str,
         mv_unit: UnitBase,
@@ -108,11 +108,11 @@ class InternalModelController(ControllerBase):
         )
 
         self._mv_converter_from_model_unit_to_controller_unit = cast(
-            UnitBase, calculation.tag_metadata_dict[mv_tag].unit
+            UnitBase, calculation.point_metadata_dict[mv_tag].unit
         ).get_converter(mv_controller_unit)
 
         converter_from_controller_unit_to_model_unit = mv_controller_unit.get_converter(
-            calculation.tag_metadata_dict[mv_tag].unit,
+            calculation.point_metadata_dict[mv_tag].unit,
         )
 
         self._mv_range_in_model_units = (

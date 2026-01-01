@@ -1,12 +1,12 @@
 from typing import override
-from modular_simulation.usables.control_system.controller_base import ControllerBase
+from modular_simulation.usables.control_system.abstract_controller import AbstractController
 from modular_simulation.utils.typing import StateValue, Seconds
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class MVController(ControllerBase):
+class MVController(AbstractController):
     """
     Sets the mv (controller output) to be the setpoint, whereever it comes from.
     """

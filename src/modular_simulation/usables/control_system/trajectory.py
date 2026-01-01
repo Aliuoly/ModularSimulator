@@ -1,9 +1,8 @@
 from __future__ import annotations
 import math
 from bisect import bisect_right
-from pydantic.dataclasses import dataclass
-from dataclasses import field
-from typing import overload
+from typing import overload, Any, override
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from modular_simulation.utils.typing import (
     PerSeconds,
     Seconds,
@@ -30,8 +29,7 @@ def _noise_interp(seed: int, x: float) -> float:
     return (1 - f) * r0 + f * r1
 
 
-@dataclass(config={"arbitrary_types_allowed": True})
-class Trajectory:
+class Trajectory(BaseModel):
     """
     Minimal piecewise setpoint trajectory with trimming.
 
@@ -40,23 +38,19 @@ class Trajectory:
     - Internals: seconds (float) in two primitive lists: _knots_t, _knots_y.
     - Ops: set, step, ramp, hold, random_walk
     - Trimming: an internal clock t0; all ops call _gc() to discard history.
-
-    Semantics:
-      - set(value, t=None): from time t onward hold 'value'. If t is None, uses current end time.
-      - step(mag): instantaneous jump at current end time.
-      - ramp(mag, duration): linear change over 'duration' starting at end time.
-      - hold(duration, value=None): keep value (or set to 'value' first) and append a flat segment.
-      - random_walk(std, duration, dt, clamp=(min,max), seed): cumulative RW knots, deterministic.
     """
 
     y0: StateValue
-    t0: Seconds = field(default=0.0)
+    t0: Seconds = Field(default=0.0)
 
-    _knots_t: list[Seconds] = field(init=False)
-    _knots_y: list[StateValue] = field(init=False)
+    _knots_t: list[Seconds] = PrivateAttr()
+    _knots_y: list[StateValue] = PrivateAttr()
 
-    def __post_init__(self):
-        self._knots_t = [self.t0]  # already in seconds due to validation in SerializableSeconds
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @override
+    def model_post_init(self, __context: Any) -> None:
+        self._knots_t = [self.t0]
         self._knots_y = [self.y0]
 
     # --------------------------
@@ -227,7 +221,7 @@ class Trajectory:
         return self
 
     def clone(self) -> Trajectory:
-        t = Trajectory(self._knots_y[0], second(self._knots_t[0]))
+        t = Trajectory(y0=self._knots_y[0], t0=second(self._knots_t[0]))
         t._knots_t = self._knots_t.copy()
         t._knots_y = self._knots_y.copy()
         t.t0 = self.t0

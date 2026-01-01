@@ -1,9 +1,9 @@
 from __future__ import annotations
 from pydantic import Field, PrivateAttr
-from modular_simulation.usables.control_system.controller_base import ControllerBase
+from modular_simulation.usables.control_system.abstract_controller import AbstractController
 from typing import TYPE_CHECKING, Callable, override, cast
 from astropy.units import UnitBase
-from modular_simulation.usables.tag_info import TagData
+from modular_simulation.usables.point import DataValue
 import logging
 from modular_simulation.utils.typing import Seconds, StateValue
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class BangBangController(ControllerBase):
+class BangBangController(AbstractController):
     """bang-bang controller for either on or off controllers.
     Default returns on_value starting from when the measurement goes below UL
     until when the measurement goes above HL.
@@ -52,10 +52,10 @@ class BangBangController(ControllerBase):
     _state: bool = PrivateAttr(default=False)
 
     @override
-    def _post_initialization(
+    def _post_commission_hook(
         self,
         system: System,
-        mv_getter: Callable[[], TagData],
+        mv_getter: Callable[[], DataValue],
         mv_range: tuple[StateValue, StateValue],
         mv_tag: str,
         mv_unit: UnitBase,

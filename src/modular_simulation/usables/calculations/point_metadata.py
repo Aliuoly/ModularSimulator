@@ -1,6 +1,7 @@
 from enum import IntEnum
 from astropy.units import UnitBase, Unit
 
+
 class TagType(IntEnum):
     """Enum for tag types"""
 
@@ -8,7 +9,8 @@ class TagType(IntEnum):
     OUTPUT = 2
     CONSTANT = 3
 
-class TagMetadata:
+
+class PointMetadata:
     """
     Represents information about a model state, including its type, unit, and description
 

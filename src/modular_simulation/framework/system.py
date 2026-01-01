@@ -5,14 +5,14 @@ from collections.abc import Sequence
 from functools import cached_property
 from modular_simulation.usables.control_system.control_element import ControlElement
 from modular_simulation.utils.typing import Seconds, StateValue, TimeQuantity
-from modular_simulation.usables.tag_store import TagStore
-from modular_simulation.usables.tag_info import TagInfo, TagData
+from modular_simulation.usables.point import PointRegistry, Point, DataValue
+
 from modular_simulation.utils.wrappers import second
 from modular_simulation.measurables.process_model import ProcessModel
-from modular_simulation.usables.sensors.sensor_base import SensorBase
-from modular_simulation.usables.calculations.calculation_base import CalculationBase
+from modular_simulation.usables.sensors.abstract_sensor import AbstractSensor
+from modular_simulation.usables.calculations.abstract_calculation import AbstractCalculation
 from modular_simulation.usables.control_system.controller_mode import ControllerMode
-from modular_simulation.usables.control_system.controller_base import ControllerBase
+from modular_simulation.usables.control_system.abstract_controller import AbstractController
 from modular_simulation.validation.exceptions import (
     SensorConfigurationError,
     ControllerConfigurationError,
@@ -38,8 +38,8 @@ class System(BaseModel):
     """
     A container for all constants, state, control, and algebraic variables that can be measured or recorded. "
     """
-    sensors: Sequence[SensorBase]
-    calculations: Sequence[CalculationBase]
+    sensors: Sequence[AbstractSensor]
+    calculations: Sequence[AbstractCalculation]
     control_elements: Sequence[ControlElement]
     solver_options: dict[str, Any] = Field(  # pyright: ignore[reportExplicitAny]
         default_factory=lambda: {"method": "LSODA"},
@@ -58,7 +58,7 @@ class System(BaseModel):
         ),
     )
 
-    _tag_store: TagStore = PrivateAttr(default_factory=TagStore)
+    _tag_store: PointRegistry = PrivateAttr(default_factory=PointRegistry)
     _history_updaters: list[Callable[[Seconds], None]] = PrivateAttr(default_factory=list)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportUnannotatedClassAttribute]
 
@@ -67,6 +67,25 @@ class System(BaseModel):
         self._validate()
 
         self.process_model.attach_system(self)
+
+        # Register all process variables in the tag store BEFORE components
+        # so that components can find them during their initialization.
+        for raw_state_name in self.process_model.state_list:
+            metadata = self.process_model.state_metadata_dict[raw_state_name]
+            initial_value = getattr(self.process_model, raw_state_name)
+            tag_info = Point(
+                tag=f"(raw, {metadata.type.name})_{raw_state_name}",
+                unit=metadata.unit,
+                type="raw",
+                description=metadata.description,
+                _raw_tag=raw_state_name,
+            )
+            # Initialize data immediately so components reading it see valid values
+            # cast to StateValue to handle potential type discrepancies or numpy scalars
+            val = cast(StateValue, initial_value)
+            tag_info.data = DataValue(value=val, time=self.process_model.t, ok=True)
+            self._tag_store.add(tag_info)
+
         # importantly, the order must be
         # 1. sensors, 2. calculations, 3. controllers
         # as calculations depend on sensors, and controllers depend on
@@ -111,31 +130,29 @@ class System(BaseModel):
             if not successful and error is not None:
                 raise error
 
-        if self.record_history:
+        if True:  # Always create updaters to keep TagStore in sync
 
-            def make_history_updater(tag_info: TagInfo) -> Callable[[Seconds], None]:
+            def make_history_updater(tag_info: Point) -> Callable[[Seconds], None]:
                 process_model = self.process_model
                 tag = tag_info.raw_tag
 
                 def updater(time: Seconds):
                     value = cast(StateValue, getattr(process_model, tag))
-                    tag_info.data = TagData(
+                    tag_info.data = DataValue(
                         value=value, time=time, ok=True
-                    )  # the setter of .data updates TagInfo.history as well
+                    )  # the setter of .data updates Point.history as well
 
                 return updater
 
             for raw_state_name in self.process_model.state_list:
+                # Need to find the point we already added
                 metadata = self.process_model.state_metadata_dict[raw_state_name]
-                tag_info = TagInfo(
-                    tag=f"(raw, {metadata.type.name})_{raw_state_name}",
-                    unit=metadata.unit,
-                    type="raw",
-                    description=metadata.description,
-                    _raw_tag=raw_state_name,
-                )
-                self._history_updaters.append(make_history_updater(tag_info))
-                self._tag_store.add(tag_info)
+                tag = f"(raw, {metadata.type.name})_{raw_state_name}"
+                tag_info = self._tag_store.get(tag)
+
+                # Should not be None as we just added it
+                if tag_info:
+                    self._history_updaters.append(make_history_updater(tag_info))
 
     def _validate(self):
         exception_group: list[Exception] = []
@@ -187,19 +204,20 @@ class System(BaseModel):
         Handles the control loop logic before integration.
 
         This method updates all sensors and controllers based on the current state,
-        sets the new values for the control elements, and returns the initial state
-        array for the solver.
         """
         t = self.time
         for s in self.sensors:
-            _ = s.measure(t)
+            if s.should_update(t):
+                _ = s.update(t)
         for c in self.calculations:
-            _ = c.calculate(t)
+            if c.should_update(t):
+                _ = c.update(t)
         for c in self.control_elements:
-            _ = c.update(t)
+            if c.should_update(t):
+                _ = c.update(t)
 
     def add_component(
-        self, component: SensorBase | CalculationBase | ControlElement
+        self, component: AbstractSensor | AbstractCalculation | ControlElement
     ) -> tuple[Exception | None, bool]:
         """
         Adds sensors, calculations, and controllers to the system.
@@ -211,26 +229,35 @@ class System(BaseModel):
         # for sensor and controller, if an error was raised, it is fatal, so
         # the following code assumes if it returned, we are ok.
         # for calculation, that is a different issue.
-        if isinstance(component, SensorBase):
-            self.tag_store.add(component.tag_info)
+        if isinstance(component, AbstractSensor):
+            self.tag_store.add(component.point)
             # don't care about sensor lol, only way it fails is if
             # state value is bad, in which case scipy solver will fail later.
-            _ = component.initialize(self)
-            error = None
-        elif isinstance(component, CalculationBase):
+            exceptions = component.initialize(self)
+            if not exceptions:
+                successful = True
+            else:
+                error = exceptions[0]
+                successful = False
+        elif isinstance(component, AbstractCalculation):
             # output tag info available before wiring inputs, but
             # certain calculations have some preprocessing during the wiring stage,
             # such as resolving unit issues. Thus, put it after wiring inputs.
-            error, successful = component.initialize(self)
-            if successful:
-                self.tag_store.add(component.output_tag_info_dict)
+            exceptions = component.initialize(self)
+            if not exceptions:
+                self.tag_store.add(component.output_point_dict)
+                successful = True
+            else:
+                error = exceptions[0]
+                successful = False
         elif isinstance(component, ControlElement):  # pyright: ignore[reportUnnecessaryIsInstance]
-            _ = component.initialize(
-                self
-            )  # don't care about controller lol, it may fail and still be fine.
-            # sp tag info available only after initialization, unlike above.
-            self.tag_store.add(component.controller_sp_tag_info_dict)
-            error = None
+            exceptions = component.initialize(self)
+            if not exceptions:
+                self.tag_store.add(component.controller_sp_point_dict)
+                successful = True
+            else:
+                error = exceptions[0]
+                successful = False
         else:
             raise ValueError(f"Unknown component type: {type(component)}")  # pyright: ignore[reportUnreachable]
         return error, successful
@@ -241,8 +268,6 @@ class System(BaseModel):
 
         Performs one integration step by calling the ODE solver.
 
-        It configures and runs `solve_ivp`, then updates the system's algebraic
-        states with the final, successful result.
         """
         show_progress = False
         duration = second(duration) if duration is not None else self.dt
@@ -256,7 +281,8 @@ class System(BaseModel):
             pbar = tqdm(total=nsteps)
         # update sensors, calculations, and controllers
         # and then update the states with single_step()
-        for _ in range(int(nsteps)):
+        # raise RuntimeError(f"DEBUG: Pre-loop. nsteps={nsteps}")
+        for i in range(int(nsteps)):
             self._update_components()
             self.process_model.step(self.dt)
             for updater in self._history_updaters:  # only populated if record history is True
@@ -354,12 +380,12 @@ class System(BaseModel):
         return controller.mode
 
     @property
-    def tag_store(self) -> TagStore:
+    def tag_store(self) -> PointRegistry:
         return self._tag_store
 
     @cached_property
-    def controller_dictionary(self) -> dict[str, ControllerBase]:
-        return_dict: dict[str, ControllerBase] = {}
+    def controller_dictionary(self) -> dict[str, AbstractController]:
+        return_dict: dict[str, AbstractController] = {}
         for control_element in self.control_elements:
             controller = control_element.controller
             while controller is not None:
@@ -387,7 +413,7 @@ class System(BaseModel):
         return list(self.control_element_mv_dictionary.keys())
 
     @property
-    def history(self) -> dict[str, list[TagData]]:
+    def history(self) -> dict[str, list[DataValue]]:
         """Returns historized measurements and calculations."""
         return self._tag_store.history
 
@@ -413,8 +439,8 @@ class System(BaseModel):
 
         system_config = payload["system"]
         process_model = ProcessModel.load(payload["process_model"])
-        sensors = [SensorBase.load(s) for s in payload.get("sensors", [])]
-        calculations = [CalculationBase.load(c) for c in payload.get("calculations", [])]
+        sensors = [AbstractSensor.load(s) for s in payload.get("sensors", [])]
+        calculations = [AbstractCalculation.load(c) for c in payload.get("calculations", [])]
         control_elements = [ControlElement.load(ce) for ce in payload.get("control_elements", [])]
 
         return cls(

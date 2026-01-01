@@ -3,11 +3,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 from collections.abc import Callable
 from .controller_mode import ControllerMode
-from modular_simulation.usables.tag_info import TagData
+from modular_simulation.usables.point import DataValue
 
 if TYPE_CHECKING:
-    from .controller_base import ControllerBase
+    from .abstract_controller import AbstractController
     from .trajectory import Trajectory
+    from modular_simulation.usables.abstract_component import ComponentUpdateResult
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ class ControlElementModeManager:
     For a control element:
         manual_mv_source corresponds to the mv_trajectory. 
     """
-    auto_mv_source: ControllerBase | None
+    auto_mv_source: AbstractController | None
     """
     For a control element:
         auto_mv_source corresponds to its associated controller's `update` method,
@@ -28,15 +29,15 @@ class ControlElementModeManager:
         to its CONTROLLED state using its `_mv_setter` callable private attribute. 
     """
     mode: ControllerMode
-    mv_getter: Callable[[], TagData]
+    mv_getter: Callable[[], DataValue]
     mv_tag: str
 
     def __init__(
         self,
         mode: ControllerMode,
         manual_mv_source: Trajectory,
-        auto_mv_source: ControllerBase | None,
-        mv_getter: Callable[[], TagData],
+        auto_mv_source: AbstractController | None,
+        mv_getter: Callable[[], DataValue],
         mv_tag: str,
     ):
         self.mode = mode
@@ -100,11 +101,12 @@ class ControlElementModeManager:
             self.auto_mv_source.change_control_mode(ControllerMode.AUTO)
             return self.mode
 
-    def get_control_action(self, t: float) -> TagData:
+    def get_control_action(self, t: float) -> DataValue:
         if self.mode == ControllerMode.MANUAL:
-            return TagData(time=t, value=self.manual_mv_source(t), ok=True)
+            return DataValue(time=t, value=self.manual_mv_source(t), ok=True)
         elif self.mode == ControllerMode.AUTO and self.auto_mv_source is not None:
-            return self.auto_mv_source.update(t)
+            result = self.auto_mv_source.update(t)
+            return result.data_value  # type: ignore
         else:
             raise RuntimeError("Error in mode change for control element '%s'.")
 
@@ -143,16 +145,16 @@ class ControllerModeManager:
         The control element, when in AUTO mode, simply passes the controller's control output
         to its CONTROLLED state using its `_mv_setter` callable private attribute. 
     """
-    cascade_sp_source: ControllerBase | None
+    cascade_sp_source: AbstractController | None
     """
     for a controller:
         corresponds to the cascade controller's `update` method, which provides
         said cascade controller's control output.
     """
     mode: ControllerMode
-    mv_getter: Callable[[], TagData]
-    cv_getter: Callable[[], TagData]
-    sp_getter: Callable[[], TagData]
+    mv_getter: Callable[[], DataValue]
+    cv_getter: Callable[[], DataValue]
+    sp_getter: Callable[[], DataValue]
     cv_tag: str
 
     def __init__(
@@ -160,10 +162,10 @@ class ControllerModeManager:
         mode: ControllerMode,
         manual_mv_source: Trajectory,
         auto_sp_source: Trajectory,
-        cascade_sp_source: ControllerBase | None,
-        mv_getter: Callable[[], TagData],
-        cv_getter: Callable[[], TagData],
-        sp_getter: Callable[[], TagData],
+        cascade_sp_source: AbstractController | None,
+        mv_getter: Callable[[], DataValue],
+        cv_getter: Callable[[], DataValue],
+        sp_getter: Callable[[], DataValue],
         cv_tag: str,
     ):
         self.mode = mode
@@ -238,21 +240,22 @@ class ControllerModeManager:
             self.cascade_sp_source.change_control_mode(ControllerMode.AUTO)
             return self.mode
 
-    def get_setpoint(self, t: float) -> TagData:
+    def get_setpoint(self, t: float) -> DataValue:
         if self.mode == ControllerMode.TRACKING:
             return self.cv_getter()
         elif self.mode == ControllerMode.AUTO:
-            return TagData(time=t, value=self.auto_sp_source(t), ok=True)
+            return DataValue(time=t, value=self.auto_sp_source(t), ok=True)
         elif self.mode == ControllerMode.CASCADE and self.cascade_sp_source is not None:
-            return self.cascade_sp_source.update(t)
+            result = self.cascade_sp_source.update(t)
+            return result.data_value  # type: ignore
         else:
             raise RuntimeError(
                 f"Invalid mode '{self.mode}' for get_setpoint. This is a bug. Please report it."
             )
 
-    def get_control_action(self, t: float) -> TagData:
+    def get_control_action(self, t: float) -> DataValue:
         if self.mode == ControllerMode.MANUAL:
-            return TagData(time=t, value=self.manual_mv_source(t), ok=True)
+            return DataValue(time=t, value=self.manual_mv_source(t), ok=True)
         else:
             raise RuntimeError(
                 "Not in MANUAL mode but get_control_action is called. This is a bug. Please report it."

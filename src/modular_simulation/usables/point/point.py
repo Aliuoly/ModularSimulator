@@ -9,13 +9,13 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True)
-class TagData:
+class DataValue:
     """
-    Stores the timestamp, value, and validity status for a tag
+    Stores the timestamp, value, and validity status for a point
 
-    :var time: Timestamp when the tag value was recorded
+    :var time: Timestamp when the value was recorded
     :vartype time: float
-    :var ok: Indicates if the tag value is valid (not faulty)
+    :var ok: Indicates if the value is valid (not faulty)
     :vartype ok: bool
     """
 
@@ -25,10 +25,10 @@ class TagData:
 
 
 @dataclass(slots=True)
-class TagInfo:
+class Point:
     """
-    Defines the tag name, unit, and description of a single usable tag.
-    Also contains the current data and history of the tag are public
+    Defines the tag name, unit, and description of a single usable point.
+    Also contains the current data and history of the point as public
     read only properties.
     """
 
@@ -38,8 +38,8 @@ class TagInfo:
     description: str
     _raw_tag: str
 
-    _data: TagData = field(init=False, default_factory=TagData)
-    _history: list[TagData] = field(init=False, default_factory=list)
+    _data: DataValue = field(init=False, default_factory=DataValue)
+    _history: list[DataValue] = field(init=False, default_factory=list)
 
     def __init__(
         self,
@@ -56,26 +56,26 @@ class TagInfo:
         self.description = description
         self._raw_tag = self.tag if _raw_tag is None else _raw_tag
         self._history = []
-        self._data = TagData()
+        self._data = DataValue()
 
     @override
     def __repr__(self) -> str:
-        return f"TagInfo(tag={self.tag}, type={self.type}, unit={self.unit}, description={self.description}, raw_tag={self._raw_tag}, data={self._data}, history length: {len(self._history)})"
+        return f"Point(tag={self.tag}, type={self.type}, unit={self.unit}, description={self.description}, raw_tag={self._raw_tag}, data={self._data}, history length: {len(self._history)})"
 
     def make_converted_data_getter(self, target_unit: UnitBase | None = None):
         if target_unit is None:
             target_unit = self.unit
         if self.unit == target_unit:
 
-            def getter() -> TagData:
+            def getter() -> DataValue:
                 return self.data
 
             return getter
 
         converter = self.unit.get_converter(target_unit)
 
-        def converted_getter() -> TagData:
-            return TagData(
+        def converted_getter() -> DataValue:
+            return DataValue(
                 self.data.time,
                 converter(self.data.value),
                 self.data.ok,
@@ -83,13 +83,35 @@ class TagInfo:
 
         return converted_getter
 
+    def make_converted_data_setter(self, source_unit: UnitBase | None = None):
+        if source_unit is None:
+            source_unit = self.unit
+        if self.unit == source_unit:
+
+            def setter(new_data: DataValue) -> None:
+                self.data = new_data
+
+            return setter
+
+        converter = source_unit.get_converter(self.unit)
+
+        def converted_setter(new_data: DataValue) -> None:
+            converted_value = converter(new_data.value)
+            self.data = DataValue(
+                new_data.time,
+                converted_value,
+                new_data.ok,
+            )
+
+        return converted_setter
+
     @property
-    def data(self) -> TagData:
+    def data(self) -> DataValue:
         """public access to the private data"""
         return self._data
 
     @data.setter
-    def data(self, new_data: TagData) -> None:
+    def data(self, new_data: DataValue) -> None:
         """setter for the private data & historizes new data"""
         self._data = new_data
         self._history.append(new_data)
@@ -100,6 +122,6 @@ class TagInfo:
         return self._raw_tag
 
     @property
-    def history(self) -> list[TagData]:
-        """public access to the tag's history"""
+    def history(self) -> list[DataValue]:
+        """public access to the point's history"""
         return self._history

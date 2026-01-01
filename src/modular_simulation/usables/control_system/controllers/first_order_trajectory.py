@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast, override
 from collections.abc import Callable
 from pydantic import Field, PrivateAttr
-from modular_simulation.usables.control_system.controller_base import ControllerBase
-from modular_simulation.usables.tag_info import TagData
+from modular_simulation.usables.control_system.abstract_controller import AbstractController
+from modular_simulation.usables.point import DataValue
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 from modular_simulation.utils.typing import Seconds, StateValue
 
@@ -15,7 +15,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class FirstOrderTrajectoryController(ControllerBase):
+class FirstOrderTrajectoryController(AbstractController):
     """ControllerBase that targets user-specified first-order closed-loop dynamics.
 
     The controller approximates the process as a first-order lag and computes
@@ -50,7 +50,7 @@ class FirstOrderTrajectoryController(ControllerBase):
     def _post_initialization(
         self,
         system: System,
-        mv_getter: Callable[[], TagData],
+        mv_getter: Callable[[], DataValue],
         mv_range: tuple[StateValue, StateValue],
         mv_tag: str,
         mv_unit: UnitBase,

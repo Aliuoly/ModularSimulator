@@ -2,15 +2,16 @@ from __future__ import annotations
 import collections
 from typing import TYPE_CHECKING, override
 from pydantic import Field, PrivateAttr
-from modular_simulation.usables.sensors.sensor_base import SensorBase
+from modular_simulation.usables.sensors.abstract_sensor import AbstractSensor
 from modular_simulation.utils.typing import Seconds, StateValue
-from modular_simulation.usables.tag_info import TagData
+from modular_simulation.usables.abstract_component import ComponentUpdateResult
+from modular_simulation.usables.point import DataValue
 
 if TYPE_CHECKING:
     from modular_simulation.framework.system import System
 
 
-class SampledDelayedSensor(SensorBase):
+class SampledDelayedSensor(AbstractSensor):
     """
     A sensor with a set sampling frequency, measurement deadtime, and gaussian noise.
     """
@@ -30,70 +31,65 @@ class SampledDelayedSensor(SensorBase):
         ),
     )
     _first_sample: bool = PrivateAttr(default=True)
-    _sample_queue: collections.deque[TagData] = PrivateAttr(default_factory=collections.deque)
-    _t: Seconds = PrivateAttr()
+    _sample_queue: collections.deque[DataValue] = PrivateAttr(default_factory=collections.deque)
+    _last_sample_t: Seconds = PrivateAttr(default=-1.0)
 
     # ============================================================
     # ===                    LOGIC METHODS                    ====
     # ============================================================
 
-    @override
-    def _should_update(self, t: Seconds) -> bool:
-        """Return True if the next sample should be taken."""
-        if self._first_sample:
-            return True
-        return t > (self._t + self.sampling_period)
-
-    @override
-    def _post_initialization(self, system: System) -> bool:
-        """Subclass hook that is called after initialization."""
-        self._t = system.time
-        return True
-
-    def _get_sample(self, target_t: Seconds) -> tuple[TagData, bool]:
-        """
-        Consume and return the latest sample with time ≤ target_t.
-        Optimized deque-safe version (bulk removal via loop unrolling).
-        """
+    def _consume_samples(self, target_t: Seconds) -> DataValue:
+        """Return the sample corresponding to target_t, discarding older ones."""
         q = self._sample_queue
+        # ensure we have something
         if not q:
-            return self._tag_info.data, False
+            return DataValue()
 
-        # Fast-path: all samples valid → take last, clear queue
-        if q[-1].time <= target_t:
-            last_valid = q[-1]
-            q.clear()
-            return last_valid, True
+        while len(q) > 1 and q[1].time <= (target_t + 1e-9):
+            q.popleft()
 
-        # Use local variables to reduce attribute lookups
-        popleft = q.popleft
-
-        # Small local loop but with reduced overhead
-        last_valid = None
-        while q and q[0].time <= target_t:
-            last_valid = popleft()
-
-        if last_valid is not None:
-            return last_valid, True
-
-        return self._tag_info.data, False
+        return q[0]
 
     @override
-    def _get_processed_value(
-        self,
-        t: Seconds,
-        raw_value: StateValue,
-    ) -> tuple[StateValue, bool]:
-        """
-        Append new sample and return time-delayed measurement value.
-        """
-        q = self._sample_queue
-        q_append = q.append
-        q_append(TagData(t, raw_value))
-        if self._first_sample:
-            self._first_sample = False
-            return q[0].value, True  # always return first sample so they have a value
-        target_t = t - self.deadtime
-        tag_data, successful = self._get_sample(target_t)
+    def _initialize(self, system: System) -> list[Exception]:
+        exceptions = super()._initialize(system)
+        if not exceptions:
+            self._last_sample_t = system.time
+        return exceptions
+
+    @override
+    def _update(self, t: Seconds) -> ComponentUpdateResult:
+        """Update logic with sampling period and deadtime."""
         self._t = t
-        return tag_data.value, successful
+
+        # Check if we should sample
+        # Add a small epsilon to handle floating point inaccuracies in time iteration
+        epsilon = 1e-9
+        should_sample = self._first_sample or t >= (
+            self._last_sample_t + self.sampling_period - epsilon
+        )
+
+        if should_sample:
+            # It IS time to sample.
+            # Calling super()._measurement_getter directly as super()._update logic is slightly different
+            raw_data = self._measurement_getter()
+
+            # --- SampledDelayed Logic ---
+            self._sample_queue.append(raw_data)
+            self._last_sample_t = t
+            self._first_sample = False
+
+        # Always check for emerging samples
+        target_t = t - self.deadtime
+        measurement = self._consume_samples(target_t)
+        # ----------------------------
+
+        # Layer on fault logic (copied from base for now as per previous refactor decision)
+        if self.faulty_probability > 0:
+            self._is_faulty = self._generator.random() < self.faulty_probability
+
+        if self._is_faulty:
+            measurement.ok = False
+
+        self._point.data = measurement
+        return ComponentUpdateResult(data_value=measurement, exceptions=[])

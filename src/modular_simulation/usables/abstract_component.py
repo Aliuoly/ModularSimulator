@@ -1,14 +1,24 @@
 from __future__ import annotations
+import sys
 from abc import ABC, abstractmethod
 from typing import Any, TypedDict, TYPE_CHECKING
 from pydantic import BaseModel, field_validator, PrivateAttr
+
+from modular_simulation.usables.point import DataValue
 
 if TYPE_CHECKING:
     from modular_simulation.framework import System
     from modular_simulation.utils.typing import Seconds
 
 
-class ComponentData(TypedDict):
+def get_component_class(module: str, name: str) -> type[AbstractComponent]:
+    cls = getattr(sys.modules[module], name)  # pyright: ignore[reportAny]
+    if not issubclass(cls, AbstractComponent):
+        raise ValueError(f"Class {name} is not a subclass of AbstractComponent.")
+    return cls
+
+
+class ComponentDataDict(TypedDict):
     name: str
     type: str
     module: str
@@ -16,10 +26,37 @@ class ComponentData(TypedDict):
     state: dict[str, Any]  # pyright: ignore[reportExplicitAny]
 
 
+class ComponentUpdateResult:
+    """Result of a component update.
+
+    data_value can be either:
+    - A single DataValue (for sensors, controllers)
+    - A dict[str, DataValue] (for calculations with multiple outputs)
+    """
+
+    data_value: DataValue | dict[str, DataValue]
+    exceptions: list[Exception]
+
+    def __init__(
+        self,
+        data_value: DataValue | dict[str, DataValue],
+        exceptions: list[Exception] | None = None,
+    ):
+        self.data_value = data_value
+        self.exceptions = exceptions if exceptions else []
+
+    @property
+    def ok(self) -> bool:
+        """Whether the result is ok based on its data value(s)."""
+        if isinstance(self.data_value, dict):
+            return all(dv.ok for dv in self.data_value.values())
+        return self.data_value.ok
+
+
 class AbstractComponent(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInheritance]
     """
     Base class for all components. All components must implement the following methods:
-    1. initialize (as in, binding to an instance of System)
+    1. commission (as in, binding to an instance of System)
     2. update (updating the component's states)
     3. to_dict (converting the component's configuration and history to a dictionary)
     4. from_dict (creating a component from a dictionary holding its configuration and history)
@@ -37,33 +74,50 @@ class AbstractComponent(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultiple
     def validate_name(cls, name: Any) -> str:  # pyright: ignore[reportAny, reportExplicitAny]
         return name if name else cls.__name__
 
-    def initialize(self, system: System) -> list[BaseException]:
-        """Initialize the component."""
+    def initialize(self, system: System) -> list[Exception]:
+        """Commission the component into a system."""
+        if self._initialized:
+            return []
+
         exceptions = self._initialize(system)
         if not exceptions:
             self._initialized = True
         return exceptions
 
+    def update(self, t: Seconds) -> ComponentUpdateResult:
+        """Update the component's state if necessary."""
+        if not self._initialized:
+            return ComponentUpdateResult(
+                data_value=DataValue(),
+                exceptions=[RuntimeError(f"Component '{self.name}' is not initialized.")],
+            )
+
+        return self._update(t)
+
+    def should_update(self, t: Seconds) -> bool:
+        """Check if the component should update at time t."""
+        if not self._initialized:
+            return False
+        return self._should_update(t)
+
     @abstractmethod
-    def _initialize(self, system: System) -> list[BaseException]:
-        """Initialize the component."""
+    def _initialize(self, system: System) -> list[Exception]:
+        """Internal hook to commission the component into a system."""
         ...
 
-    def update(self, t: Seconds) -> list[BaseException]:
-        """Update the component's states."""
-        if self._initialized:
-            exceptions = self._update(t)
-            return exceptions
-        return [RuntimeError(f"Component '{self.name}' has not been initialized.")]
-
     @abstractmethod
-    def _update(self, t: Seconds) -> list[BaseException]:
-        """Update the component's states."""
+    def _update(self, t: Seconds) -> ComponentUpdateResult:
+        """Internal hook to update the component's state."""
         ...
 
-    def to_dict(self) -> ComponentData:
+    @abstractmethod
+    def _should_update(self, t: Seconds) -> bool:
+        """Internal hook to check if the component should update."""
+        ...
+
+    def to_dict(self) -> ComponentDataDict:
         """Convert the component's configuration and history to a dictionary."""
-        return ComponentData(
+        return ComponentDataDict(
             name=self.name,
             type=self.__class__.__name__,
             module=self.__class__.__module__,
@@ -82,7 +136,7 @@ class AbstractComponent(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultiple
         ...
 
     @classmethod
-    def from_dict(cls, data: ComponentData) -> AbstractComponent:
+    def from_dict(cls, data: ComponentDataDict) -> AbstractComponent:
         """Create a component from a dictionary holding its configuration and history."""
         component = cls._load_configuration(data["config"])
         component.name = data["name"]

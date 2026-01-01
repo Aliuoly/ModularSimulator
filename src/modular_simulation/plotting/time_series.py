@@ -17,19 +17,20 @@ else:  # pragma: no cover - fall back when matplotlib is absent
 SeriesInput = Sequence[TagData] | Mapping[str, Sequence[Any]]
 
 
-def _coerce_scalar(value: Any, index:int|None = None) -> float:
+def _coerce_scalar(value: Any, index: int | None = None) -> float:
     arr = np.asarray(value)
-    if arr.shape != () and arr.shape != (1, ):
+    if arr.shape != () and arr.shape != (1,):
         if isinstance(index, int):
             return float(arr[index])
         raise ValueError(
-            "Plotting only supports scalar values; received array with shape " 
-            f"{arr.shape}."
+            f"Plotting only supports scalar values; received array with shape {arr.shape}."
         )
     return float(arr.item())
 
 
-def triplets_to_arrays(samples: Sequence[TagData], index:int|None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def triplets_to_arrays(
+    samples: Sequence[TagData], index: int | None = None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Convert a sequence of triplets into NumPy arrays of time, value, and quality flags."""
 
     times = np.empty(len(samples), dtype=float)
@@ -43,14 +44,18 @@ def triplets_to_arrays(samples: Sequence[TagData], index:int|None = None) -> tup
     return times, values, ok
 
 
-def _extract_series(samples: SeriesInput, index:int|None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _extract_series(
+    samples: SeriesInput, index: int | None = None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if isinstance(samples, Mapping):
         try:
             times_like = samples["time"]
             values_like = samples["value"]
             ok_like = samples["ok"]
         except KeyError as exc:  # pragma: no cover - defensive guard
-            raise KeyError("History mapping must include 'time', 'value', and 'ok' entries.") from exc
+            raise KeyError(
+                "History mapping must include 'time', 'value', and 'ok' entries."
+            ) from exc
 
         times_arr = np.asarray(times_like, dtype=float)
         ok_arr = np.asarray(ok_like, dtype=bool)
@@ -87,9 +92,9 @@ def plot_triplet_series(
     line_kwargs: Mapping[str, Any] | None = None,
     bad_kwargs: Mapping[str, Any] | None = None,
     time_converter: Callable = lambda v: v,
-    t_start: float | tuple[float,...] = 0.0, # in the converted unit
-    t_end: float | tuple[float,...] = np.inf, # in the converted unit
-    array_index: int| None = None,
+    t_start: float | tuple[float, ...] = 0.0,  # in the converted unit
+    t_end: float | tuple[float, ...] = np.inf,  # in the converted unit
+    array_index: int | None = None,
 ) -> list[Any]:
     """Plot a :class:`TagData` series on ``ax``.
 
@@ -117,10 +122,10 @@ def plot_triplet_series(
     -------
     list of Matplotlib artists added to the axes.
     """
-    
+
     times, values, ok = _extract_series(samples, index=array_index)
     times = time_converter(times)
-    keep_ind = np.zeros(len(times), dtype = np.bool)
+    keep_ind = np.zeros(len(times), dtype=np.bool)
     if isinstance(t_start, tuple):
         assert isinstance(t_end, tuple), "if t_start is a tuple, t_end must also be one"
         assert len(t_start) == len(t_end), "t_start and t_end must have equal length"
@@ -134,6 +139,7 @@ def plot_triplet_series(
         keep_ind = (times > t_start) * (times < t_end)
     values = values[keep_ind]
     times = times[keep_ind]
+    ok = ok[keep_ind]
     artists: list[Any] = []
 
     if times.size == 0:

@@ -5,8 +5,8 @@ from typing import Callable, override, TYPE_CHECKING
 from astropy.units import UnitBase
 import numpy as np
 from pydantic import Field, PrivateAttr
-from modular_simulation.usables.control_system.controller_base import ControllerBase
-from modular_simulation.usables.tag_info import TagData
+from modular_simulation.usables.control_system.abstract_controller import AbstractController
+from modular_simulation.usables.point import DataValue
 from modular_simulation.utils.typing import Seconds, StateValue
 
 if TYPE_CHECKING:
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class PIDController(ControllerBase):
+class PIDController(AbstractController):
     """
     A simple Proportional-Integral-Derivative controller.
     The control output is return according to the time-domain formulation
@@ -67,10 +67,10 @@ class PIDController(ControllerBase):
     _filtered_derivative: StateValue = PrivateAttr(default=0.0)
 
     @override
-    def _post_initialization(
+    def _post_commission_hook(
         self,
         system: System,
-        mv_getter: Callable[[], TagData],
+        mv_getter: Callable[[], DataValue],
         mv_range: tuple[StateValue, StateValue],
         mv_tag: str,
         mv_unit: UnitBase,
@@ -97,7 +97,13 @@ class PIDController(ControllerBase):
         PID control algorithm for SISO systems. As such, only handles scalar cv and sp.
         """
         successful = True
-        dt = t - self.t
+        last_t = self.t
+        dt = t - last_t
+
+        # Handle first run (last_t = -inf) or redundant updates (dt=0)
+        # If -inf, we treat it as an instantaneous update (dt=0)
+        if np.isinf(last_t) or dt <= 0.0:
+            dt = 0.0
 
         error = sp - cv
         last_error, last_last_error = self._error_queue
@@ -105,13 +111,19 @@ class PIDController(ControllerBase):
         if self.inverted:
             error = -error
             PD_error = -PD_error
+
         self._integral += error * dt
+
         # first order approximation of the timec onstant -> filter factor
         # valid enough so whatever.
-        alpha = dt / (dt + self.derivative_filter_tc)
-        self._filtered_derivative = (
-            alpha * (PD_error - self._error_queue[1]) + (1 - alpha) * self._filtered_derivative
-        )
+        if dt > 0:
+            alpha = dt / (dt + self.derivative_filter_tc)
+            self._filtered_derivative = (
+                alpha * (PD_error - self._error_queue[1]) + (1 - alpha) * self._filtered_derivative
+            )
+        else:
+            # If dt=0, derivative state doesn't evolve?
+            pass
 
         # PID control law
         if self.velocity_form:
@@ -138,7 +150,7 @@ class PIDController(ControllerBase):
         else:
             p_term = self.Kp * PD_error
             i_term = self.Kp / self.Ti * self._integral
-            d_term = self.Kp * self.Td / dt * self._filtered_derivative
+            d_term = self.Kp * self.Td / dt * self._filtered_derivative if dt > 0 else 0.0
             output = p_term + i_term + d_term
             overflow, underflow = output - self._mv_range[1], output - self._mv_range[0]
             saturated = "No"

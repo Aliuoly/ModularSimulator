@@ -34,10 +34,11 @@ control_elements = [
     ControlElement(
         mv_tag="F_in",
         mv_range=(0.0, 1.0e6),
+        mv_trajectory=Trajectory(y0=0.0),
         controller=PIDController(
             cv_tag="V",
             cv_range=(0.0, 2000.0),
-            sp_trajectory=Trajectory(1.0e3),
+            sp_trajectory=Trajectory(y0=1.0e3),
             Kp=1.0e-2,
             Ti=100.0,
         ),
@@ -45,6 +46,7 @@ control_elements = [
     ControlElement(
         mv_tag="T_J_in",
         mv_range=(200.0, 350.0),
+        mv_trajectory=Trajectory(y0=280.0),
         controller=PIDController(
             cv_tag="T_J",
             cv_range=(200.0, 400.0),
@@ -58,7 +60,7 @@ control_elements = [
                 cascade_controller=PIDController(
                     cv_tag="B",
                     cv_range=(0.0, 1.0),
-                    sp_trajectory=Trajectory(0.02),
+                    sp_trajectory=Trajectory(y0=0.02),
                     Kp=2.0e-1,
                     Ti=5.0,
                 ),

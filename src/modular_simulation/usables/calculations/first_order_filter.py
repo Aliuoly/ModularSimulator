@@ -3,8 +3,8 @@ import numpy as np
 from typing import Annotated, TYPE_CHECKING, override
 from pydantic import PrivateAttr, Field
 from modular_simulation.validation.exceptions import CalculationConfigurationError
-from modular_simulation.usables.calculations.tag_metadata import TagMetadata, TagType
-from modular_simulation.usables.calculations.calculation_base import CalculationBase
+from modular_simulation.usables.calculations.point_metadata import PointMetadata, TagType
+from modular_simulation.usables.calculations.abstract_calculation import AbstractCalculation
 from modular_simulation.utils.typing import Seconds, StateValue
 from astropy.units import Unit
 
@@ -14,20 +14,20 @@ if TYPE_CHECKING:
 SMALL = 1e-12
 
 
-class FirstOrderFilter(CalculationBase):
+class FirstOrderFilter(AbstractCalculation):
     """
     only constant "time_constant" is forced to be in units of seconds, but
     you are allowed to pass in Quantity of other time units.
     """
 
     filtered_signal_tag: Annotated[
-        str, TagMetadata(type=TagType.OUTPUT, unit=Unit(""), description="")
+        str, PointMetadata(type=TagType.OUTPUT, unit=Unit(""), description="")
     ]
-    raw_signal_tag: Annotated[str, TagMetadata(type=TagType.INPUT, unit=Unit(""))]
+    raw_signal_tag: Annotated[str, PointMetadata(type=TagType.INPUT, unit=Unit(""))]
 
     time_constant: Annotated[
         Seconds,
-        TagMetadata(type=TagType.CONSTANT, unit=Unit("s")),
+        PointMetadata(type=TagType.CONSTANT, unit=Unit("s")),
     ] = Field(default=0.0, description="time constant of this first order filter in seconds. ")
 
     # ----- wiring time definition -----
@@ -35,7 +35,7 @@ class FirstOrderFilter(CalculationBase):
     _t: Seconds = PrivateAttr()
 
     @override
-    def _pre_initialization(
+    def _pre_commissioning_hook(
         self,
         system: System,
     ) -> tuple[CalculationConfigurationError | None, bool]:
@@ -48,7 +48,7 @@ class FirstOrderFilter(CalculationBase):
         if raw_signal_tag_info is not None:
             self._field_metadata_dict["raw_signal_tag"].unit = raw_signal_tag_info.unit
             self._field_metadata_dict["filtered_signal_tag"].unit = raw_signal_tag_info.unit
-            self._output_tag_info_dict[self.filtered_signal_tag].unit = raw_signal_tag_info.unit
+            self._output_point_dict[self.filtered_signal_tag].unit = raw_signal_tag_info.unit
             self._filtered_signal = raw_signal_tag_info.data.value
         else:
             error = CalculationConfigurationError(

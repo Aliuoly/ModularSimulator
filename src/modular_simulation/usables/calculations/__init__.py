@@ -1,10 +1,14 @@
-from .calculation_base import CalculationBase
-from .tag_metadata import TagMetadata, TagType
+from .abstract_calculation import AbstractCalculation
+from .point_metadata import PointMetadata, TagType
 from .first_order_filter import FirstOrderFilter
 
+# Backward compatibility alias
+CalculationBase = AbstractCalculation
+
 __all__ = [
-    "CalculationBase",
-    "TagMetadata",
+    "AbstractCalculation",
+    "CalculationBase",  # Deprecated alias for backward compatibility
+    "PointMetadata",
     "TagType",
     "FirstOrderFilter",
 ]

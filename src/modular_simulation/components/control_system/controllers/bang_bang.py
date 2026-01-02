@@ -52,7 +52,7 @@ class BangBangController(AbstractController):
     _state: bool = PrivateAttr(default=False)
 
     @override
-    def _post_commission_hook(
+    def post_install(
         self,
         system: System,
         mv_getter: Callable[[], DataValue],
@@ -60,7 +60,7 @@ class BangBangController(AbstractController):
         mv_tag: str,
         mv_unit: UnitBase,
     ) -> bool:
-        cv_value = system.tag_store[self.cv_tag].data.value
+        cv_value = system.point_registry[self.cv_tag].data.value
         try:
             cv_value = float(cv_value)
         except ValueError:

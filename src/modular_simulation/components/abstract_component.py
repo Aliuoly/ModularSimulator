@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys
 from abc import ABC, abstractmethod
-from typing import Any, TypedDict, TYPE_CHECKING
+from typing import Any, TypedDict, TYPE_CHECKING, cast
 from pydantic import BaseModel, field_validator, PrivateAttr
 import importlib
 
@@ -57,12 +57,16 @@ class ComponentUpdateResult:
 class AbstractComponent(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultipleInheritance]
     """
     Base class for all components. All components must implement the following methods:
-    1. commission (as in, binding to an instance of System)
-    2. update (updating the component's states)
-    1. commission (as in, binding to an instance of System)
-    2. update (updating the component's states)
-    3. save (converting the component's configuration and history to a dictionary)
-    4. load (creating a component from a dictionary holding its configuration and history)
+    1. _install (as in installing to an instance of System)
+        part of template method pattern of install method
+    2. _update (updating the component's states)
+        part of template method pattern of update method
+    3. _should_update (checking if the component should update)
+        part of template method pattern of update method
+    4. _get_configuration_dict (converting the component's configuration to a dictionary)
+    5. _get_runtime_state_dict (converting the component's runtime state to a dictionary)
+    6. _load_configuration (creating a component from a dictionary holding its configuration and history)
+    7. _load_runtime_state (loading the component's runtime state from a dictionary)
 
     All components must also have a name attribute. If no name is provided, the name will be set to the class name.
     The orchestrating `System` will ensure that all components have unique names.
@@ -77,12 +81,12 @@ class AbstractComponent(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultiple
     def validate_name(cls, name: Any) -> str:  # pyright: ignore[reportAny, reportExplicitAny]
         return name if name else cls.__name__
 
-    def initialize(self, system: System) -> list[Exception]:
+    def install(self, system: System) -> list[Exception]:
         """Commission the component into a system."""
         if self._initialized:
             return []
 
-        exceptions = self._initialize(system)
+        exceptions = self._install(system)
         if not exceptions:
             self._initialized = True
         return exceptions
@@ -103,8 +107,33 @@ class AbstractComponent(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultiple
             return False
         return self._should_update(t)
 
+    def save(self) -> ComponentDataDict:
+        """Serialize the component to a dictionary."""
+        return ComponentDataDict(
+            name=self.name,
+            type=self.__class__.__name__,
+            module=self.__class__.__module__,
+            config=self._get_configuration_dict(),
+            state=self._get_runtime_state_dict(),
+        )
+
+    @classmethod
+    def load(cls, payload: ComponentDataDict) -> AbstractComponent:
+        """Create a component from a dictionary."""
+        module_name = payload["module"]
+        type_name = payload["type"]
+        module = importlib.import_module(module_name)
+        component_cls = cast(type[AbstractComponent], getattr(module, type_name))
+        if not issubclass(component_cls, AbstractComponent):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise TypeError(f"{component_cls} is not a subclass of AbstractComponent")
+
+        component = component_cls._load_configuration(payload["config"])
+        component.name = payload["name"]
+        component._load_runtime_state(payload["state"])
+        return component
+
     @abstractmethod
-    def _initialize(self, system: System) -> list[Exception]:
+    def _install(self, system: System) -> list[Exception]:
         """Internal hook to commission the component into a system."""
         ...
 
@@ -117,31 +146,6 @@ class AbstractComponent(BaseModel, ABC):  # pyright: ignore[reportUnsafeMultiple
     def _should_update(self, t: Seconds) -> bool:
         """Internal hook to check if the component should update."""
         ...
-
-    def save(self) -> ComponentDataDict:
-        """Serialize the component to a dictionary."""
-        return ComponentDataDict(
-            name=self.name,
-            type=self.__class__.__name__,
-            module=self.__class__.__module__,
-            config=self._get_configuration_dict(),
-            state=self._get_runtime_state_dict(),
-        )
-
-    @classmethod
-    def load(cls, payload: dict[str, Any]) -> AbstractComponent:
-        """Create a component from a dictionary."""
-        module_name = payload["module"]
-        type_name = payload["type"]
-        module = importlib.import_module(module_name)
-        component_cls = getattr(module, type_name)
-        if not issubclass(component_cls, AbstractComponent):
-            raise TypeError(f"{component_cls} is not a subclass of AbstractComponent")
-
-        component = component_cls._load_configuration(payload["config"])
-        component.name = payload["name"]
-        component._load_runtime_state(payload["state"])
-        return component
 
     @abstractmethod
     def _get_configuration_dict(self) -> dict[str, Any]:  # pyright: ignore[reportExplicitAny]

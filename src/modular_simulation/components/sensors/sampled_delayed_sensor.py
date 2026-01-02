@@ -51,8 +51,8 @@ class SampledDelayedSensor(AbstractSensor):
         return q[0]
 
     @override
-    def _initialize(self, system: System) -> list[Exception]:
-        exceptions = super()._initialize(system)
+    def _install(self, system: System) -> list[Exception]:
+        exceptions = super()._install(system)
         if not exceptions:
             self._last_sample_t = system.time
         return exceptions

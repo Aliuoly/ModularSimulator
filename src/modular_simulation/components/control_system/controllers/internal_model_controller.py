@@ -75,7 +75,7 @@ class InternalModelController(AbstractController):
     _internal_model: Callable[[StateValue], StateValue] = PrivateAttr()
 
     @override
-    def _post_commission_hook(
+    def post_install(
         self,
         system: System,
         mv_getter: Callable[[], DataValue],
@@ -84,7 +84,7 @@ class InternalModelController(AbstractController):
         mv_unit: UnitBase,
     ) -> bool:
         # initialize filtered sp to be current pv
-        self._filtered_sp = system.tag_store[self.cv_tag].data.value
+        self._filtered_sp = system.point_registry[self.cv_tag].data.value
         mv_controller_unit = mv_unit
         found_calculation = [
             c for c in system.calculations if c.name == self.model.calculation_name

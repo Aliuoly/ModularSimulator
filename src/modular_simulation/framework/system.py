@@ -58,7 +58,7 @@ class System(BaseModel):
         ),
     )
 
-    _tag_store: PointRegistry = PrivateAttr(default_factory=PointRegistry)
+    _point_registry: PointRegistry = PrivateAttr(default_factory=PointRegistry)
     _history_updaters: list[Callable[[Seconds], None]] = PrivateAttr(default_factory=list)
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportUnannotatedClassAttribute]
 
@@ -84,7 +84,7 @@ class System(BaseModel):
             # cast to StateValue to handle potential type discrepancies or numpy scalars
             val = cast(StateValue, initial_value)
             tag_info.data = DataValue(value=val, time=self.process_model.t, ok=True)
-            self._tag_store.add(tag_info)
+            self._point_registry.add(tag_info)
 
         # importantly, the order must be
         # 1. sensors, 2. calculations, 3. controllers
@@ -148,7 +148,7 @@ class System(BaseModel):
                 # Need to find the point we already added
                 metadata = self.process_model.state_metadata_dict[raw_state_name]
                 tag = f"(raw, {metadata.type.name})_{raw_state_name}"
-                tag_info = self._tag_store.get(tag)
+                tag_info = self._point_registry.get(tag)
 
                 # Should not be None as we just added it
                 if tag_info:
@@ -230,10 +230,10 @@ class System(BaseModel):
         # the following code assumes if it returned, we are ok.
         # for calculation, that is a different issue.
         if isinstance(component, AbstractSensor):
-            self.tag_store.add(component.point)
+            self.point_registry.add(component.point)
             # don't care about sensor lol, only way it fails is if
             # state value is bad, in which case scipy solver will fail later.
-            exceptions = component.initialize(self)
+            exceptions = component.install(self)
             if not exceptions:
                 successful = True
             else:
@@ -243,17 +243,17 @@ class System(BaseModel):
             # output tag info available before wiring inputs, but
             # certain calculations have some preprocessing during the wiring stage,
             # such as resolving unit issues. Thus, put it after wiring inputs.
-            exceptions = component.initialize(self)
+            exceptions = component.install(self)
             if not exceptions:
-                self.tag_store.add(component.output_point_dict)
+                self.point_registry.add(component.output_point_dict)
                 successful = True
             else:
                 error = exceptions[0]
                 successful = False
         elif isinstance(component, ControlElement):  # pyright: ignore[reportUnnecessaryIsInstance]
-            exceptions = component.initialize(self)
+            exceptions = component.install(self)
             if not exceptions:
-                self.tag_store.add(component.controller_sp_point_dict)
+                self.point_registry.add(component.controller_sp_point_dict)
                 successful = True
             else:
                 error = exceptions[0]
@@ -380,8 +380,8 @@ class System(BaseModel):
         return controller.mode
 
     @property
-    def tag_store(self) -> PointRegistry:
-        return self._tag_store
+    def point_registry(self) -> PointRegistry:
+        return self._point_registry
 
     @cached_property
     def controller_dictionary(self) -> dict[str, AbstractController]:
@@ -415,7 +415,7 @@ class System(BaseModel):
     @property
     def history(self) -> dict[str, list[DataValue]]:
         """Returns historized measurements and calculations."""
-        return self._tag_store.history
+        return self._point_registry.history
 
     def save(self) -> dict[str, Any]:
         """Persist minimal configuration and component snapshots for reconstruction."""

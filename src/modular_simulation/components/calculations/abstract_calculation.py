@@ -10,7 +10,10 @@ from modular_simulation.validation.exceptions import (
     CalculationConfigurationError,
 )
 from modular_simulation.components.point import Point, DataValue
-from modular_simulation.components.abstract_component import AbstractComponent, ComponentUpdateResult
+from modular_simulation.components.abstract_component import (
+    AbstractComponent,
+    ComponentUpdateResult,
+)
 from modular_simulation.utils.typing import StateValue, Seconds
 from modular_simulation.utils.metadata_extraction import extract_unique_metadata
 from modular_simulation.components.calculations.point_metadata import PointMetadata, TagType
@@ -69,7 +72,7 @@ class AbstractCalculation(AbstractComponent):
     # -------- AbstractComponent Interface --------
 
     @override
-    def _initialize(self, system: System) -> list[Exception]:
+    def _install(self, system: System) -> list[Exception]:
         """Link calculation inputs to tag info instances and create callables.
 
         Returns a list of exceptions (empty if successful).
@@ -77,7 +80,7 @@ class AbstractCalculation(AbstractComponent):
         exceptions: list[Exception] = []
 
         # Call pre-commissioning hook
-        pre_error, successful = self._pre_commissioning_hook(system)
+        pre_error, successful = self.pre_install(system)
         if not successful and pre_error is not None:
             exceptions.append(pre_error)
             return exceptions
@@ -90,8 +93,10 @@ class AbstractCalculation(AbstractComponent):
 
         for input_tag, input_metadata in input_tag_metadata_pairs.items():
             try:
-                self._input_data_getters[input_tag] = system.tag_store.make_converted_data_getter(
-                    tag=input_tag, target_unit=input_metadata.unit
+                self._input_data_getters[input_tag] = (
+                    system.point_registry.make_converted_data_getter(
+                        tag=input_tag, target_unit=input_metadata.unit
+                    )
                 )
             except KeyError as e:
                 exceptions.append(CalculationConfigurationError(str(e)))
@@ -168,7 +173,7 @@ class AbstractCalculation(AbstractComponent):
 
     # -------- hooks --------
 
-    def _pre_commissioning_hook(
+    def pre_install(
         self,
         system: System,  # pyright: ignore[reportUnusedParameter]
     ) -> tuple[CalculationConfigurationError | None, bool]:

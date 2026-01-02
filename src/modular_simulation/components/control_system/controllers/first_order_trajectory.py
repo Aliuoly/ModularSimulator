@@ -47,7 +47,7 @@ class FirstOrderTrajectoryController(AbstractController):
 
     # ------------------------------------------------------------------------
     @override
-    def _post_initialization(
+    def post_install(
         self,
         system: System,
         mv_getter: Callable[[], DataValue],
@@ -57,7 +57,7 @@ class FirstOrderTrajectoryController(AbstractController):
     ) -> bool:
         # resolve the open_loop_time_constant thing
         if isinstance(self.open_loop_time_constant, str):
-            found_tag_info = system.tag_store.get(self.open_loop_time_constant)
+            found_tag_info = system.point_registry.get(self.open_loop_time_constant)
             if found_tag_info is None:
                 raise ControllerConfigurationError(
                     f"The configured open loop time constant tag '{self.open_loop_time_constant}' "

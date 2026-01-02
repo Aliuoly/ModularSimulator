@@ -79,17 +79,28 @@ class AbstractController(AbstractComponent):
 
     # -------- AbstractComponent Interface --------
 
+    @abstractmethod
+    def _control_algorithm(
+        self,
+        t: Seconds,
+        cv: StateValue,
+        sp: StateValue,
+    ) -> tuple[StateValue, bool]:
+        """The actual control algorithm. To be implemented by subclasses."""
+        pass
+
     @override
-    def _initialize(self, system: System) -> list[Exception]:
+    def _install(self, system: System) -> list[Exception]:
         """Base commissioning for the controller.
 
-        Resolves CV points, sets up SP points, and commissions cascade controllers.
+        Resolves CV points, sets up SP points, commissions cascade controllers.
         Element-specific wiring happens later in wire_to_element().
         """
         exceptions: list[Exception] = []
         logger.debug(f"Commissioning '{self.cv_tag}' controller.")
 
-        cv_point = system.tag_store.get(self.cv_tag)
+        # 1. Get CV point from system's point registry
+        cv_point = system.point_registry.get(self.cv_tag)
         if cv_point is None:
             exceptions.append(
                 ControllerConfigurationError(
@@ -99,13 +110,16 @@ class AbstractController(AbstractComponent):
             )
             return exceptions
 
-        self._cv_getter = system.tag_store.make_converted_data_getter(self.cv_tag)
+        # 2. Get CV getter from system's point registry
+        self._cv_getter = system.point_registry.make_converted_data_getter(self.cv_tag)
+
+        # 3. Initialize SP trajectory if necessary
         if self.sp_trajectory is None:
             self.sp_trajectory = Trajectory(y0=cv_point.data.value, t0=cv_point.data.time)
 
-        # Commission cascade controllers recursively
+        # 4. Commission cascade controllers recursively if it exists
         if self.cascade_controller is not None:
-            cascade_exceptions = self.cascade_controller.initialize(system)
+            cascade_exceptions = self.cascade_controller.install(system)
             if cascade_exceptions:
                 exceptions.extend(cascade_exceptions)
                 return exceptions
@@ -190,7 +204,7 @@ class AbstractController(AbstractComponent):
         )
 
         # Call subclass hook
-        if not self._post_commission_hook(system, mv_getter, mv_range, mv_tag, mv_unit):
+        if not self.post_install(system, mv_getter, mv_range, mv_tag, mv_unit):
             return False
 
         if np.isscalar(self._control_action.value):
@@ -198,7 +212,7 @@ class AbstractController(AbstractComponent):
 
         return True
 
-    def _post_commission_hook(
+    def post_install(
         self,
         system: System,
         mv_getter: Callable[[], DataValue],
@@ -285,16 +299,6 @@ class AbstractController(AbstractComponent):
             return mv_target
         else:
             return mv0 + math.copysign(max_delta, delta)
-
-    @abstractmethod
-    def _control_algorithm(
-        self,
-        t: Seconds,
-        cv: StateValue,
-        sp: StateValue,
-    ) -> tuple[StateValue, bool]:
-        """The actual control algorithm. To be implemented by subclasses."""
-        pass
 
     @override
     def _get_configuration_dict(self) -> dict[str, Any]:

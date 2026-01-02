@@ -38,7 +38,7 @@ def test_sampled_delayed_sensor_measures_and_histories(thermal_process_model):
     assert sensor._initialized
 
     # First sample at t=0
-    # System init calls initialize() but doesn't run first update() automatically
+    # System init calls install() but doesn't run first update() automatically
     # (Wait, yes it does? System.__init__ calls _update_components(0.0)?)
     # Let's check system definition. Usually System.step() drives it.
 
@@ -151,4 +151,4 @@ def test_pid_controller_updates_manipulated_variable(thermal_process_model):
 
     # Check controller internals (public access has changed to PrivateAttr for state)
     # We can check the point data in tag_store
-    assert system.tag_store["temperature.sp"].data.value == 310.0
+    assert system.point_registry["temperature.sp"].data.value == 310.0

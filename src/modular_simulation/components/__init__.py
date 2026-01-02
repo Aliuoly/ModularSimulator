@@ -1,3 +1,4 @@
+from .abstract_component import AbstractComponent
 from .calculations import (
     AbstractCalculation,
     CalculationBase,
@@ -27,14 +28,10 @@ TagData = DataValue
 
 __all__ = [
     # New abstract base class names
+    "AbstractComponent",
     "AbstractSensor",
     "AbstractController",
     "AbstractCalculation",
-    # Legacy aliases (deprecated)
-    "SensorBase",
-    "ControllerBase",
-    "CalculationBase",
-    "TagData",  # Deprecated, use DataValue
     # Controllers
     "ControllerMode",
     "MVController",

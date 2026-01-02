@@ -48,8 +48,8 @@ def test_system_step_updates_measurements_and_state(thermal_process_model):
         sensors=[sensor, mv_sensor],
         control_elements=[control_element],
         calculations=[],
-        record_history=False,
-        show_progress=False,
+        record_history=True,
+        show_progress=True,
     )
 
     system.set_controller_mode("temperature", ControllerMode.AUTO)

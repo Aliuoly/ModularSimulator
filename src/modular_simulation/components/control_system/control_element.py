@@ -62,34 +62,34 @@ class ControlElement(AbstractComponent):
     # -------- AbstractComponent Interface --------
 
     @override
-    def _initialize(self, system: System) -> list[Exception]:
+    def _install(self, system: System) -> list[Exception]:
         """Bind the control element to the system and wire its controller."""
         exceptions: list[Exception] = []
-        # Try to find the point in TagStore.
+        # Try to find the point in PointRegistry.
         # If it's a process state, System registers it with a specific prefix.
         mv_point = None
         if self.mv_tag in system.process_model.state_metadata_dict:
             metadata = system.process_model.state_metadata_dict[self.mv_tag]
             # Reconstruct the prefix used by System.py
             # TODO: This coupling to System's naming convention is fragile.
-            # Ideally TagStore handles this or System provides a helper.
+            # Ideally PointRegistry handles this or System provides a helper.
             prefixed_tag = f"(raw, {metadata.type.name})_{self.mv_tag}"
-            mv_point = system.tag_store.get(prefixed_tag)
+            mv_point = system.point_registry.get(prefixed_tag)
 
         if mv_point is None:
             # Fallback 1: Direct lookup
-            mv_point = system.tag_store.get(self.mv_tag)
+            mv_point = system.point_registry.get(self.mv_tag)
 
         if mv_point is None:
             # Fallback 2: Search for suffix match (handling System's internal naming)
             # This handles cases where metadata.type.name might differ or be casing dependent
             possible_matches = [
                 t
-                for t in system.tag_store
+                for t in system.point_registry
                 if t.endswith(f"_{self.mv_tag}") and t.startswith("(raw,")
             ]
             if len(possible_matches) == 1:
-                mv_point = system.tag_store.get(possible_matches[0])
+                mv_point = system.point_registry.get(possible_matches[0])
 
         if mv_point is None:
             exceptions.append(
@@ -123,7 +123,7 @@ class ControlElement(AbstractComponent):
 
                 self._mv_setter = setter
             else:
-                self._mv_setter = system.tag_store.make_converted_data_setter(self.mv_tag)
+                self._mv_setter = system.point_registry.make_converted_data_setter(self.mv_tag)
 
         except Exception as e:
             exceptions.append(ControlElementConfigurationError(f"Failed to bind MV setter: {e}"))
@@ -139,7 +139,7 @@ class ControlElement(AbstractComponent):
                 self.mode = ControllerMode.AUTO
 
             # Phase 1: Base component commissioning
-            controller_exceptions = self.controller.initialize(system)
+            controller_exceptions = self.controller.install(system)
             if controller_exceptions:
                 exceptions.extend(controller_exceptions)
                 return exceptions

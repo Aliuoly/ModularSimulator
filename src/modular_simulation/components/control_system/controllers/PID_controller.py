@@ -67,7 +67,7 @@ class PIDController(AbstractController):
     _filtered_derivative: StateValue = PrivateAttr(default=0.0)
 
     @override
-    def _post_commission_hook(
+    def post_install(
         self,
         system: System,
         mv_getter: Callable[[], DataValue],

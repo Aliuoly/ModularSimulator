@@ -35,7 +35,7 @@ class FirstOrderFilter(AbstractCalculation):
     _t: Seconds = PrivateAttr()
 
     @override
-    def _pre_commissioning_hook(
+    def pre_install(
         self,
         system: System,
     ) -> tuple[CalculationConfigurationError | None, bool]:
@@ -43,7 +43,7 @@ class FirstOrderFilter(AbstractCalculation):
         overwrite the unit info in the annotation
         with the tag info of the raw measurement itself.
         """
-        available_tag_info_dict = system.tag_store
+        available_tag_info_dict = system.point_registry
         raw_signal_tag_info = available_tag_info_dict.get(self.raw_signal_tag)
         if raw_signal_tag_info is not None:
             self._field_metadata_dict["raw_signal_tag"].unit = raw_signal_tag_info.unit

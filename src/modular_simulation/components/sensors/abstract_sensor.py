@@ -7,7 +7,10 @@ from modular_simulation.validation.exceptions import (
     SensorConfigurationError,
 )
 from modular_simulation.components.point import Point, DataValue
-from modular_simulation.components.abstract_component import AbstractComponent, ComponentUpdateResult
+from modular_simulation.components.abstract_component import (
+    AbstractComponent,
+    ComponentUpdateResult,
+)
 from modular_simulation.utils.typing import Seconds
 from modular_simulation.components.calculations.point_metadata import PointMetadata, TagType
 from modular_simulation.utils.metadata_extraction import extract_unique_metadata
@@ -71,8 +74,8 @@ class AbstractSensor(AbstractComponent):
     # -------- AbstractComponent Interface --------
 
     @override
-    def _initialize(self, system: System) -> list[Exception]:
-        """Bind the sensor to the system's tag store."""
+    def _install(self, system: System) -> list[Exception]:
+        """Bind the sensor to the system's point registry."""
         exceptions: list[Exception] = []
         try:
             # Check if the measurement tag corresponds to a process state first
@@ -94,7 +97,7 @@ class AbstractSensor(AbstractComponent):
 
                 self._measurement_getter = getter
             else:
-                self._measurement_getter = system.tag_store.make_converted_data_getter(
+                self._measurement_getter = system.point_registry.make_converted_data_getter(
                     tag=self.measurement_tag, target_unit=self.unit
                 )
         except KeyError as e:

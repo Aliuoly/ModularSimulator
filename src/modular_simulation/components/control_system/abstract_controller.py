@@ -1,8 +1,8 @@
 from __future__ import annotations  # without this cant type hint the cascade controller properly
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 import math
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, cast, override
 from dataclasses import asdict
 from astropy.units import UnitBase
 import numpy as np
@@ -13,6 +13,7 @@ from .trajectory import Trajectory
 from modular_simulation.validation.exceptions import ControllerConfigurationError
 from modular_simulation.components.abstract_component import (
     AbstractComponent,
+    ComponentDataDict,
     ComponentUpdateResult,
 )
 from modular_simulation.utils.typing import Seconds, StateValue, PerSeconds
@@ -25,7 +26,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class AbstractController(AbstractComponent):
+class AbstractController(AbstractComponent, ABC):
     """Abstract base class for all controllers in the modular simulation framework."""
 
     cv_tag: str = Field(..., description="The tag of the controlled variable (CV).")
@@ -88,6 +89,57 @@ class AbstractController(AbstractComponent):
     ) -> tuple[StateValue, bool]:
         """The actual control algorithm. To be implemented by subclasses."""
         pass
+
+    @abstractmethod
+    def post_wire_to_element(
+        self,
+        system: System,
+        mv_getter: Callable[[], DataValue],
+        mv_range: tuple[StateValue, StateValue],
+        mv_tag: str,
+        mv_unit: UnitBase,
+    ) -> bool:
+        """Hook for additional logic involving system after wire_to_element."""
+        return True
+
+    @override
+    def _get_configuration_dict(self) -> dict[str, Any]:  # pyright: ignore[reportExplicitAny]
+        """Subclass should overload this method and call super()._get_configuration_dict() before returning."""
+        config = self.model_dump(exclude={"cascade_controller"})
+        if self.cascade_controller is not None:
+            config["cascade_controller"] = self.cascade_controller.save()
+        return config
+
+    @override
+    def _get_runtime_state_dict(self) -> dict[str, Any]:  # pyright: ignore[reportExplicitAny]
+        """Subclass should overload this method and call super()._get_runtime_state_dict() before returning."""
+        return {
+            "mode": self.mode.name,
+        }
+
+    @classmethod
+    @override
+    def _load_configuration(cls, data: dict[str, Any]) -> AbstractController:  # pyright: ignore[reportExplicitAny]
+        """Subclass should overload this method and call super()._load_configuration() before returning."""
+        config = dict(data)
+
+        # Handle Controller
+        cascade_controller_data_dict = config.get("cascade_controller")
+        if cascade_controller_data_dict:
+            cascade_controller = AbstractController.load(
+                cast(ComponentDataDict, cascade_controller_data_dict)
+            )  # hail mary, if config is not compatible, will get error inside .load
+            config["cascade_controller"] = cascade_controller
+
+        # if config incompatible, pydantic will raise error
+        return cls(**config)  # pyright: ignore[reportAny]
+
+    @override
+    def _load_runtime_state(self, state: dict[str, Any]) -> None:  # pyright: ignore[reportExplicitAny]
+        """Subclass should overload this method and call super()._load_runtime_state() before returning."""
+        self.mode = ControllerMode[state["mode"]]
+        self._sp_point.data = DataValue(**state["sp"])
+        self._control_action = DataValue(**state["control_action"])
 
     @override
     def _install(self, system: System) -> list[Exception]:
@@ -192,6 +244,11 @@ class AbstractController(AbstractComponent):
                 return False
 
         # Create mode manager
+        if not self.sp_trajectory:
+            raise RuntimeError(
+                f"Controller '{self.cv_tag}' must have a setpoint trajectory. ",
+                "This is usually taken care of during `install` - check order of calling `install` and `wire_to_element`",
+            )
         self._mode_manager = ControllerModeManager(
             mode=self.mode,
             manual_mv_source=self._mv_trajectory,
@@ -204,23 +261,12 @@ class AbstractController(AbstractComponent):
         )
 
         # Call subclass hook
-        if not self.post_install(system, mv_getter, mv_range, mv_tag, mv_unit):
+        if not self.post_wire_to_element(system, mv_getter, mv_range, mv_tag, mv_unit):
             return False
 
         if np.isscalar(self._control_action.value):
             self._is_scalar = True
 
-        return True
-
-    def post_install(
-        self,
-        system: System,
-        mv_getter: Callable[[], DataValue],
-        mv_range: tuple[StateValue, StateValue],
-        mv_tag: str,
-        mv_unit: UnitBase,
-    ) -> bool:
-        """Hook for additional logic involving system after wire_to_element."""
         return True
 
     # -------- Control Logic --------
@@ -299,42 +345,6 @@ class AbstractController(AbstractComponent):
             return mv_target
         else:
             return mv0 + math.copysign(max_delta, delta)
-
-    @override
-    def _get_configuration_dict(self) -> dict[str, Any]:
-        config = self.model_dump(exclude={"cascade_controller"})
-        if self.cascade_controller is not None:
-            config["cascade_controller"] = self.cascade_controller.save()
-        return config
-
-    @override
-    def _get_runtime_state_dict(self) -> dict[str, Any]:
-        return {
-            "mode": self.mode.name,
-            "sp": asdict(self._sp_point.data),
-            "control_action": asdict(self._control_action),
-        }
-
-    @classmethod
-    @override
-    def _load_configuration(cls, data: dict[str, Any]) -> "AbstractController":
-        config = dict(data)
-
-        # Handle Controller
-        if "cascade_controller" in config and config["cascade_controller"] is not None:
-            # We use cls.load instead of AbstractController.load to maintain type
-            # but actually AbstractController.load is safer for dispatch
-            cascade_controller = AbstractController.load(config["cascade_controller"])
-            config["cascade_controller"] = cascade_controller
-
-        return cls(**config)
-
-    @override
-    def _load_runtime_state(self, state: dict[str, Any]) -> None:
-        if "mode" in state:
-            self.mode = ControllerMode[state["mode"]]
-        # sp and control_action are usually cold-started or updated by first step
-        # but could be restored here if needed.
 
     # -------- Properties --------
 

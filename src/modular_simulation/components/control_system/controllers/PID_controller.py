@@ -67,7 +67,7 @@ class PIDController(AbstractController):
     _filtered_derivative: StateValue = PrivateAttr(default=0.0)
 
     @override
-    def post_install(
+    def post_wire_to_element(
         self,
         system: System,
         mv_getter: Callable[[], DataValue],

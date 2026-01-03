@@ -75,7 +75,7 @@ class InternalModelController(AbstractController):
     _internal_model: Callable[[StateValue], StateValue] = PrivateAttr()
 
     @override
-    def post_install(
+    def post_wire_to_element(
         self,
         system: System,
         mv_getter: Callable[[], DataValue],

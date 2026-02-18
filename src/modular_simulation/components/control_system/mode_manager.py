@@ -8,7 +8,6 @@ from modular_simulation.components.point import DataValue
 if TYPE_CHECKING:
     from .abstract_controller import AbstractController
     from .trajectory import Trajectory
-    from modular_simulation.components.abstract_component import ComponentUpdateResult
 import logging
 
 logger = logging.getLogger(__name__)

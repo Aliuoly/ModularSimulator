@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast, override
-from dataclasses import asdict
 from astropy.units import UnitBase
 import numpy as np
 from .controller_mode import ControllerMode

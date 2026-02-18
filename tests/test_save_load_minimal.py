@@ -10,7 +10,6 @@ from modular_simulation.measurables.process_model import (
     StateType,
 )
 from modular_simulation.components.sensors import AbstractSensor as SensorBase
-from modular_simulation.components import ControlElement, Trajectory, Point
 from modular_simulation.components.abstract_component import ComponentUpdateResult
 
 

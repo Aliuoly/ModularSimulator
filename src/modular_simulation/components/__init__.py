@@ -30,8 +30,11 @@ __all__ = [
     # New abstract base class names
     "AbstractComponent",
     "AbstractSensor",
+    "SensorBase",
     "AbstractController",
+    "ControllerBase",
     "AbstractCalculation",
+    "CalculationBase",
     # Controllers
     "ControllerMode",
     "MVController",

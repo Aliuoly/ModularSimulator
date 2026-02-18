@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any, override
 import numpy as np
-import importlib
 from dataclasses import asdict
 from pydantic import PrivateAttr, ConfigDict, Field
 from modular_simulation.components.point import Point, DataValue

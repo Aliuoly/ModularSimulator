@@ -3,7 +3,7 @@ import collections
 from typing import TYPE_CHECKING, override
 from pydantic import Field, PrivateAttr
 from modular_simulation.components.sensors.abstract_sensor import AbstractSensor
-from modular_simulation.utils.typing import Seconds, StateValue
+from modular_simulation.utils.typing import Seconds
 from modular_simulation.components.abstract_component import ComponentUpdateResult
 from modular_simulation.components.point import DataValue
 

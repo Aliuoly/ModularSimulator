@@ -1,5 +1,4 @@
 from __future__ import annotations
-from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, override
 import numpy as np
 from pydantic import ConfigDict, Field, PrivateAttr
@@ -13,7 +12,6 @@ from modular_simulation.components.abstract_component import (
 )
 from modular_simulation.utils.typing import Seconds
 from modular_simulation.components.calculations.point_metadata import PointMetadata, TagType
-from modular_simulation.utils.metadata_extraction import extract_unique_metadata
 
 if TYPE_CHECKING:
     from modular_simulation.framework.system import System

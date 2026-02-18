@@ -1,7 +1,7 @@
 import numpy as np
 from modular_simulation.framework.system import System
 from modular_simulation.measurables.process_model import ProcessModel, StateMetadata, StateType
-from modular_simulation.components import ControlElement, Trajectory, Point
+from modular_simulation.components import ControlElement, Trajectory
 from modular_simulation.components.control_system.controller_mode import ControllerMode
 from pydantic import Field
 from typing import Annotated

@@ -1,198 +1,170 @@
-# modular_simulation Context for Agentic LLMs
+# LLM_CONTEXT.md - Architectural Context for Agentic Work
 
-> [!IMPORTANT]
-> This document is designed to provide high-level context and architectural understanding of the `modular_simulation` framework. Use this as a map when exploring the codebase.
+> Purpose: this file is the architecture map for coding agents.
+> For commands, workflow, and style rules, use `AGENTS.md` as the primary source.
 
-## 1. Architectural Overview
+## Scope and Priority
 
-`modular_simulation` is a Python framework for simulating closed-loop process control systems. It is designed to solve Differential-Algebraic Equations (DAEs) using standard ODE solvers by decoupling the differential and algebraic states.
+- This repository uses a two-file agent guidance model:
+  - `AGENTS.md`: build/test/lint commands, style, workflow, safety rules.
+  - `LLM_CONTEXT.md`: architecture, runtime behavior, data flow, extension points.
+- If guidance differs:
+  1. explicit user instruction,
+  2. `AGENTS.md`,
+  3. `LLM_CONTEXT.md`.
+- Keep this file at repo root. Do not split into module-level `AGENTS.md` files unless
+  the codebase grows into multiple independently-owned packages.
 
-### The Simulation Loop
-The core loop is managed by the `System` class in `src/modular_simulation/framework/system.py`.
+## Repository Mental Model
 
-1.  **Time Step (`System.step(duration)`)**:
-    *   The user requests a step of a certain duration (e.g., 10 seconds).
-    *   The system divides this into logical steps of size `dt`.
-    *   Inside the loop, it calls `_update_components()` and then `ProcessModel.step()`.
+- Package root: `src/modular_simulation/`.
+- Core abstraction: `System` orchestrates one `ProcessModel` plus component collections.
+- Components are template-method based (`install`, `update`, `should_update`) and include:
+  - sensors,
+  - calculations,
+  - control elements (optionally with controllers).
+- Shared data exchange is through `PointRegistry` + `Point` + `DataValue`.
 
-2.  **Component Update (`System._update_components()`)**:
-    *   **Sensors**: Read current process state, add noise/delays.
-    *   **Calculations**: Compute derived values from sensors.
-    *   **Control Elements**:
-        *   Controllers calculate new Manipulated Variable (MV) values.
-        *   Control Elements write these MVs to the `ProcessModel` or other targets.
+## Runtime Loop (Ground Truth)
 
-3.  **Process Integration (`ProcessModel.step()`)**:
-    *   Uses `scipy.integrate.solve_ivp` to solve the system from `t` to `t + dt`.
-    *   **The DAE Trick**: The `ProcessModel` acts as a pure ODE system to the solver (`dy/dt = f(t, y)`). However, strictly algebraic variables are recomputed *inside* the RHS function wrapper (`_rhs_wrapper`) at every internal solver step. This ensures algebraic constraints are satisfied throughout the integration interval.
+Primary loop is in `src/modular_simulation/framework/system.py`.
 
-### Data Flow
-`ProcessModel` (Truth) -> `Sensors` (Measured) -> `Calculations` (Derived) -> `Controllers` (Decision) -> `ControlElements` (Action) -> `ProcessModel` (Update)
+1. `System.step(duration)` computes `nsteps = round(duration / dt)`.
+2. Each logical step runs in fixed order:
+   - `_update_components()`
+   - `process_model.step(dt)`
+   - point/history synchronization
+3. `_update_components()` runs in dependency-safe sequence:
+   - sensors -> calculations -> control elements.
 
----
+Why this matters:
+- Calculations depend on sensor outputs.
+- Controllers/control elements can depend on both sensors and calculations.
+- Reordering can subtly break closed-loop behavior.
 
-## 2. Core Components
+## System Initialization and Wiring
 
-### 2.1 ProcessModel (`src/modular_simulation/measurables/process_model.py`)
-The physics/chemistry engine. Users must subclass `ProcessModel`.
+`System.model_post_init` performs core bootstrapping:
 
-*   **State Definition**: All class attributes must be valid state variables.
-    *   They are auto-discovered during `model_post_init` using `StateMetadata`.
-    *   **`StateMetadata(type, unit, description)`**:
-        *   `StateType.DIFFERENTIAL`: Variables with time derivatives ($dx/dt$).
-        *   `StateType.ALGEBRAIC`: Variables defined by algebraic equations ($0 = g(x, z)$).
-        *   `StateType.CONTROLLED`: External inputs/actuators (MVs).
-        *   `StateType.CONSTANT`: Fixed parameters.
+- Validates resolvability of sensor and control-element tags.
+- Calls `process_model.attach_system(self)`.
+- Registers all process-model states into `PointRegistry` with raw tags:
+  - format: `(raw, {StateType})_{state_name}`.
+- Installs components in strict order:
+  1. sensors,
+  2. calculations (with iterative dependency resolution),
+  3. control elements.
+- Aggregates unresolved wiring issues via `ExceptionGroup`.
 
-*   **Abstract Methods**:
-    *   `differential_rhs(...)`: Returns array of $dy/dt$. **Must be stateless.**
-    *   `calculate_algebraic_values(...)`: Returns array of algebraic variables. **Must be stateless.**
+Do not bypass registry-based wiring with ad-hoc object mutation.
 
-*   **Views**: `differential_view`, `algebraic_view`, etc., provide efficient array-based access to the underlying scalar attributes.
+## ProcessModel Contract
 
-### 2.2 System (`src/modular_simulation/framework/system.py`)
- The simulation orchestrator.
+Defined in `src/modular_simulation/measurables/process_model.py`.
 
-*   **Responsibility**: Holds the `ProcessModel`, list of `Sensors`, `Calculations`, and `ControlElements`.
-*   **Initialization**: `System(process_model=..., sensors=..., ...)`
-    *   Recursively validation configuration.
-    *   Resolves dependencies (wiring sensors to calculations, calculations to controllers).
-    *   Populates the `PointRegistry` (accessed via `system.point_registry`) with all accessible data points.
+### State typing model
 
-### 2.3 ControlElement (`src/modular_simulation/components/control_system/control_element.py`)
-Represents the physical actuator (valve, pump, heater).
+- State metadata is declared with `Annotated[..., StateMetadata(...)]`.
+- Categories are fixed enum values:
+  - `DIFFERENTIAL`
+  - `ALGEBRAIC`
+  - `CONTROLLED`
+  - `CONSTANT`
+- States are surfaced through categorized array views (`CategorizedStateView`) with
+  deterministic name->index mapping.
 
-*   **Fields**:
-    *   `mv_tag`: The name of the variable it manipulates.
-    *   `mv_trajectory`: A `Trajectory` object for manual control.
-    *   `controller`: An optional `AbstractController` (e.g., PID) that drives this element in AUTO mode.
-*   **Modes**:
-    *   `MANUAL`: Follows `mv_trajectory`.
-    *   `AUTO`: Follows `controller` output.
-*   **Binding**: Can bind directly to a `ProcessModel` attribute (updating the attribute directly while keeping `PointRegistry` in sync) or to a pure `PointRegistry` point.
+### Numerical API contract
 
-### 2.4 AbstractSensor (`src/modular_simulation/components/sensors/abstract_sensor.py`)
-Reads truth from `ProcessModel` and reports it to the system.
+Subclasses must provide stateless static methods:
 
-*   **Fields**:
-    *   `measurement_tag`: The raw State name in `ProcessModel`.
-    *   `alias_tag`: The public name in the simulation (e.g., 'TI-101').
-    *   `faulty_probability`, `coefficient_of_variance`: For Simulation realism.
+- `calculate_algebraic_values(y, u, k, y_map, u_map, k_map, algebraic_map, algebraic_size)`
+- `differential_rhs(t, y, u, k, algebraic, y_map, u_map, k_map, algebraic_map)`
 
-### 2.5 AbstractCalculation (`src/modular_simulation/components/calculations/abstract_calculation.py`)
-Performs math on sensors.
+Implementation notes:
+- Treat these methods as pure functions over arrays/maps.
+- Use `y_map`/`u_map`/`k_map`/`algebraic_map` for indexing.
+- Avoid reading instance attributes inside these static methods.
 
-*   **Usage**: Subclass and annotate inputs/outputs with `PointMetadata`.
-    *   `TagType.INPUT`: Reads from `PointRegistry`.
-    *   `TagType.OUTPUT`: Writes to `PointRegistry`.
-*   **Wiring**: The keys in your `calculations` dict in the system definition map to these inputs.
+### Integration behavior
 
-## 3. The Type System & Units
+- `ProcessModel.step(dt)` uses `scipy.integrate.solve_ivp`.
+- `_rhs_wrapper` recomputes algebraic values on each solver callback before evaluating RHS.
+- After successful integration, final differential and algebraic states are written back,
+  and `t` advances.
 
-The framework is heavily typed.
+## Units and Conversion Model
 
-*   **`StateValue`**: Union types for scalars (float/int) or numpy arrays.
-*   **`Seconds`**: Type alias for float, indicating usage.
-*   **Units**: Uses `astropy.units`.
-    *   `ProcessModel` states define their *intrinsic* units.
-    *   `Sensors` can request `unit="deg_C"` even if the process model uses `K`. The framework handles conversion automatically during data access.
-    *   **Warning**: The DAE/ODE equations (`differential_rhs`) are currently **unit-naive**. You must perform calculations in consistent units (usually SI) manually within these methods.
+- Units use `astropy.units`.
+- `StateMetadata.unit` defines intrinsic process-model units.
+- Conversion helpers:
+  - `make_converted_getter`
+  - `make_converted_setter`
+- Sensors and control elements can bridge between registry/process units and requested units.
 
-## 4. Coding Patterns & Cookbook
+Practical rule: keep equation internals unit-consistent; rely on conversion helpers at IO edges.
 
-### How to Create a New Process Model
+## Component Contracts
 
-```python
-from modular_simulation.measurables.process_model import ProcessModel, StateMetadata, StateType
-from typing import Annotated
+Base class: `src/modular_simulation/components/abstract_component.py`.
 
-class MyReactor(ProcessModel):
-    # Use Annotated[type, StateMetadata] pattern
-    
-    # 1. Differential Parameter
-    T: Annotated[
-        float, 
-        StateMetadata(StateType.DIFFERENTIAL, unit="K", description="Reactor Temp")
-    ] = 300.0
+- Public lifecycle API:
+  - `install(system)`
+  - `update(t)`
+  - `should_update(t)`
+  - `save()` / `load()`
+- Subclasses implement private hooks (`_install`, `_update`, `_should_update`, etc.).
+- Update paths return `ComponentUpdateResult` with `data_value` and `exceptions`.
 
-    # 2. Controlled Parameter (MV)
-    flow_in: Annotated[
-        float,
-        StateMetadata(StateType.CONTROLLED, unit="L/s", description="Inlet Flow")
-    ] = 10.0
+### Sensors
 
-    # ... Implement abstract methods ...
-```
+- Defined via `AbstractSensor`.
+- Typically read process truth or registry values, then emit measured points.
+- Fault/noise behavior can alter quality (`ok`) and emitted value.
 
-### How to Create a Calculation
+### Calculations
 
-```python
-from modular_simulation.components.calculations.abstract_calculation import AbstractCalculation
-from modular_simulation.components.calculations.point_metadata import PointMetadata, TagType
-from typing import Annotated
+- Defined via `AbstractCalculation`.
+- Inputs/outputs are metadata-driven (`PointMetadata`, `TagType`).
+- Inputs are wired via converted getters from `PointRegistry`.
 
-class MyCalculation(AbstractCalculation):
-    # Define Inputs
-    input_tag: Annotated[
-        str, 
-        PointMetadata(TagType.INPUT, unit="m", description="Input Level")
-    ]
-    
-    # Define Outputs
-    output_tag: Annotated[
-        str,
-        PointMetadata(TagType.OUTPUT, unit="ft", description="Output Level (Converted)")
-    ]
+### Control elements
 
-    def _calculation_algorithm(self, t, inputs_dict):
-        # inputs_dict keys matches the field names (e.g. 'input_tag')
-        val_m = inputs_dict["input_tag"] 
-        val_ft = val_m * 3.28084
-        return {"output_tag": val_ft}
-```
+- Defined via `ControlElement`.
+- Can bind manipulated variable tags to process-model states or registry points.
+- Operate in `MANUAL` or `AUTO`, optionally driven by controller chains.
 
-### How to Implement `differential_rhs`
-**Crucial**: The function signature receives *flat arrays* and *mapping dictionaries*. Do not access `self.variable` inside this method; it is static/stateless for performance and pickling.
+## Persistence Model
 
-```python
-    @override
-    @staticmethod
-    def differential_rhs(
-        t, y, u, k, algebraic, y_map, u_map, k_map, algebraic_map
-    ) -> NDArray[np.float64]:
-        dydt = np.zeros_like(y)
-        
-        # Access variables using maps
-        Temp = y[y_map["T"]]
-        Flow = u[u_map["flow_in"]]
-        
-        # Physics
-        dT_dt = ... 
-        
-        dydt[y_map["T"]] = dT_dt
-        return dydt
-```
+- `ProcessModel`, `System`, and components expose `save()` / `load()` payloads.
+- Serialization stores `type` + `module` and reconstructs classes via dynamic import.
+- Preserve payload compatibility when changing runtime state/config fields.
 
-### Reference vs. Alias in Tags
-*   **Raw Tags**: Property names in `ProcessModel` (e.g., `T`, `pressure`, `concentration_A`).
-*   **System Tags**: Auto-generated by System (e.g., `(raw, DIFFERENTIAL)_T`).
-*   **Sensor/Alias Tags**: User-defined names (e.g., `TI-100`, `PC-101`).
-*   **Best Practice**: Always perform lookups in the `PointRegistry` (`system.point_registry.get("tag_name")`) which handles resolution.
+## Error Model
 
-## 5. Directory Map
+- Domain exceptions live in `src/modular_simulation/validation/exceptions.py`.
+- Configuration/wiring errors should prefer domain-specific exceptions.
+- Multi-error startup failures are intentionally surfaced as `ExceptionGroup`.
 
-*   `src/modular_simulation/`
-    *   `framework/`: `System` loop, time stepping.
-    *   `measurables/`: `ProcessModel` base classes.
-    *   `components/`:
-        *   `control_system/`: `ControlElement`, `PIDController`, `Trajectory`.
-        *   `sensors/`: `SampledDelayedSensor`.
-        *   `calculations/`: logic blocks.
-        *   `point/`: `Point` and `DataValue` (data containers).
-    *   `utils/`: Helper functions.
+## High-Value Files for Fast Orientation
 
-## 6. Testing & Development
-*   **`examples/`**: Contains complete, runnable systems. Use these as golden reference patterns.
-*   **Unit Tests**: Standard `pytest` suite.
-*   **Debugging**: The system relies on `logging`. Use `logging.getLogger(__name__)`.
+- `src/modular_simulation/framework/system.py`
+- `src/modular_simulation/measurables/process_model.py`
+- `src/modular_simulation/components/abstract_component.py`
+- `src/modular_simulation/components/control_system/control_element.py`
+- `src/modular_simulation/components/sensors/abstract_sensor.py`
+- `src/modular_simulation/components/calculations/abstract_calculation.py`
+- `src/modular_simulation/validation/exceptions.py`
+- `tests/conftest.py`
 
+## Agent Working Heuristics
+
+- Follow existing ordering and wiring semantics before attempting refactors.
+- For bug fixes: prefer surgical edits in the smallest relevant module.
+- Add/update tests around `System.step()` interactions when behavior changes cross components.
+- Use `AGENTS.md` commands for verification (`pytest`, `ruff`, `basedpyright`).
+
+## Current-Repo Notes (2026-02)
+
+- Root README in working tree is `readme.md`.
+- No Cursor rules detected at `.cursor/rules/**` or `.cursorrules`.
+- No Copilot instructions detected at `.github/copilot-instructions.md`.

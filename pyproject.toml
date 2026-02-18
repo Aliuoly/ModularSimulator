@@ -43,9 +43,18 @@ testpaths = [
 reportMissingTypeStubs = false
 stubPath = "typings"
 reportImportCycles = false
+include = [
+  "src/modular_simulation/connection",
+  "tests/connection",
+  "examples/connection_layer",
+]
+exclude = [
+  "examples/gas_phase_polymerization/**",
+]
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.37.2",
     "ruff",
 ]
 

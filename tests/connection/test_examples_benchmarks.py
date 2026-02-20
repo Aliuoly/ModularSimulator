@@ -1,5 +1,6 @@
 import math
 
+import importlib.abc
 import importlib.util
 from pathlib import Path
 
@@ -9,12 +10,14 @@ def _load_module_from_path(name: str, path: str):
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
+    loader = spec.loader
+    assert isinstance(loader, importlib.abc.Loader)
     # Ensure the module is present in sys.modules before executing code that
     # may reference its __name__ for dataclass construction
     import sys
 
     sys.modules[name] = module
-    spec.loader.exec_module(module)  # type: ignore
+    loader.exec_module(module)
     return module
 
 

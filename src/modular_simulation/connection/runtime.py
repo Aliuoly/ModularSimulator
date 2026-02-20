@@ -102,6 +102,35 @@ class ConnectionRuntimeOrchestrator:
         self._macro_step_active: bool = False
         self._committed_idempotency_keys: set[str] = set()
 
+    @property
+    def simulation_time_s(self) -> float:
+        return self._simulation_time_s
+
+    @property
+    def macro_step_index(self) -> int:
+        return self._macro_step_index
+
+    @property
+    def macro_step_active(self) -> bool:
+        return self._macro_step_active
+
+    @property
+    def committed_idempotency_keys(self) -> tuple[str, ...]:
+        return tuple(sorted(self._committed_idempotency_keys))
+
+    def set_runtime_state(
+        self,
+        *,
+        simulation_time_s: float,
+        macro_step_index: int,
+        macro_step_active: bool,
+        committed_idempotency_keys: Sequence[str],
+    ) -> None:
+        self._simulation_time_s = simulation_time_s
+        self._macro_step_index = macro_step_index
+        self._macro_step_active = macro_step_active
+        self._committed_idempotency_keys = set(committed_idempotency_keys)
+
     def step(
         self, *, network: ConnectionNetwork, macro_step_time_s: float
     ) -> ConnectionRuntimeStepResult:
@@ -155,8 +184,8 @@ class ConnectionRuntimeOrchestrator:
             self._macro_step_active = False
 
         current_graph_revision = None
-        if network._compiled is not None:
-            current_graph_revision = str(network._compiled.graph_revision)
+        if network.compiled is not None:
+            current_graph_revision = str(network.compiled.graph_revision)
 
         return ConnectionRuntimeStepResult(
             macro_step_index=self._macro_step_index,
@@ -178,9 +207,9 @@ class ConnectionRuntimeOrchestrator:
             raise RuntimeError(
                 "runtime snapshot capture is unavailable during active macro-step execution"
             )
-        compiled = network._compiled
+        compiled = network.compiled
         graph_revision = None if compiled is None else str(compiled.graph_revision)
-        queue = network._queued_reconfigurations
+        queue = network.queued_reconfigurations
         return {
             "schema": "connection_runtime_v1",
             "simulation_time_s": self._simulation_time_s,
@@ -246,10 +275,10 @@ class ConnectionRuntimeOrchestrator:
     def _apply_reconfiguration_batch(
         self, *, network: ConnectionNetwork
     ) -> BarrierReconfigurationReport:
-        network_snapshot = network._capture_reconfiguration_state()
-        queued_requests = network._drain_reconfiguration_queue()
+        network_snapshot = network.capture_reconfiguration_state()
+        queued_requests = network.drain_reconfiguration_queue()
         if not queued_requests:
-            compiled = network._compiled
+            compiled = network.compiled
             return BarrierReconfigurationReport(
                 queue_size_before=0,
                 queue_size_after=0,
@@ -297,7 +326,7 @@ class ConnectionRuntimeOrchestrator:
                     ) from error
                 graph_revision = compiled.graph_revision
             else:
-                compiled = network._compiled
+                compiled = network.compiled
                 graph_revision = None if compiled is None else compiled.graph_revision
 
             return BarrierReconfigurationReport(
@@ -308,7 +337,7 @@ class ConnectionRuntimeOrchestrator:
                 graph_revision=graph_revision,
             )
         except Exception as error:
-            network._restore_reconfiguration_state(network_snapshot)
+            network.restore_reconfiguration_state(network_snapshot)
             self._simulation_time_s = runtime_snapshot[0]
             self._macro_step_index = runtime_snapshot[1]
             self._committed_idempotency_keys = runtime_snapshot[2]
@@ -337,7 +366,7 @@ class ConnectionRuntimeOrchestrator:
             return
 
         if operation == "remove_connection":
-            _ = network._remove_connection(
+            _ = network.remove_connection(
                 edge_id=mutation.get("edge_id"),
                 source=mutation.get("source"),
                 target=mutation.get("target"),
@@ -348,7 +377,7 @@ class ConnectionRuntimeOrchestrator:
             edge_id = self._require_non_empty_string(mutation, "edge_id", operation)
             source = self._require_non_empty_string(mutation, "source", operation)
             target = self._require_non_empty_string(mutation, "target", operation)
-            network._rewire_connection(edge_id=edge_id, source=source, target=target)
+            network.rewire_connection(edge_id=edge_id, source=source, target=target)
             return
 
         if operation == "add_boundary_source":
@@ -372,11 +401,11 @@ class ConnectionRuntimeOrchestrator:
             return
 
         if operation == "remove_boundary":
-            network._remove_boundary(boundary_id=mutation.get("boundary_id"))
+            network.remove_boundary(boundary_id=mutation.get("boundary_id"))
             return
 
         if operation == "add_process_port":
-            network._add_process_port(
+            network.add_process_port(
                 process_id=mutation.get("process_id"),
                 direction=mutation.get("direction"),
                 port_name=mutation.get("port_name"),
@@ -384,7 +413,7 @@ class ConnectionRuntimeOrchestrator:
             return
 
         if operation == "remove_process_port":
-            network._remove_process_port(
+            network.remove_process_port(
                 process_id=mutation.get("process_id"),
                 direction=mutation.get("direction"),
                 port_name=mutation.get("port_name"),
@@ -438,7 +467,7 @@ class ConnectionRuntimeOrchestrator:
         macro_step_time_s: float,
     ) -> HydraulicSolveResult:
         del macro_step_time_s
-        compiled = network._compiled
+        compiled = network.compiled
         if compiled is None or compiled.hydraulic is None:
             raise RuntimeError(
                 "runtime macro-step is unavailable: compiled hydraulic graph is required"

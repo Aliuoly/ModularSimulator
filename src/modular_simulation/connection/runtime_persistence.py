@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from math import isfinite
 from modular_simulation.connection.network import (
     ConnectionNetwork,
-    _QueuedReconfigurationTransaction,
+    QueuedReconfigurationTransaction,
 )
 from modular_simulation.connection.runtime import ConnectionRuntimeOrchestrator
 
@@ -41,10 +41,10 @@ def save_runtime_snapshot_contract(
     network: ConnectionNetwork,
     process_runtime_state: Mapping[str, object],
 ) -> dict[str, object]:
-    compiled = network._compiled
+    compiled = network.compiled
     graph_revision = None if compiled is None else str(compiled.graph_revision)
     queue_payload: list[dict[str, object]] = []
-    for queued in network._queued_reconfigurations:
+    for queued in network.queued_reconfigurations:
         queue_payload.append(
             {
                 "request_id": queued.request_id,
@@ -59,19 +59,19 @@ def save_runtime_snapshot_contract(
         "schema_marker": RUNTIME_SNAPSHOT_SCHEMA_MARKER,
         "schema_version": RUNTIME_SNAPSHOT_SCHEMA_VERSION,
         "runtime": {
-            "simulation_time_s": runtime._simulation_time_s,
-            "macro_step_index": runtime._macro_step_index,
-            "macro_step_active": runtime._macro_step_active,
+            "simulation_time_s": runtime.simulation_time_s,
+            "macro_step_index": runtime.macro_step_index,
+            "macro_step_active": runtime.macro_step_active,
         },
         "process_runtime_state": _normalize_mapping_payload(process_runtime_state),
         "connection_runtime_state": {
             "graph_revision": graph_revision,
-            "next_edge_index": network._next_edge_index,
-            "next_reconfiguration_index": network._next_reconfiguration_index,
-            "next_revision_index": network._next_revision_index,
+            "next_edge_index": network.next_edge_index,
+            "next_reconfiguration_index": network.next_reconfiguration_index,
+            "next_revision_index": network.next_revision_index,
             "queued_reconfigurations": queue_payload,
             "queued_request_ids": [queued["request_id"] for queued in queue_payload],
-            "committed_idempotency_keys": sorted(runtime._committed_idempotency_keys),
+            "committed_idempotency_keys": list(runtime.committed_idempotency_keys),
         },
     }
 
@@ -261,13 +261,13 @@ def restore_runtime_snapshot_contract(
     snapshot: Mapping[str, object],
     process_runtime_validator: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
 ) -> None:
-    if runtime._macro_step_active:
+    if runtime.macro_step_active:
         raise RuntimeError(
             "runtime snapshot restore is unavailable during active macro-step execution"
         )
 
     validated_snapshot = validate_runtime_snapshot_contract(snapshot)
-    current_graph_revision = None if network._compiled is None else network._compiled.graph_revision
+    current_graph_revision = None if network.compiled is None else network.compiled.graph_revision
     if validated_snapshot.graph_revision != current_graph_revision:
         raise ValueError(
             "invalid runtime snapshot payload: field 'connection_runtime_state.graph_revision' "
@@ -281,19 +281,19 @@ def restore_runtime_snapshot_contract(
         )
 
     runtime_backup = (
-        runtime._simulation_time_s,
-        runtime._macro_step_index,
-        runtime._macro_step_active,
-        set(runtime._committed_idempotency_keys),
+        runtime.simulation_time_s,
+        runtime.macro_step_index,
+        runtime.macro_step_active,
+        runtime.committed_idempotency_keys,
     )
-    queue_backup = list(network._queued_reconfigurations)
-    edge_index_backup = network._next_edge_index
-    reconfiguration_index_backup = network._next_reconfiguration_index
-    revision_index_backup = network._next_revision_index
+    queue_backup = tuple(network.queued_reconfigurations)
+    edge_index_backup = network.next_edge_index
+    reconfiguration_index_backup = network.next_reconfiguration_index
+    revision_index_backup = network.next_revision_index
     process_state_backup = dict(process_runtime_state_sink)
 
     staged_queue = [
-        _QueuedReconfigurationTransaction(
+        QueuedReconfigurationTransaction(
             request_id=item.request_id,
             idempotency_key=item.idempotency_key,
             mutations=item.mutations,
@@ -302,28 +302,36 @@ def restore_runtime_snapshot_contract(
     ]
 
     try:
-        runtime._simulation_time_s = validated_snapshot.simulation_time_s
-        runtime._macro_step_index = validated_snapshot.macro_step_index
-        runtime._macro_step_active = False
-        runtime._committed_idempotency_keys = set(validated_snapshot.committed_idempotency_keys)
+        runtime.set_runtime_state(
+            simulation_time_s=validated_snapshot.simulation_time_s,
+            macro_step_index=validated_snapshot.macro_step_index,
+            macro_step_active=False,
+            committed_idempotency_keys=validated_snapshot.committed_idempotency_keys,
+        )
 
-        network._next_edge_index = validated_snapshot.next_edge_index
-        network._next_reconfiguration_index = validated_snapshot.next_reconfiguration_index
-        network._next_revision_index = validated_snapshot.next_revision_index
-        network._queued_reconfigurations = staged_queue
+        network.set_reconfiguration_counters(
+            next_edge_index=validated_snapshot.next_edge_index,
+            next_reconfiguration_index=validated_snapshot.next_reconfiguration_index,
+            next_revision_index=validated_snapshot.next_revision_index,
+        )
+        network.replace_queued_reconfigurations(staged_queue)
 
         process_runtime_state_sink.clear()
         process_runtime_state_sink.update(normalized_process_state)
     except Exception:
-        runtime._simulation_time_s = runtime_backup[0]
-        runtime._macro_step_index = runtime_backup[1]
-        runtime._macro_step_active = runtime_backup[2]
-        runtime._committed_idempotency_keys = runtime_backup[3]
+        runtime.set_runtime_state(
+            simulation_time_s=runtime_backup[0],
+            macro_step_index=runtime_backup[1],
+            macro_step_active=runtime_backup[2],
+            committed_idempotency_keys=runtime_backup[3],
+        )
 
-        network._queued_reconfigurations = queue_backup
-        network._next_edge_index = edge_index_backup
-        network._next_reconfiguration_index = reconfiguration_index_backup
-        network._next_revision_index = revision_index_backup
+        network.replace_queued_reconfigurations(queue_backup)
+        network.set_reconfiguration_counters(
+            next_edge_index=edge_index_backup,
+            next_reconfiguration_index=reconfiguration_index_backup,
+            next_revision_index=revision_index_backup,
+        )
 
         process_runtime_state_sink.clear()
         process_runtime_state_sink.update(process_state_backup)

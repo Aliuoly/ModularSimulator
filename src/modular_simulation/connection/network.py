@@ -50,6 +50,9 @@ class _QueuedReconfigurationTransaction:
     mutations: tuple[dict[str, object], ...]
 
 
+QueuedReconfigurationTransaction = _QueuedReconfigurationTransaction
+
+
 @dataclass(frozen=True)
 class _NetworkReconfigurationState:
     process_specs: dict[str, _ProcessSpec]
@@ -59,7 +62,7 @@ class _NetworkReconfigurationState:
     next_edge_index: int
     next_reconfiguration_index: int
     next_revision_index: int
-    queued_reconfigurations: list[_QueuedReconfigurationTransaction]
+    queued_reconfigurations: list[QueuedReconfigurationTransaction]
     compiled: CompiledConnectionNetwork | None
 
 
@@ -96,7 +99,7 @@ class ConnectionNetwork:
         self._next_edge_index: int = 1
         self._next_reconfiguration_index: int = 1
         self._next_revision_index: int = 1
-        self._queued_reconfigurations: list[_QueuedReconfigurationTransaction] = []
+        self._queued_reconfigurations: list[QueuedReconfigurationTransaction] = []
         self._compiled: CompiledConnectionNetwork | None = None
 
     def add_process(
@@ -219,6 +222,43 @@ class ConnectionNetwork:
         )
         return self._compiled
 
+    @property
+    def compiled(self) -> CompiledConnectionNetwork | None:
+        return self._compiled
+
+    @property
+    def queued_reconfigurations(self) -> tuple[QueuedReconfigurationTransaction, ...]:
+        return tuple(self._queued_reconfigurations)
+
+    @property
+    def next_edge_index(self) -> int:
+        return self._next_edge_index
+
+    @property
+    def next_reconfiguration_index(self) -> int:
+        return self._next_reconfiguration_index
+
+    @property
+    def next_revision_index(self) -> int:
+        return self._next_revision_index
+
+    def set_reconfiguration_counters(
+        self,
+        *,
+        next_edge_index: int,
+        next_reconfiguration_index: int,
+        next_revision_index: int,
+    ) -> None:
+        self._next_edge_index = next_edge_index
+        self._next_reconfiguration_index = next_reconfiguration_index
+        self._next_revision_index = next_revision_index
+
+    def replace_queued_reconfigurations(
+        self,
+        queued_reconfigurations: Sequence[QueuedReconfigurationTransaction],
+    ) -> None:
+        self._queued_reconfigurations = list(queued_reconfigurations)
+
     def step(self, *, macro_step_time_s: float) -> object:
         if self._runtime_orchestrator is None:
             raise RuntimeError(
@@ -278,7 +318,7 @@ class ConnectionNetwork:
         request_id = f"rq_{self._next_reconfiguration_index:04d}"
         self._next_reconfiguration_index += 1
         self._queued_reconfigurations.append(
-            _QueuedReconfigurationTransaction(
+            QueuedReconfigurationTransaction(
                 request_id=request_id,
                 idempotency_key=idempotency_key,
                 mutations=mutations,
@@ -301,6 +341,48 @@ class ConnectionNetwork:
                 "runtime resume is unavailable: runtime orchestrator not configured for ConnectionNetwork"
             )
         self._runtime_orchestrator.resume_from_snapshot(network=self, snapshot=snapshot)
+
+    def remove_boundary(self, *, boundary_id: object) -> None:
+        self._remove_boundary(boundary_id=boundary_id)
+
+    def add_process_port(
+        self,
+        *,
+        process_id: object,
+        direction: object,
+        port_name: object,
+    ) -> None:
+        self._add_process_port(process_id=process_id, direction=direction, port_name=port_name)
+
+    def remove_process_port(
+        self,
+        *,
+        process_id: object,
+        direction: object,
+        port_name: object,
+    ) -> None:
+        self._remove_process_port(process_id=process_id, direction=direction, port_name=port_name)
+
+    def remove_connection(
+        self,
+        *,
+        edge_id: object | None = None,
+        source: object | None = None,
+        target: object | None = None,
+    ) -> str:
+        return self._remove_connection(edge_id=edge_id, source=source, target=target)
+
+    def rewire_connection(self, *, edge_id: object, source: object, target: object) -> None:
+        self._rewire_connection(edge_id=edge_id, source=source, target=target)
+
+    def capture_reconfiguration_state(self) -> _NetworkReconfigurationState:
+        return self._capture_reconfiguration_state()
+
+    def restore_reconfiguration_state(self, state: _NetworkReconfigurationState) -> None:
+        self._restore_reconfiguration_state(state)
+
+    def drain_reconfiguration_queue(self) -> tuple[QueuedReconfigurationTransaction, ...]:
+        return self._drain_reconfiguration_queue()
 
     def _add_boundary(
         self,
@@ -557,7 +639,7 @@ class ConnectionNetwork:
         self._queued_reconfigurations = list(state.queued_reconfigurations)
         self._compiled = state.compiled
 
-    def _drain_reconfiguration_queue(self) -> tuple[_QueuedReconfigurationTransaction, ...]:
+    def _drain_reconfiguration_queue(self) -> tuple[QueuedReconfigurationTransaction, ...]:
         queue = tuple(self._queued_reconfigurations)
         self._queued_reconfigurations = []
         return queue
@@ -670,4 +752,4 @@ class ConnectionNetwork:
         return port_name.strip()
 
 
-__all__ = ["CompiledConnectionNetwork", "ConnectionNetwork"]
+__all__ = ["CompiledConnectionNetwork", "ConnectionNetwork", "QueuedReconfigurationTransaction"]

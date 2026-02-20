@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Protocol
+from typing import ClassVar, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,9 +12,7 @@ class DensityModel(Protocol):
 class IncompressibleDensityModel(BaseModel):
     density_kg_per_m3: float = Field(gt=0.0, description="Constant fluid density")
 
-    model_config = ConfigDict(  # pyright: ignore[reportUnannotatedClassAttribute]
-        extra="forbid", arbitrary_types_allowed=True
-    )
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     def density(self, *, pressure: float, temperature: float) -> float:
         del pressure, temperature
@@ -27,9 +25,7 @@ class IdealGasDensityModel(BaseModel):
         description="Specific gas constant used in rho = P / (R_specific * T)",
     )
 
-    model_config = ConfigDict(  # pyright: ignore[reportUnannotatedClassAttribute]
-        extra="forbid", arbitrary_types_allowed=True
-    )
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     def density(self, *, pressure: float, temperature: float) -> float:
         if pressure <= 0.0:
@@ -43,9 +39,7 @@ class DensityModelSelection(BaseModel):
     model: Literal["incompressible", "ideal_gas"]
     parameters: dict[str, float] = Field(default_factory=dict)
 
-    model_config = ConfigDict(  # pyright: ignore[reportUnannotatedClassAttribute]
-        extra="forbid", arbitrary_types_allowed=True
-    )
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
 def select_density_model(config: DensityModelSelection) -> DensityModel:

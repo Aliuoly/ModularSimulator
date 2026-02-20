@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 
@@ -14,9 +16,7 @@ class MaterialState(BaseModel):
         description="Material composition as mole fractions ordered by component index",
     )
 
-    model_config = ConfigDict(  # pyright: ignore[reportUnannotatedClassAttribute]
-        extra="forbid", arbitrary_types_allowed=True
-    )
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     @field_validator("mole_fractions")
     @classmethod
@@ -48,6 +48,4 @@ class PortCondition(BaseModel):
         description="Optional macro-step timestamp in seconds",
     )
 
-    model_config = ConfigDict(  # pyright: ignore[reportUnannotatedClassAttribute]
-        extra="forbid", arbitrary_types_allowed=True
-    )
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", arbitrary_types_allowed=True)

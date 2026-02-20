@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pyright: reportMissingImports=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false, reportMissingParameterType=false
+
 import importlib
 from dataclasses import dataclass
 from math import isfinite
@@ -8,9 +10,10 @@ from types import MappingProxyType
 import pytest
 
 hydraulic_element = importlib.import_module("modular_simulation.connection.hydraulic_element")
+hydraulic_compile = importlib.import_module("modular_simulation.connection.hydraulic_compile")
 hydraulic_solver = importlib.import_module("modular_simulation.connection.hydraulic_solver")
 junction = importlib.import_module("modular_simulation.connection.junction")
-process_interface = importlib.import_module("modular_simulation.connection.process_interface")
+network = importlib.import_module("modular_simulation.connection.network")
 state = importlib.import_module("modular_simulation.connection.state")
 transport = importlib.import_module("modular_simulation.connection.transport")
 
@@ -19,18 +22,19 @@ ElementOutputSpec = hydraulic_element.ElementOutputSpec
 ElementParameterSpec = hydraulic_element.ElementParameterSpec
 ElementUnknownSpec = hydraulic_element.ElementUnknownSpec
 HydraulicSystemDefinition = hydraulic_solver.HydraulicSystemDefinition
+HydraulicCompileLifecycle = hydraulic_compile.HydraulicCompileLifecycle
 LagTransportState = transport.LagTransportState
 LinearResidualEquation = hydraulic_solver.LinearResidualEquation
 MaterialState = state.MaterialState
 PipeHydraulicElement = hydraulic_element.PipeHydraulicElement
 PortCondition = state.PortCondition
-ProcessModelAdapter = process_interface.ProcessModelAdapter
+ConnectionNetwork = network.ConnectionNetwork
 assemble_residual_vector = hydraulic_solver.assemble_residual_vector
 smooth_signed_quadratic_flow_term = hydraulic_element.smooth_signed_quadratic_flow_term
 smooth_signed_quadratic_flow_term_derivative = (
     hydraulic_element.smooth_signed_quadratic_flow_term_derivative
 )
-solve_hydraulic_system = hydraulic_solver.solve_hydraulic_system
+solve_compiled_hydraulic_graph = hydraulic_compile.solve_compiled_hydraulic_graph
 update_lag_transport_state = transport.update_lag_transport_state
 mix_junction_state = junction.mix_junction_state
 
@@ -144,6 +148,42 @@ def _build_three_branch_topology_system() -> HydraulicSystemDefinition:
     )
 
 
+def _compile_single_pipe_network(system: HydraulicSystemDefinition):
+    connection_network = ConnectionNetwork(
+        compile_lifecycle=HydraulicCompileLifecycle(),
+        hydraulic_system_builder=lambda topology: system,
+    )
+    connection_network.add_process("pipe", inlet_ports=("inlet",), outlet_ports=("outlet",))
+    connection_network.add_boundary_source("upstream")
+    connection_network.add_boundary_sink("downstream")
+    connection_network.connect("upstream", "pipe.inlet")
+    connection_network.connect("pipe.outlet", "downstream")
+    compiled = connection_network.compile()
+    assert compiled.hydraulic is not None
+    return compiled.hydraulic
+
+
+def _compile_three_branch_network(system: HydraulicSystemDefinition):
+    connection_network = ConnectionNetwork(
+        compile_lifecycle=HydraulicCompileLifecycle(),
+        hydraulic_system_builder=lambda topology: system,
+    )
+    connection_network.add_process(
+        "mixer",
+        inlet_ports=("feed_a", "feed_b"),
+        outlet_ports=("product", "purge"),
+    )
+    connection_network.add_boundary_source("feed_a_boundary")
+    connection_network.add_boundary_source("feed_b_boundary")
+    connection_network.add_boundary_sink("product_boundary")
+    connection_network.connect("feed_a_boundary", "mixer.feed_a")
+    connection_network.connect("feed_b_boundary", "mixer.feed_b")
+    connection_network.connect("mixer.product", "product_boundary")
+    compiled = connection_network.compile()
+    assert compiled.hydraulic is not None
+    return compiled
+
+
 def _run_reversal_sequence() -> tuple[tuple[float, float, float, float, float, bool], ...]:
     state_value = LagTransportState(composition=(0.5, 0.5), temperature=320.0)
     forward_advected = LagTransportState(composition=(0.92, 0.08), temperature=390.0)
@@ -156,10 +196,12 @@ def _run_reversal_sequence() -> tuple[tuple[float, float, float, float, float, b
         upstream_pressure = 120000.0 if step % 2 == 0 else 100000.0
         downstream_pressure = 100000.0 if step % 2 == 0 else 120000.0
 
-        hydraulic_result = solve_hydraulic_system(
-            _single_pipe_system(
-                upstream_pressure=upstream_pressure,
-                downstream_pressure=downstream_pressure,
+        hydraulic_result = solve_compiled_hydraulic_graph(
+            _compile_single_pipe_network(
+                _single_pipe_system(
+                    upstream_pressure=upstream_pressure,
+                    downstream_pressure=downstream_pressure,
+                )
             ),
             warm_start=warm_start,
             tolerance=1.0e-12,
@@ -205,18 +247,12 @@ def _run_reversal_sequence() -> tuple[tuple[float, float, float, float, float, b
     return tuple(trace)
 
 
-def _adapter_with_declared_ports(thermal_process_model) -> ProcessModelAdapter:
-    thermal_process_model._input_streams = {"feed_a": object(), "feed_b": object()}  # pyright: ignore[reportPrivateUsage]
-    thermal_process_model._output_streams = {"product": object()}  # pyright: ignore[reportPrivateUsage]
-    return ProcessModelAdapter(thermal_process_model)
-
-
 def test_causality_contract_preserves_pressure_flow_consistency_without_unilateral_hack() -> None:
     forward_system = _single_pipe_system(upstream_pressure=120000.0, downstream_pressure=100000.0)
     reverse_system = _single_pipe_system(upstream_pressure=100000.0, downstream_pressure=120000.0)
 
-    forward = solve_hydraulic_system(
-        forward_system,
+    forward = solve_compiled_hydraulic_graph(
+        _compile_single_pipe_network(forward_system),
         initial_unknowns=MappingProxyType(
             {
                 "edge_flow": 0.0,
@@ -227,8 +263,8 @@ def test_causality_contract_preserves_pressure_flow_consistency_without_unilater
         tolerance=1.0e-12,
         max_iterations=12,
     )
-    reverse = solve_hydraulic_system(
-        reverse_system,
+    reverse = solve_compiled_hydraulic_graph(
+        _compile_single_pipe_network(reverse_system),
         initial_unknowns=MappingProxyType(
             {
                 "edge_flow": 0.0,
@@ -274,13 +310,14 @@ def test_reversal_sequence_is_bounded_and_deterministic_across_macro_steps() -> 
     assert sign_change_count == len(first_trace) - 1
 
 
-def test_representative_topology_closure_preserves_mass_balance_and_stable_bookkeeping(
-    thermal_process_model,
-) -> None:
+def test_representative_topology_closure_preserves_mass_balance_and_stable_bookkeeping() -> None:
     system = _build_three_branch_topology_system()
-    solved = solve_hydraulic_system(system, tolerance=1.0e-10, max_iterations=20)
-    warm_solved = solve_hydraulic_system(
-        system,
+    compiled = _compile_three_branch_network(system)
+    solved = solve_compiled_hydraulic_graph(
+        compiled.hydraulic, tolerance=1.0e-10, max_iterations=20
+    )
+    warm_solved = solve_compiled_hydraulic_graph(
+        compiled.hydraulic,
         warm_start=solved.solution_vector,
         tolerance=1.0e-10,
         max_iterations=20,
@@ -348,31 +385,27 @@ def test_representative_topology_closure_preserves_mass_balance_and_stable_bookk
     assert mixed.state.mole_fractions[0] == pytest.approx(expected_x0)
     assert mixed.state.mole_fractions[1] == pytest.approx(1.0 - expected_x0)
 
-    adapter = _adapter_with_declared_ports(thermal_process_model)
-    adapter.write_port_conditions(
+    binding = compiled.process_bindings["mixer"]
+    binding.bind_inlets({"feed_a": flow_feed_a, "feed_b": flow_feed_b})
+    binding.bind_outlets(
         {
-            "feed_a": PortCondition(
-                state=mixed.state,
-                through_molar_flow_rate=flow_feed_a,
-                macro_step_time_s=1.0,
-            ),
-            "feed_b": PortCondition(
-                state=mixed.state,
-                through_molar_flow_rate=flow_feed_b,
-                macro_step_time_s=1.0,
-            ),
-            "product": PortCondition(
-                state=mixed.state,
-                through_molar_flow_rate=flow_outlet,
-                macro_step_time_s=1.0,
-            ),
+            "product": {
+                "role": "outlet",
+                "flow": flow_outlet,
+                "composition": mixed.state.mole_fractions,
+            },
+            "purge": {
+                "role": "outlet",
+                "flow": 0.0,
+                "composition": mixed.state.mole_fractions,
+            },
         }
     )
-    mapped = adapter.map_port_conditions_to_balance_terms()
 
-    assert tuple(mapped.keys()) == ("feed_a", "feed_b", "product")
-    assert mapped["feed_a"].inlet_molar_flow_rate == pytest.approx(flow_feed_a)
-    assert mapped["feed_b"].inlet_molar_flow_rate == pytest.approx(flow_feed_b)
-    assert mapped["product"].outlet_molar_flow_rate == pytest.approx(flow_outlet)
-    total_inlet = mapped["feed_a"].inlet_molar_flow_rate + mapped["feed_b"].inlet_molar_flow_rate
-    assert total_inlet == pytest.approx(mapped["product"].outlet_molar_flow_rate)
+    product_binding = binding.get_outlet("product")
+    purge_binding = binding.get_outlet("purge")
+    assert product_binding["outlet_flow"] == pytest.approx(flow_outlet)
+    assert purge_binding["outlet_flow"] == pytest.approx(0.0)
+    total_inlet = flow_feed_a + flow_feed_b
+    total_outlet = product_binding["outlet_flow"] + purge_binding["outlet_flow"]
+    assert total_inlet == pytest.approx(total_outlet)

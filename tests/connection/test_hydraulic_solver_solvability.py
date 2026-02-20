@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+# pyright: reportMissingImports=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false, reportMissingParameterType=false
+
 import importlib
 from types import MappingProxyType
 
 import pytest
 
+hydraulic_compile = importlib.import_module("modular_simulation.connection.hydraulic_compile")
 hydraulic_solver = importlib.import_module("modular_simulation.connection.hydraulic_solver")
+network = importlib.import_module("modular_simulation.connection.network")
 
+ConnectionNetwork = network.ConnectionNetwork
+HydraulicCompileLifecycle = hydraulic_compile.HydraulicCompileLifecycle
 HydraulicSystemDefinition = hydraulic_solver.HydraulicSystemDefinition
 LinearResidualEquation = hydraulic_solver.LinearResidualEquation
-solve_hydraulic_system = hydraulic_solver.solve_hydraulic_system
+solve_compiled_hydraulic_graph = hydraulic_compile.solve_compiled_hydraulic_graph
 
 
 def _linear_equation(
@@ -25,6 +31,25 @@ def _linear_equation(
     )
 
 
+def _compile_hydraulic_via_network(system: HydraulicSystemDefinition):
+    connection_network = ConnectionNetwork(
+        compile_lifecycle=HydraulicCompileLifecycle(),
+        hydraulic_system_builder=lambda topology: system,
+    )
+    connection_network.add_process(
+        "solver_process",
+        inlet_ports=("feed",),
+        outlet_ports=("product",),
+    )
+    connection_network.add_boundary_source("source")
+    connection_network.add_boundary_sink("sink")
+    connection_network.connect("source", "solver_process.feed")
+    connection_network.connect("solver_process.product", "sink")
+    compiled = connection_network.compile()
+    assert compiled.hydraulic is not None
+    return compiled.hydraulic
+
+
 def test_missing_pressure_reference_in_connected_component_fails_fast() -> None:
     system = HydraulicSystemDefinition(
         equations=(),
@@ -35,7 +60,7 @@ def test_missing_pressure_reference_in_connected_component_fails_fast() -> None:
     )
 
     with pytest.raises(ValueError) as error:
-        solve_hydraulic_system(system)
+        _ = _compile_hydraulic_via_network(system)
 
     message = str(error.value)
     assert "missing pressure reference" in message
@@ -54,7 +79,7 @@ def test_disconnected_component_without_reference_reports_component_deterministi
     )
 
     with pytest.raises(ValueError) as error:
-        solve_hydraulic_system(system)
+        _ = _compile_hydraulic_via_network(system)
 
     message = str(error.value)
     assert "missing pressure reference" in message
@@ -73,7 +98,11 @@ def test_disconnected_components_with_references_solve_deterministically() -> No
         ),
     )
 
-    result = solve_hydraulic_system(system, tolerance=1.0e-12, max_iterations=10)
+    result = solve_compiled_hydraulic_graph(
+        _compile_hydraulic_via_network(system),
+        tolerance=1.0e-12,
+        max_iterations=10,
+    )
 
     assert result.converged
     assert result.unknowns["pressure_a"] == pytest.approx(5.0)
@@ -93,7 +122,7 @@ def test_connected_component_dof_mismatch_is_detected_before_newton() -> None:
     )
 
     with pytest.raises(ValueError) as error:
-        solve_hydraulic_system(system)
+        _ = _compile_hydraulic_via_network(system)
 
     message = str(error.value)
     assert "DOF mismatch" in message
@@ -109,8 +138,10 @@ def test_singular_jacobian_fails_with_actionable_message() -> None:
         ),
     )
 
+    compiled = _compile_hydraulic_via_network(system)
+
     with pytest.raises(ValueError) as error:
-        solve_hydraulic_system(system)
+        _ = solve_compiled_hydraulic_graph(compiled)
 
     message = str(error.value)
     assert "Jacobian is singular or underdetermined" in message

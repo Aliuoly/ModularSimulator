@@ -1,25 +1,68 @@
 from __future__ import annotations
 
-import importlib
+# pyright: reportMissingImports=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false
+
+from typing import cast
 
 import numpy as np
 import pytest
 
-connection_layer = importlib.import_module("modular_simulation.connection.connection_layer")
-hydraulic_solver = importlib.import_module("modular_simulation.connection.hydraulic_solver")
-junction = importlib.import_module("modular_simulation.connection.junction")
-state = importlib.import_module("modular_simulation.connection.state")
-transport = importlib.import_module("modular_simulation.connection.transport")
+from modular_simulation.connection.connection_layer import (
+    MACRO_COUPLING_SEQUENCE,
+    TransportAndMixingUpdate,
+)
+from modular_simulation.connection.hydraulic_compile import HydraulicCompileLifecycle
+from modular_simulation.connection.hydraulic_solver import (
+    HydraulicSolveResult,
+    HydraulicSystemDefinition,
+    LinearResidualEquation,
+)
+from modular_simulation.connection.junction import JunctionMixingResult
+from modular_simulation.connection.network import ConnectionNetwork
+from modular_simulation.connection.runtime import (
+    ConnectionRuntimeOrchestrator,
+    ConnectionRuntimeStepResult,
+)
+from modular_simulation.connection.state import MaterialState, PortCondition
+from modular_simulation.connection.transport import LagTransportState, LagTransportUpdateResult
 
-HydraulicSolveResult = hydraulic_solver.HydraulicSolveResult
-JunctionMixingResult = junction.JunctionMixingResult
-LagTransportState = transport.LagTransportState
-LagTransportUpdateResult = transport.LagTransportUpdateResult
-MACRO_COUPLING_SEQUENCE = connection_layer.MACRO_COUPLING_SEQUENCE
-MaterialState = state.MaterialState
-PortCondition = state.PortCondition
-TransportAndMixingUpdate = connection_layer.TransportAndMixingUpdate
-run_macro_coupling_step = connection_layer.run_macro_coupling_step
+
+def _linear_equation(
+    residual_name: str,
+    coefficients: dict[str, float],
+    *,
+    constant: float = 0.0,
+) -> LinearResidualEquation:
+    return LinearResidualEquation(
+        residual_name=residual_name,
+        coefficients=coefficients,
+        constant=constant,
+    )
+
+
+def _valid_system() -> HydraulicSystemDefinition:
+    return HydraulicSystemDefinition(
+        equations=(),
+        linear_residual_equations=(
+            _linear_equation("ref", {"pressure": 1.0}, constant=-5.0),
+            _linear_equation("balance", {"pressure": 1.0, "flow": -1.0}),
+        ),
+    )
+
+
+def _network(runtime: ConnectionRuntimeOrchestrator) -> ConnectionNetwork:
+    network = ConnectionNetwork(
+        compile_lifecycle=HydraulicCompileLifecycle(),
+        hydraulic_system_builder=lambda topology: _valid_system(),
+        runtime_orchestrator=runtime,
+    )
+    network.add_process("reactor", inlet_ports=("feed",), outlet_ports=("product",))
+    network.add_boundary_source("feed_boundary")
+    network.add_boundary_sink("product_boundary")
+    network.connect("feed_boundary", "reactor.feed")
+    network.connect("reactor.product", "product_boundary")
+    _ = network.compile()
+    return network
 
 
 def _hydraulic_result(*, edge_flow: float, node_pressure: float = 101325.0) -> HydraulicSolveResult:
@@ -66,20 +109,28 @@ def _material_state(
 
 def test_macro_sequence_ordering_and_outputs_are_deterministic() -> None:
     call_order: list[str] = []
+    boundary_outputs: list[dict[str, PortCondition]] = []
 
-    def hydraulic_solve_step(*, macro_step_time_s: float) -> HydraulicSolveResult:
+    def hydraulic_solve_step(
+        *,
+        network: ConnectionNetwork,
+        macro_step_time_s: float,
+    ) -> HydraulicSolveResult:
+        assert network._compiled is not None
         assert macro_step_time_s == pytest.approx(12.0)
-        call_order.append("hydraulics")
+        call_order.append("hydraulics_solve")
         return _hydraulic_result(edge_flow=0.75)
 
-    def transport_update_step(
+    def transport_and_mixing_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         macro_step_time_s: float,
     ) -> TransportAndMixingUpdate:
+        assert network._compiled is not None
         assert macro_step_time_s == pytest.approx(12.0)
         assert hydraulic_result.unknowns["edge_flow"] == pytest.approx(0.75)
-        call_order.append("transport")
+        call_order.append("transport_update")
         return TransportAndMixingUpdate(
             transport_results={
                 "edge_b": _transport_update_result(
@@ -97,15 +148,17 @@ def test_macro_sequence_ordering_and_outputs_are_deterministic() -> None:
 
     def boundary_propagation_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         transport_and_mixing_update: TransportAndMixingUpdate,
         macro_step_time_s: float,
     ) -> dict[str, PortCondition]:
+        assert network._compiled is not None
         assert macro_step_time_s == pytest.approx(12.0)
         assert hydraulic_result.unknowns["edge_flow"] == pytest.approx(0.75)
         assert tuple(transport_and_mixing_update.transport_results.keys()) == ("edge_b", "edge_a")
-        call_order.append("boundary")
-        return {
+        call_order.append("boundary_state_propagation")
+        output = {
             "reactor_inlet": PortCondition(
                 state=_material_state(
                     pressure=120000.0, temperature=315.0, mole_fractions=(0.7, 0.3)
@@ -114,49 +167,67 @@ def test_macro_sequence_ordering_and_outputs_are_deterministic() -> None:
                 macro_step_time_s=macro_step_time_s,
             )
         }
+        boundary_outputs.append(output)
+        return output
 
-    result_a = run_macro_coupling_step(
-        macro_step_time_s=12.0,
-        macro_step_index=5,
+    runtime = ConnectionRuntimeOrchestrator(
         hydraulic_solve_step=hydraulic_solve_step,
-        transport_update_step=transport_update_step,
+        transport_and_mixing_step=transport_and_mixing_step,
         boundary_propagation_step=boundary_propagation_step,
     )
-    result_b = run_macro_coupling_step(
-        macro_step_time_s=12.0,
-        macro_step_index=5,
-        hydraulic_solve_step=hydraulic_solve_step,
-        transport_update_step=transport_update_step,
-        boundary_propagation_step=boundary_propagation_step,
-    )
+    network = _network(runtime)
+
+    result_a = cast(ConnectionRuntimeStepResult, network.step(macro_step_time_s=12.0))
+    result_b = cast(ConnectionRuntimeStepResult, network.step(macro_step_time_s=12.0))
 
     assert call_order == [
-        "hydraulics",
-        "transport",
-        "boundary",
-        "hydraulics",
-        "transport",
-        "boundary",
+        "hydraulics_solve",
+        "transport_update",
+        "boundary_state_propagation",
+        "hydraulics_solve",
+        "transport_update",
+        "boundary_state_propagation",
     ]
+    assert result_a.bookkeeping.macro_step_index == 1
+    assert result_b.bookkeeping.macro_step_index == 2
     assert result_a.bookkeeping.executed_sequence == MACRO_COUPLING_SEQUENCE
-    assert result_a.bookkeeping == result_b.bookkeeping
-    assert result_a.port_conditions == result_b.port_conditions
+    assert result_a.bookkeeping.executed_sequence == result_b.bookkeeping.executed_sequence
+    assert result_a.bookkeeping.updated_port_keys == result_b.bookkeeping.updated_port_keys
+    assert (
+        result_a.bookkeeping.transport_fallback_keys == result_b.bookkeeping.transport_fallback_keys
+    )
+    assert (
+        result_a.bookkeeping.junction_fallback_keys == result_b.bookkeeping.junction_fallback_keys
+    )
+    assert result_a.bookkeeping.used_fallback == result_b.bookkeeping.used_fallback
+    assert boundary_outputs[0] == boundary_outputs[1]
 
 
 def test_macro_step_uses_current_hydraulics_result_for_transport_and_boundaries() -> None:
     edge_flows = iter((0.20, 0.85))
+    transport_update_fractions: list[float] = []
+    boundary_flow_rates: list[float] = []
+    boundary_temperatures: list[float] = []
 
-    def hydraulic_solve_step(*, macro_step_time_s: float) -> HydraulicSolveResult:
+    def hydraulic_solve_step(
+        *,
+        network: ConnectionNetwork,
+        macro_step_time_s: float,
+    ) -> HydraulicSolveResult:
+        del network
         del macro_step_time_s
         return _hydraulic_result(edge_flow=next(edge_flows))
 
-    def transport_update_step(
+    def transport_and_mixing_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         macro_step_time_s: float,
     ) -> TransportAndMixingUpdate:
+        del network
         del macro_step_time_s
         edge_flow = hydraulic_result.unknowns["edge_flow"]
+        transport_update_fractions.append(edge_flow)
         return TransportAndMixingUpdate(
             transport_results={
                 "edge_main": _transport_update_result(
@@ -171,13 +242,21 @@ def test_macro_step_uses_current_hydraulics_result_for_transport_and_boundaries(
 
     def boundary_propagation_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         transport_and_mixing_update: TransportAndMixingUpdate,
         macro_step_time_s: float,
     ) -> dict[str, PortCondition]:
+        del network
         del macro_step_time_s
         edge_flow = hydraulic_result.unknowns["edge_flow"]
-        edge_state = transport_and_mixing_update.transport_results["edge_main"].state
+        edge_update = cast(
+            LagTransportUpdateResult,
+            transport_and_mixing_update.transport_results["edge_main"],
+        )
+        edge_state = edge_update.state
+        boundary_flow_rates.append(edge_flow)
+        boundary_temperatures.append(edge_state.temperature)
         return {
             "feed": PortCondition(
                 state=_material_state(
@@ -189,42 +268,40 @@ def test_macro_step_uses_current_hydraulics_result_for_transport_and_boundaries(
             )
         }
 
-    first = run_macro_coupling_step(
-        macro_step_time_s=0.1,
+    runtime = ConnectionRuntimeOrchestrator(
         hydraulic_solve_step=hydraulic_solve_step,
-        transport_update_step=transport_update_step,
+        transport_and_mixing_step=transport_and_mixing_step,
         boundary_propagation_step=boundary_propagation_step,
     )
-    second = run_macro_coupling_step(
-        macro_step_time_s=0.2,
-        hydraulic_solve_step=hydraulic_solve_step,
-        transport_update_step=transport_update_step,
-        boundary_propagation_step=boundary_propagation_step,
-    )
+    network = _network(runtime)
 
-    assert first.transport_and_mixing_update.transport_results[
-        "edge_main"
-    ].update_fraction == pytest.approx(0.20)
-    assert first.port_conditions["feed"].through_molar_flow_rate == pytest.approx(0.20)
-    assert first.port_conditions["feed"].state.temperature == pytest.approx(310.0)
+    first = cast(ConnectionRuntimeStepResult, network.step(macro_step_time_s=0.1))
+    second = cast(ConnectionRuntimeStepResult, network.step(macro_step_time_s=0.2))
 
-    assert second.transport_and_mixing_update.transport_results[
-        "edge_main"
-    ].update_fraction == pytest.approx(0.85)
-    assert second.port_conditions["feed"].through_molar_flow_rate == pytest.approx(0.85)
-    assert second.port_conditions["feed"].state.temperature == pytest.approx(342.5)
+    assert first.macro_step_index == 1
+    assert second.macro_step_index == 2
+    assert transport_update_fractions == pytest.approx([0.20, 0.85])
+    assert boundary_flow_rates == pytest.approx([0.20, 0.85])
+    assert boundary_temperatures == pytest.approx([310.0, 342.5])
 
 
 def test_macro_step_bookkeeping_marks_transport_and_junction_fallbacks() -> None:
-    def hydraulic_solve_step(*, macro_step_time_s: float) -> HydraulicSolveResult:
+    def hydraulic_solve_step(
+        *,
+        network: ConnectionNetwork,
+        macro_step_time_s: float,
+    ) -> HydraulicSolveResult:
+        del network
         del macro_step_time_s
         return _hydraulic_result(edge_flow=0.0)
 
-    def transport_update_step(
+    def transport_and_mixing_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         macro_step_time_s: float,
     ) -> TransportAndMixingUpdate:
+        del network
         del hydraulic_result, macro_step_time_s
         return TransportAndMixingUpdate(
             transport_results={
@@ -251,10 +328,12 @@ def test_macro_step_bookkeeping_marks_transport_and_junction_fallbacks() -> None
 
     def boundary_propagation_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         transport_and_mixing_update: TransportAndMixingUpdate,
         macro_step_time_s: float,
     ) -> dict[str, PortCondition]:
+        del network
         del hydraulic_result, transport_and_mixing_update, macro_step_time_s
         return {
             "recycle": PortCondition(
@@ -265,12 +344,14 @@ def test_macro_step_bookkeeping_marks_transport_and_junction_fallbacks() -> None
             )
         }
 
-    result = run_macro_coupling_step(
-        macro_step_time_s=5.0,
+    runtime = ConnectionRuntimeOrchestrator(
         hydraulic_solve_step=hydraulic_solve_step,
-        transport_update_step=transport_update_step,
+        transport_and_mixing_step=transport_and_mixing_step,
         boundary_propagation_step=boundary_propagation_step,
     )
+    network = _network(runtime)
+
+    result = cast(ConnectionRuntimeStepResult, network.step(macro_step_time_s=5.0))
 
     assert result.bookkeeping.executed_sequence == MACRO_COUPLING_SEQUENCE
     assert result.bookkeeping.transport_fallback_keys == ("edge_zero",)

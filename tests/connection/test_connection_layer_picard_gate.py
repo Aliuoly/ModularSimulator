@@ -1,23 +1,68 @@
 from __future__ import annotations
 
-import importlib
+# pyright: reportMissingImports=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false
+
+from typing import cast
 
 import numpy as np
 import pytest
 
-connection_layer = importlib.import_module("modular_simulation.connection.connection_layer")
-hydraulic_solver = importlib.import_module("modular_simulation.connection.hydraulic_solver")
-state = importlib.import_module("modular_simulation.connection.state")
-transport = importlib.import_module("modular_simulation.connection.transport")
+from modular_simulation.connection.connection_layer import (
+    MACRO_COUPLING_SEQUENCE,
+    PicardIterationGateConfig,
+    TransportAndMixingUpdate,
+)
+from modular_simulation.connection.hydraulic_compile import HydraulicCompileLifecycle
+from modular_simulation.connection.hydraulic_solver import (
+    HydraulicSolveResult,
+    HydraulicSystemDefinition,
+    LinearResidualEquation,
+)
+from modular_simulation.connection.network import ConnectionNetwork
+from modular_simulation.connection.runtime import (
+    ConnectionRuntimeOrchestrator,
+    ConnectionRuntimeStepResult,
+)
+from modular_simulation.connection.state import MaterialState, PortCondition
+from modular_simulation.connection.transport import LagTransportState, LagTransportUpdateResult
 
-HydraulicSolveResult = hydraulic_solver.HydraulicSolveResult
-LagTransportState = transport.LagTransportState
-LagTransportUpdateResult = transport.LagTransportUpdateResult
-MaterialState = state.MaterialState
-PicardIterationGateConfig = connection_layer.PicardIterationGateConfig
-PortCondition = state.PortCondition
-TransportAndMixingUpdate = connection_layer.TransportAndMixingUpdate
-run_macro_coupling_step = connection_layer.run_macro_coupling_step
+
+def _linear_equation(
+    residual_name: str,
+    coefficients: dict[str, float],
+    *,
+    constant: float = 0.0,
+) -> LinearResidualEquation:
+    return LinearResidualEquation(
+        residual_name=residual_name,
+        coefficients=coefficients,
+        constant=constant,
+    )
+
+
+def _valid_system() -> HydraulicSystemDefinition:
+    return HydraulicSystemDefinition(
+        equations=(),
+        linear_residual_equations=(
+            _linear_equation("ref", {"pressure": 1.0}, constant=-5.0),
+            _linear_equation("balance", {"pressure": 1.0, "flow": -1.0}),
+        ),
+    )
+
+
+def _network(runtime: ConnectionRuntimeOrchestrator) -> ConnectionNetwork:
+    network = ConnectionNetwork(
+        compile_lifecycle=HydraulicCompileLifecycle(),
+        hydraulic_system_builder=lambda topology: _valid_system(),
+        runtime_orchestrator=runtime,
+    )
+    network.add_process("reactor", inlet_ports=("feed",), outlet_ports=("product",))
+    network.add_boundary_source("feed_boundary")
+    network.add_boundary_sink("product_boundary")
+    network.connect("feed_boundary", "reactor.feed")
+    network.connect("reactor.product", "product_boundary")
+    _ = network.compile()
+    return network
 
 
 def _hydraulic_result(*, edge_flow: float, residual_norm: float) -> HydraulicSolveResult:
@@ -60,34 +105,39 @@ def _port_condition(*, through_molar_flow_rate: float) -> PortCondition:
 def test_gate_off_for_weak_coupling_keeps_single_pass() -> None:
     call_counts = {"hydraulics": 0, "transport": 0, "boundary": 0}
 
-    def hydraulic_solve_step(*, macro_step_time_s: float) -> HydraulicSolveResult:
-        del macro_step_time_s
+    def hydraulic_solve_step(
+        *,
+        network: ConnectionNetwork,
+        macro_step_time_s: float,
+    ) -> HydraulicSolveResult:
+        del network, macro_step_time_s
         call_counts["hydraulics"] += 1
         return _hydraulic_result(edge_flow=0.25, residual_norm=1.0e-9)
 
-    def transport_update_step(
+    def transport_and_mixing_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         macro_step_time_s: float,
     ) -> TransportAndMixingUpdate:
-        del hydraulic_result, macro_step_time_s
+        del network, hydraulic_result, macro_step_time_s
         call_counts["transport"] += 1
         return _transport_update()
 
     def boundary_propagation_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         transport_and_mixing_update: TransportAndMixingUpdate,
         macro_step_time_s: float,
     ) -> dict[str, PortCondition]:
-        del hydraulic_result, transport_and_mixing_update, macro_step_time_s
+        del network, hydraulic_result, transport_and_mixing_update, macro_step_time_s
         call_counts["boundary"] += 1
         return {"inlet": _port_condition(through_molar_flow_rate=0.25)}
 
-    result = run_macro_coupling_step(
-        macro_step_time_s=1.0,
+    runtime = ConnectionRuntimeOrchestrator(
         hydraulic_solve_step=hydraulic_solve_step,
-        transport_update_step=transport_update_step,
+        transport_and_mixing_step=transport_and_mixing_step,
         boundary_propagation_step=boundary_propagation_step,
         picard_gate_config=PicardIterationGateConfig(
             enabled=True,
@@ -96,6 +146,9 @@ def test_gate_off_for_weak_coupling_keeps_single_pass() -> None:
             tolerance=1.0e-12,
         ),
     )
+    network = _network(runtime)
+
+    result = cast(ConnectionRuntimeStepResult, network.step(macro_step_time_s=1.0))
 
     assert call_counts == {"hydraulics": 1, "transport": 1, "boundary": 1}
     assert not result.bookkeeping.picard_gate_enabled
@@ -105,36 +158,42 @@ def test_gate_off_for_weak_coupling_keeps_single_pass() -> None:
 
 
 def test_gate_on_for_strong_coupling_iterates_until_tolerance() -> None:
-    call_count = 0
+    call_counts = {"hydraulics": 0, "transport": 0, "boundary": 0}
     boundary_flows = iter((1.0, 0.40, 0.10, 0.1000000001))
 
-    def hydraulic_solve_step(*, macro_step_time_s: float) -> HydraulicSolveResult:
-        nonlocal call_count
-        del macro_step_time_s
-        call_count += 1
+    def hydraulic_solve_step(
+        *,
+        network: ConnectionNetwork,
+        macro_step_time_s: float,
+    ) -> HydraulicSolveResult:
+        del network, macro_step_time_s
+        call_counts["hydraulics"] += 1
         return _hydraulic_result(edge_flow=1.0, residual_norm=5.0)
 
-    def transport_update_step(
+    def transport_and_mixing_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         macro_step_time_s: float,
     ) -> TransportAndMixingUpdate:
-        del hydraulic_result, macro_step_time_s
+        del network, hydraulic_result, macro_step_time_s
+        call_counts["transport"] += 1
         return _transport_update()
 
     def boundary_propagation_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         transport_and_mixing_update: TransportAndMixingUpdate,
         macro_step_time_s: float,
     ) -> dict[str, PortCondition]:
-        del hydraulic_result, transport_and_mixing_update, macro_step_time_s
+        del network, hydraulic_result, transport_and_mixing_update, macro_step_time_s
+        call_counts["boundary"] += 1
         return {"inlet": _port_condition(through_molar_flow_rate=next(boundary_flows))}
 
-    result = run_macro_coupling_step(
-        macro_step_time_s=2.0,
+    runtime = ConnectionRuntimeOrchestrator(
         hydraulic_solve_step=hydraulic_solve_step,
-        transport_update_step=transport_update_step,
+        transport_and_mixing_step=transport_and_mixing_step,
         boundary_propagation_step=boundary_propagation_step,
         picard_gate_config=PicardIterationGateConfig(
             enabled=True,
@@ -143,45 +202,55 @@ def test_gate_on_for_strong_coupling_iterates_until_tolerance() -> None:
             tolerance=1.0e-6,
         ),
     )
+    network = _network(runtime)
 
-    assert call_count == 4
+    result = cast(ConnectionRuntimeStepResult, network.step(macro_step_time_s=2.0))
+
+    assert call_counts == {"hydraulics": 4, "transport": 4, "boundary": 4}
     assert result.bookkeeping.picard_gate_enabled
     assert result.bookkeeping.picard_iterations_used == 3
     assert result.bookkeeping.picard_converged
     assert result.bookkeeping.picard_last_residual == pytest.approx(1.0e-10)
+    assert result.bookkeeping.executed_sequence == MACRO_COUPLING_SEQUENCE
 
 
 def test_gate_stops_at_max_iterations_when_tolerance_not_reached() -> None:
-    call_count = 0
+    call_counts = {"hydraulics": 0, "transport": 0, "boundary": 0}
     boundary_flows = iter((1.0, 0.80, 0.70, 0.60))
 
-    def hydraulic_solve_step(*, macro_step_time_s: float) -> HydraulicSolveResult:
-        nonlocal call_count
-        del macro_step_time_s
-        call_count += 1
+    def hydraulic_solve_step(
+        *,
+        network: ConnectionNetwork,
+        macro_step_time_s: float,
+    ) -> HydraulicSolveResult:
+        del network, macro_step_time_s
+        call_counts["hydraulics"] += 1
         return _hydraulic_result(edge_flow=1.0, residual_norm=10.0)
 
-    def transport_update_step(
+    def transport_and_mixing_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         macro_step_time_s: float,
     ) -> TransportAndMixingUpdate:
-        del hydraulic_result, macro_step_time_s
+        del network, hydraulic_result, macro_step_time_s
+        call_counts["transport"] += 1
         return _transport_update()
 
     def boundary_propagation_step(
         *,
+        network: ConnectionNetwork,
         hydraulic_result: HydraulicSolveResult,
         transport_and_mixing_update: TransportAndMixingUpdate,
         macro_step_time_s: float,
     ) -> dict[str, PortCondition]:
-        del hydraulic_result, transport_and_mixing_update, macro_step_time_s
+        del network, hydraulic_result, transport_and_mixing_update, macro_step_time_s
+        call_counts["boundary"] += 1
         return {"inlet": _port_condition(through_molar_flow_rate=next(boundary_flows))}
 
-    result = run_macro_coupling_step(
-        macro_step_time_s=3.0,
+    runtime = ConnectionRuntimeOrchestrator(
         hydraulic_solve_step=hydraulic_solve_step,
-        transport_update_step=transport_update_step,
+        transport_and_mixing_step=transport_and_mixing_step,
         boundary_propagation_step=boundary_propagation_step,
         picard_gate_config=PicardIterationGateConfig(
             enabled=True,
@@ -190,8 +259,11 @@ def test_gate_stops_at_max_iterations_when_tolerance_not_reached() -> None:
             tolerance=1.0e-12,
         ),
     )
+    network = _network(runtime)
 
-    assert call_count == 4
+    result = cast(ConnectionRuntimeStepResult, network.step(macro_step_time_s=3.0))
+
+    assert call_counts == {"hydraulics": 4, "transport": 4, "boundary": 4}
     assert result.bookkeeping.picard_gate_enabled
     assert result.bookkeeping.picard_iterations_used == 3
     assert not result.bookkeeping.picard_converged
@@ -243,4 +315,4 @@ def test_invalid_picard_gate_config_raises_value_error(
     kwargs: dict[str, object], message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        PicardIterationGateConfig(**kwargs)
+        _ = PicardIterationGateConfig(**kwargs)  # pyright: ignore[reportArgumentType]

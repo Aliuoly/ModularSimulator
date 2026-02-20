@@ -3,12 +3,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import isfinite
-from typing import Any, Protocol
+from typing import Protocol, SupportsFloat
 
-HydraulicSolveResult = Any
-JunctionMixingResult = Any
-PortCondition = Any
-LagTransportUpdateResult = Any
+from modular_simulation.connection.hydraulic_solver import HydraulicSolveResult
+from modular_simulation.connection.junction import JunctionMixingResult
+from modular_simulation.connection.state import PortCondition
+from modular_simulation.connection.transport import LagTransportUpdateResult
+
 
 MACRO_COUPLING_SEQUENCE: tuple[str, str, str] = (
     "hydraulics_solve",
@@ -198,11 +199,7 @@ def run_macro_coupling_step(
 
 
 def _extract_gate_residual(hydraulic_result: HydraulicSolveResult) -> float:
-    residual_norm = getattr(hydraulic_result, "residual_norm", 0.0)
-    try:
-        residual = float(residual_norm)
-    except (TypeError, ValueError):
-        return 0.0
+    residual = _as_finite_float(hydraulic_result.residual_norm)
     if not isfinite(residual) or residual < 0.0:
         return 0.0
     return residual
@@ -225,32 +222,27 @@ def _compute_coupling_residual(
 
 
 def _port_condition_delta(previous: PortCondition, current: PortCondition) -> float:
-    previous_flow = _as_finite_float(getattr(previous, "through_molar_flow_rate", 0.0))
-    current_flow = _as_finite_float(getattr(current, "through_molar_flow_rate", 0.0))
+    previous_flow = _as_finite_float(previous.through_molar_flow_rate)
+    current_flow = _as_finite_float(current.through_molar_flow_rate)
     residual = abs(current_flow - previous_flow)
 
-    previous_state = getattr(previous, "state", None)
-    current_state = getattr(current, "state", None)
-    if previous_state is None or current_state is None:
-        return residual
+    previous_state = previous.state
+    current_state = current.state
 
     residual = max(
         residual,
-        abs(
-            _as_finite_float(getattr(current_state, "pressure", 0.0))
-            - _as_finite_float(getattr(previous_state, "pressure", 0.0))
-        ),
+        abs(_as_finite_float(current_state.pressure) - _as_finite_float(previous_state.pressure)),
     )
     residual = max(
         residual,
         abs(
-            _as_finite_float(getattr(current_state, "temperature", 0.0))
-            - _as_finite_float(getattr(previous_state, "temperature", 0.0))
+            _as_finite_float(current_state.temperature)
+            - _as_finite_float(previous_state.temperature)
         ),
     )
 
-    previous_comp = getattr(previous_state, "mole_fractions", ())
-    current_comp = getattr(current_state, "mole_fractions", ())
+    previous_comp = previous_state.mole_fractions
+    current_comp = current_state.mole_fractions
     if len(previous_comp) != len(current_comp):
         return float("inf")
     for previous_frac, current_frac in zip(previous_comp, current_comp, strict=True):
@@ -260,10 +252,15 @@ def _port_condition_delta(previous: PortCondition, current: PortCondition) -> fl
     return residual
 
 
-def _as_finite_float(value: Any) -> float:
-    try:
+def _as_finite_float(value: object) -> float:
+    if isinstance(value, SupportsFloat):
         scalar = float(value)
-    except (TypeError, ValueError):
+    elif isinstance(value, (str, bytes, bytearray)):
+        try:
+            scalar = float(value)
+        except ValueError:
+            return 0.0
+    else:
         return 0.0
     if not isfinite(scalar):
         return 0.0

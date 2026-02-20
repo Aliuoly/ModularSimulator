@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Mapping, Sequence
-from typing import Protocol, cast
+from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -56,16 +56,22 @@ class ElementEquation:
         actual_unknowns = set(self.unknown_name_map.keys())
         if actual_unknowns != expected_unknowns:
             raise ValueError(
-                f"equation {self.name!r} unknown mapping keys must match {sorted(expected_unknowns)!r}, "
-                f"got {sorted(actual_unknowns)!r}"
+                "equation {!r} unknown mapping keys must match {!r}, got {!r}".format(
+                    self.name,
+                    sorted(expected_unknowns),
+                    sorted(actual_unknowns),
+                )
             )
 
         expected_residuals = set(self.element.output_spec.residual_names)
         actual_residuals = set(self.residual_name_map.keys())
         if actual_residuals != expected_residuals:
             raise ValueError(
-                f"equation {self.name!r} residual mapping keys must match {sorted(expected_residuals)!r}, "
-                f"got {sorted(actual_residuals)!r}"
+                "equation {!r} residual mapping keys must match {!r}, got {!r}".format(
+                    self.name,
+                    sorted(expected_residuals),
+                    sorted(actual_residuals),
+                )
             )
 
 
@@ -277,7 +283,7 @@ def _connected_components(
     adjacency: dict[str, set[str]] = {}
 
     def _add_node(node: str) -> None:
-        adjacency.setdefault(node, set())
+        _ = adjacency.setdefault(node, set())
 
     def _connect(lhs: str, rhs: str) -> None:
         _add_node(lhs)
@@ -357,9 +363,11 @@ def _validate_solvability(
     ):
         if len(component_unknowns) != len(component_residuals):
             raise ValueError(
-                "hydraulic DOF mismatch in connected component "
-                f"{component_number}: {len(component_unknowns)} unknowns vs {len(component_residuals)} residuals; "
-                "make each connected component square with independent equations"
+                "hydraulic DOF mismatch in connected component {}: {} unknowns vs {} residuals; make each connected component square with independent equations".format(
+                    component_number,
+                    len(component_unknowns),
+                    len(component_residuals),
+                )
             )
 
         pressure_unknowns = tuple(
@@ -370,9 +378,10 @@ def _validate_solvability(
 
         if not any(name in pressure_references for name in pressure_unknowns):
             raise ValueError(
-                "missing pressure reference in connected component "
-                f"{component_number}; pressure unknowns={list(pressure_unknowns)!r}. "
-                "Add a linear reference equation like pressure_node = constant."
+                "missing pressure reference in connected component {}; pressure unknowns={!r}. Add a linear reference equation like pressure_node = constant.".format(
+                    component_number,
+                    list(pressure_unknowns),
+                )
             )
 
 
@@ -383,8 +392,10 @@ def _validate_jacobian_rank(
     expected_rank = int(jacobian_dense.shape[0])
     if rank < expected_rank:
         raise ValueError(
-            "hydraulic Jacobian is singular or underdetermined "
-            f"(rank {rank} < {expected_rank}); check connected-component DOF and pressure references"
+            "hydraulic Jacobian is singular or underdetermined (rank {} < {}); check connected-component DOF and pressure references".format(
+                rank,
+                expected_rank,
+            )
         )
 
 
@@ -442,7 +453,7 @@ def solve_hydraulic_system(
             converged=True,
             iterations=0,
             residual_norm=residual_norm,
-            solution_vector=cast(NDArray[np.float64], np.asarray(x, dtype=np.float64).copy()),
+            solution_vector=np.asarray(x, dtype=np.float64).copy(),
             unknowns=unknowns,
             unknown_index_map=unknown_index_map,
             residual_index_map=residual_index_map,
@@ -458,22 +469,16 @@ def solve_hydraulic_system(
         rhs = -residual_vector
 
         try:
-            newton_step = cast(
-                NDArray[np.float64],
-                np.asarray(np.linalg.solve(jacobian_dense, rhs), dtype=np.float64),
-            )
+            newton_step = np.asarray(np.linalg.solve(jacobian_dense, rhs), dtype=np.float64)
         except np.linalg.LinAlgError as exc:
             raise ValueError(
-                "hydraulic Jacobian is singular while computing Newton step; "
-                "check component pressure references and independent residual equations"
+                "hydraulic Jacobian is singular while computing Newton step; check component pressure references and independent residual equations"
             ) from exc
 
         accepted = False
         damping = 1.0
         while damping >= min_damping:
-            candidate = cast(
-                NDArray[np.float64], np.asarray(x + damping * newton_step, dtype=np.float64)
-            )
+            candidate = np.asarray(x + damping * newton_step, dtype=np.float64)
             candidate_residual, _, _ = assemble_residual_vector(system, candidate)
             candidate_norm = _residual_norm(candidate_residual)
             if candidate_norm < residual_norm:
@@ -485,9 +490,7 @@ def solve_hydraulic_system(
             damping *= 0.5
 
         if not accepted:
-            x = cast(
-                NDArray[np.float64], np.asarray(x + min_damping * newton_step, dtype=np.float64)
-            )
+            x = np.asarray(x + min_damping * newton_step, dtype=np.float64)
             residual_vector, _, _ = assemble_residual_vector(system, x)
             residual_norm = _residual_norm(residual_vector)
 
@@ -497,7 +500,7 @@ def solve_hydraulic_system(
                 converged=True,
                 iterations=iteration,
                 residual_norm=residual_norm,
-                solution_vector=cast(NDArray[np.float64], np.asarray(x, dtype=np.float64).copy()),
+                solution_vector=np.asarray(x, dtype=np.float64).copy(),
                 unknowns=unknowns,
                 unknown_index_map=unknown_index_map,
                 residual_index_map=residual_index_map,
@@ -508,7 +511,7 @@ def solve_hydraulic_system(
         converged=False,
         iterations=max_iterations,
         residual_norm=residual_norm,
-        solution_vector=cast(NDArray[np.float64], np.asarray(x, dtype=np.float64).copy()),
+        solution_vector=np.asarray(x, dtype=np.float64).copy(),
         unknowns=unknowns,
         unknown_index_map=unknown_index_map,
         residual_index_map=residual_index_map,

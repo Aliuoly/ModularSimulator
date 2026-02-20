@@ -17,10 +17,16 @@ MACRO_COUPLING_SEQUENCE: tuple[str, str, str] = (
 )
 
 
+def _empty_junction_results() -> dict[str, JunctionMixingResult]:
+    return {}
+
+
 @dataclass(frozen=True)
 class TransportAndMixingUpdate:
     transport_results: Mapping[str, LagTransportUpdateResult]
-    junction_results: Mapping[str, JunctionMixingResult] = field(default_factory=dict)
+    junction_results: Mapping[str, JunctionMixingResult] = field(
+        default_factory=_empty_junction_results
+    )
 
 
 @dataclass(frozen=True)
@@ -54,7 +60,7 @@ class PicardIterationGateConfig:
     enabled: bool = False
 
     def __post_init__(self) -> None:
-        if not isinstance(self.enabled, bool):
+        if type(self.enabled) is not bool:
             raise ValueError("enabled must be a bool")
         if not isfinite(self.residual_threshold) or self.residual_threshold < 0.0:
             raise ValueError("residual_threshold must be finite and non-negative")

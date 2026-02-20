@@ -327,17 +327,17 @@ class ConnectionRuntimeOrchestrator:
             target = self._require_non_empty_string(mutation, "target", operation)
             edge_id_value = mutation.get("edge_id")
             if edge_id_value is None:
-                network.connect(source, target)
+                _ = network.connect(source, target)
                 return
             if not isinstance(edge_id_value, str) or not edge_id_value.strip():
                 raise ValueError(
                     "operation 'add_connection' optional field 'edge_id' must be non-empty string"
                 )
-            network.connect(source, target, edge_id=edge_id_value.strip())
+            _ = network.connect(source, target, edge_id=edge_id_value.strip())
             return
 
         if operation == "remove_connection":
-            network._remove_connection(
+            _ = network._remove_connection(
                 edge_id=mutation.get("edge_id"),
                 source=mutation.get("source"),
                 target=mutation.get("target"),

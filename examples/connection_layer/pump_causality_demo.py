@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+# pyright: reportMissingImports=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false, reportUnknownParameterType=false, reportImplicitStringConcatenation=false
+
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import cast, Any
+from typing import cast
 
+from modular_simulation.connection.hydraulic_compile import (
+    HydraulicCompileLifecycle,
+    solve_compiled_hydraulic_graph,
+)
 from modular_simulation.connection.hydraulic_element import PumpHydraulicElement
 from modular_simulation.connection.hydraulic_solver import (
     ElementEquation,
+    HydraulicElementLike,
     HydraulicSystemDefinition,
-    solve_hydraulic_system,
 )
+from modular_simulation.connection.network import ConnectionNetwork
+from modular_simulation.connection.topology import TopologyGraph
 
 
 @dataclass(frozen=True)
@@ -29,10 +37,14 @@ def _d_dp_d_mdot(flow_rate: float, pump_speed: float) -> float:
     return -4000.0
 
 
-def _build_pump_system(case: PumpCase) -> HydraulicSystemDefinition:
+def _build_pump_system(*, case: PumpCase, topology: TopologyGraph) -> HydraulicSystemDefinition:
+    del topology
     pump_equation = ElementEquation(
         name="pump_head_balance",
-        element=cast(Any, PumpHydraulicElement(dp_curve=_dp_curve, d_dp_d_mdot=_d_dp_d_mdot)),
+        element=cast(
+            HydraulicElementLike,
+            cast(object, PumpHydraulicElement(dp_curve=_dp_curve, d_dp_d_mdot=_d_dp_d_mdot)),
+        ),
         inputs=MappingProxyType(
             {
                 "upstream_pressure": case.upstream_pressure,
@@ -44,6 +56,22 @@ def _build_pump_system(case: PumpCase) -> HydraulicSystemDefinition:
         residual_name_map=MappingProxyType({"head_balance": "pump_head_balance"}),
     )
     return HydraulicSystemDefinition(equations=(pump_equation,))
+
+
+def _compile_pump_network(case: PumpCase):
+    connection_network = ConnectionNetwork(
+        compile_lifecycle=HydraulicCompileLifecycle(),
+        hydraulic_system_builder=lambda topology: _build_pump_system(case=case, topology=topology),
+    )
+    connection_network.add_process("pump", inlet_ports=("inlet",), outlet_ports=("outlet",))
+    connection_network.add_boundary_source("upstream")
+    connection_network.add_boundary_sink("downstream")
+    connection_network.connect("upstream", "pump.inlet")
+    connection_network.connect("pump.outlet", "downstream")
+    compiled = connection_network.compile()
+    if compiled.hydraulic is None:
+        raise RuntimeError("compiled pump network missing hydraulic graph")
+    return compiled.hydraulic
 
 
 def run_demo() -> list[tuple[PumpCase, float, int, float]]:
@@ -77,8 +105,8 @@ def run_demo() -> list[tuple[PumpCase, float, int, float]]:
     warm_start = None
     rows: list[tuple[PumpCase, float, int, float]] = []
     for case in cases:
-        result = solve_hydraulic_system(
-            _build_pump_system(case),
+        result = solve_compiled_hydraulic_graph(
+            _compile_pump_network(case),
             warm_start=warm_start,
             tolerance=1.0e-12,
             max_iterations=25,
@@ -106,8 +134,7 @@ def main() -> None:
     print("case,upstream_pa,downstream_pa,speed_rpm,flow_rate,iterations,residual_norm")
     for case, flow_rate, iterations, residual_norm in rows:
         print(
-            f"{case.name},{case.upstream_pressure:.1f},{case.downstream_pressure:.1f},"
-            f"{case.pump_speed:.1f},{flow_rate:.8f},{iterations},{residual_norm:.3e}"
+            f"{case.name},{case.upstream_pressure:.1f},{case.downstream_pressure:.1f},{case.pump_speed:.1f},{flow_rate:.8f},{iterations},{residual_norm:.3e}"
         )
     print("monotonic checks: PASS")
 

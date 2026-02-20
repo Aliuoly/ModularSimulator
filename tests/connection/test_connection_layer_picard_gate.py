@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # pyright: reportMissingImports=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false
 
+from collections.abc import Callable
 from typing import cast
 
 import numpy as np
@@ -271,48 +272,48 @@ def test_gate_stops_at_max_iterations_when_tolerance_not_reached() -> None:
 
 
 @pytest.mark.parametrize(
-    ("kwargs", "message"),
+    ("factory", "message"),
     [
         (
-            {
-                "enabled": "yes",
-                "residual_threshold": 0.0,
-                "max_iterations": 1,
-                "tolerance": 1.0e-8,
-            },
+            lambda: PicardIterationGateConfig(
+                enabled=cast(bool, cast(object, "yes")),
+                residual_threshold=0.0,
+                max_iterations=1,
+                tolerance=1.0e-8,
+            ),
             "enabled must be a bool",
         ),
         (
-            {
-                "enabled": True,
-                "residual_threshold": -1.0,
-                "max_iterations": 1,
-                "tolerance": 1.0e-8,
-            },
+            lambda: PicardIterationGateConfig(
+                enabled=True,
+                residual_threshold=-1.0,
+                max_iterations=1,
+                tolerance=1.0e-8,
+            ),
             "residual_threshold must be finite and non-negative",
         ),
         (
-            {
-                "enabled": True,
-                "residual_threshold": 0.0,
-                "max_iterations": 0,
-                "tolerance": 1.0e-8,
-            },
+            lambda: PicardIterationGateConfig(
+                enabled=True,
+                residual_threshold=0.0,
+                max_iterations=0,
+                tolerance=1.0e-8,
+            ),
             "max_iterations must be positive",
         ),
         (
-            {
-                "enabled": True,
-                "residual_threshold": 0.0,
-                "max_iterations": 1,
-                "tolerance": 0.0,
-            },
+            lambda: PicardIterationGateConfig(
+                enabled=True,
+                residual_threshold=0.0,
+                max_iterations=1,
+                tolerance=0.0,
+            ),
             "tolerance must be finite and positive",
         ),
     ],
 )
 def test_invalid_picard_gate_config_raises_value_error(
-    kwargs: dict[str, object], message: str
+    factory: Callable[[], PicardIterationGateConfig], message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        _ = PicardIterationGateConfig(**kwargs)  # pyright: ignore[reportArgumentType]
+        _ = factory()

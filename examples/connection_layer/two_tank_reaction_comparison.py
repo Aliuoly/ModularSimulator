@@ -11,9 +11,7 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 
 from modular_simulation.connection.junction import mix_junction_state
-from modular_simulation.connection.network import (  # pyright: ignore[reportMissingImports]
-    ConnectionNetwork,
-)
+from modular_simulation.connection.network import ConnectionNetwork
 from modular_simulation.connection.process_binding import ProcessBinding
 from modular_simulation.connection.state import MaterialState, PortCondition
 from modular_simulation.measurables.process_model import (

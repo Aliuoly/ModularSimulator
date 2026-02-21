@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -175,7 +175,11 @@ def _unknown_vector_to_mapping(
     unknown_vector: NDArray[np.float64],
     unknown_index_map: Mapping[str, int],
 ) -> dict[str, float]:
-    return {name: float(unknown_vector[idx]) for name, idx in unknown_index_map.items()}
+    values: dict[str, float] = {}
+    for name, idx in unknown_index_map.items():
+        scalar = cast(np.float64, unknown_vector[idx])
+        values[name] = float(scalar)
+    return values
 
 
 def assemble_residual_vector(
@@ -388,7 +392,8 @@ def _validate_solvability(
 def _validate_jacobian_rank(
     jacobian_dense: NDArray[np.float64],
 ) -> None:
-    rank = int(np.linalg.matrix_rank(jacobian_dense))
+    rank_value = cast(np.int64, np.linalg.matrix_rank(jacobian_dense))
+    rank = int(rank_value)
     expected_rank = int(jacobian_dense.shape[0])
     if rank < expected_rank:
         raise ValueError(

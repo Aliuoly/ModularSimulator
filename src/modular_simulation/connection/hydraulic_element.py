@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import sqrt
+
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -51,13 +53,13 @@ class HydraulicElement(Protocol):
 def smooth_signed_quadratic_flow_term(*, m_dot: float, delta: float) -> float:
     if delta <= 0.0:
         raise ValueError("delta must be positive")
-    return m_dot * (m_dot * m_dot + delta * delta) ** 0.5
+    return m_dot * sqrt(m_dot * m_dot + delta * delta)
 
 
 def smooth_signed_quadratic_flow_term_derivative(*, m_dot: float, delta: float) -> float:
     if delta <= 0.0:
         raise ValueError("delta must be positive")
-    denominator = (m_dot * m_dot + delta * delta) ** 0.5
+    denominator = sqrt(m_dot * m_dot + delta * delta)
     return (2.0 * m_dot * m_dot + delta * delta) / denominator
 
 
